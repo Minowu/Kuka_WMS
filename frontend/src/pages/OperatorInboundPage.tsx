@@ -716,7 +716,7 @@ export default function OperatorInboundPage() {
               >
                 <div className="relative min-h-0 flex-1 overflow-hidden rounded-lg bg-panel">
                   <OperatorMapCanvas
-                    zoneId={[2, 3]}
+                    zoneId={[10, 16]}
                     showInboundSeparator={true}
                     className="!h-full"
                     tuning={OPERATOR_INBOUND_MAP_TUNING}

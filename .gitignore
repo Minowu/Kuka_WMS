@@ -1,0 +1,37 @@
+# Logs
+logs/
+*.log
+backend/logs/
+
+# Temporary and local test files
+Map_VCC_temp/
+Map_VCC.zip
+scratch/
+
+# Environments & secrets
+.env
+.env.local
+.venv/
+venv/
+ENV/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Node / Frontend
+node_modules/
+dist/
+build/
+.next/
+*.local
+
+# IDE & OS
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
