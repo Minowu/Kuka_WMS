@@ -3,9 +3,15 @@
 @import "./styles/operatorTabletScale.css";
 
 @theme {
-  /* Oceanic Frost / Neo Teal */
+  /* KUKA Industrial Brand Theme */
+  --color-kuka-orange: #FF5800;
+  --color-kuka-orange-hover: #E04D00;
+  --color-kuka-orange-light: #FFF0E6;
+  --color-kuka-dark: #1A1A1A;
+
+  /* Legacy Oceanic Frost / Neo Teal (preserved for desktop) */
   --color-brand-dark: #17363A;
-  --color-brand-primary: #168C87;
+  --color-brand-primary: #FF5800;
   --color-brand-bg-dark: #163B40;
   --color-brand-bg-medium: #204F55;
   --color-brand-bg-blue: #2F8FD8;
