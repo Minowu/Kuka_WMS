@@ -66,7 +66,7 @@ import {
 import {
   buildInboundAllocationPayload,
   hasTabletScanMetadata,
-} from "@/pages/qrtablet/packer/importMappers";
+} from "@/utils/stringUtils";
 
 /** Một SKU trong nhóm. */
 export interface ImportItemDraft {

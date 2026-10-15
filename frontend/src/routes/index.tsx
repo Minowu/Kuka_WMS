@@ -14,31 +14,34 @@ import ImportPage from "@/pages/ImportPage";
 import ImportDetailPage from "@/pages/ImportDetailPage";
 import ZoneSettingPage from "@/pages/ZoneSettingPage";
 import UnitSettingPage from "@/pages/UnitSettingPage";
-import QrCodeSettingPage from "@/pages/QrCodeSettingPage";
 import OutboundDetailPage from "@/pages/OutboundDetailPage";
-// import ItemSettingPage from "@/pages/ItemSettingPage";
 import StocktakePage from "@/pages/StocktakePage";
 import StocktakeDetailPage from "@/pages/StocktakeDetailPage";
 import BacklogPage from "@/pages/BacklogPage";
 import NotificationPage from "@/pages/NotificationPage";
-import QrTabletInboundPage from "@/pages/qrtablet/QrTabletInboundPage";
-import QrTabletOutboundPage from "@/pages/qrtablet/QrTabletOutboundPage";
-import QrTabletOutboundDetailPage from "@/pages/qrtablet/QrTabletOutboundDetailPage";
-import QrTabletStocktakePage from "@/pages/qrtablet/QrTabletStocktakePage";
-import QrTabletPrintQrPage from "@/pages/qrtablet/QrTabletPrintQrPage";
-
-import { RoleGatePage } from "../components/auth/RoleGatePage";
 import { RoleHomeRedirect } from "@/components/auth/RoleHomeRedirect";
-import OperatorOverviewPage from "@/pages/OperatorOverviewPage";
-import OperatorInboundPage from "@/pages/OperatorInboundPage";
-import OperatorOutboundPage from "@/pages/OperatorOutboundPage";
-import OperatorSortingWavePage from "@/pages/OperatorSortingWavePage";
-import OperatorOutboundDetailPage from "@/pages/OperatorOutboundDetailPage";
 
+// PDA 4.2" Caller Pages (Dedicated per Area)
+import PdaCallerPage from "@/pages/pda/PdaCallerPage";
+import RawMaterialPdaPage from "@/pages/pda/RawMaterialPdaPage";
+import CncPdaPage from "@/pages/pda/CncPdaPage";
+import WashingPdaPage from "@/pages/pda/WashingPdaPage";
 
 export default function AppRoutes() {
   return (
     <Routes>
+      {/* ── PDA 4.2" Industrial Caller Dedicated Routes (Full screen standalone, no MainLayout) ── */}
+      <Route path="/caller" element={<PdaCallerPage />} />
+      <Route path="/caller/raw-material" element={<RawMaterialPdaPage />} />
+      <Route path="/caller/cnc" element={<CncPdaPage />} />
+      <Route path="/caller/washing" element={<WashingPdaPage />} />
+
+      {/* /pda Aliases */}
+      <Route path="/pda" element={<PdaCallerPage />} />
+      <Route path="/pda/raw-material" element={<RawMaterialPdaPage />} />
+      <Route path="/pda/cnc" element={<CncPdaPage />} />
+      <Route path="/pda/washing" element={<WashingPdaPage />} />
+
       <Route
         path="/login"
         element={
@@ -48,23 +51,7 @@ export default function AppRoutes() {
         }
       />
 
-      <Route
-        path="/qrtablet"
-        element={
-          <ProtectedRoute>
-            <MainLayout />
-          </ProtectedRoute>
-        }
-      >
-        <Route index element={<Navigate to="import" replace />} />
-        <Route path="import" element={<QrTabletInboundPage />} />
-        <Route path="export" element={<QrTabletOutboundPage />} />
-        <Route path="export/:orderId" element={<QrTabletOutboundDetailPage />} />
-        <Route path="inventory" element={<QrTabletStocktakePage />} />
-        <Route path="print-qr" element={<QrTabletPrintQrPage />} />
-      </Route>
-
-      {/* ── Main app with sidebar ── */}
+      {/* ── Main app with sidebar (Desktop Admin) ── */}
       <Route
         path="/"
         element={
@@ -74,30 +61,18 @@ export default function AppRoutes() {
         }
       >
         <Route index element={<RoleHomeRedirect />} />
-        <Route
-          path="overview"
-          element={
-            <RoleGatePage
-              admin={<Navigate to="/report" replace />}
-              operator={<OperatorOverviewPage />}
-            />
-          }
-        />
+        <Route path="overview" element={<Navigate to="/dashboard" replace />} />
         <Route path="dashboard" element={<DashboardPage />} />
         <Route path="items" element={<ItemPage />} />
         <Route path="items/:id" element={<ItemDetailPage />} />
         <Route path="zones" element={<ZoneSettingPage />} />
-        <Route path="import" element={<RoleGatePage admin={<ImportPage />} operator={<OperatorInboundPage />} />} />
+        <Route path="import" element={<ImportPage />} />
         <Route path="import/:id" element={<ImportDetailPage />} />
-        <Route path="export" element={<RoleGatePage admin={<OutboundPage />} operator={<OperatorOutboundPage />} />} />
-        <Route path="export/zone/:zoneId" element={<OperatorOutboundDetailPage />} />
-        <Route path="export/sorting-waves" element={<RoleGatePage admin={<div>Tính năng chia chọn của Admin chưa hoàn thiện</div>} operator={<OperatorSortingWavePage />} />} />
+        <Route path="export" element={<OutboundPage />} />
         <Route path="export/:orderId" element={<OutboundDetailPage />} />
         <Route path="inventory" element={<StocktakePage />} />
         <Route path="inventory/:id" element={<StocktakeDetailPage />} />
         <Route path="backlog" element={<BacklogPage />} />
-        <Route path="print-qr" element={<QrTabletPrintQrPage />} />
-        {/* Các Route con ngoài WMS dropdown */}
         <Route path="report" element={<ReportPage />} />
         <Route path="notification" element={<NotificationPage />} />
         <Route path="setting" element={<div>Trang Cài Đặt</div>} />
@@ -105,10 +80,8 @@ export default function AppRoutes() {
         <Route path="setting/warehouse" element={<WarehouseSettingPage />} />
         <Route path="setting/zones" element={<Navigate to="/zones" replace />} />
         <Route path="setting/units" element={<UnitSettingPage />} />
-        <Route path="setting/qr-codes" element={<QrCodeSettingPage />} />
         <Route path="setting/entry-points" element={<Navigate to="/zones" replace />} />
         <Route path="setting/exit-points" element={<Navigate to="/setting/units" replace />} />
-        {/* <Route path="setting/items" element={<ItemSettingPage />} /> */}
       </Route>
     </Routes>
   );
