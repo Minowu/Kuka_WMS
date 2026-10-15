@@ -3,7 +3,7 @@ TÍCH HỢP AMR VÀO DÂY CHUYỀN SẢN XUẤT
 
 Bản bàn giao chi tiết cho người mới tiếp quản / AI khác
 
-Phiên bản 1.1 | Cập nhật ngày 15/10/2026 (Đính chính cơ chế chọn xe gần nhất & dọn dẹp codebase)
+Phiên bản 1.2 | Cập nhật ngày 15/10/2026 (Chốt 5 câu hỏi nghiệp vụ Grill & Báo cáo Scan Database)
 
 Mục đích: cung cấp bối cảnh nghiệp vụ và các quyết định hiện có để người mới có thể tiếp tục công việc mà không phải hỏi lại từ đầu. Đây không phải đặc tả kỹ thuật cuối cùng, cũng không phải tài liệu API đã xác minh.
 
@@ -408,6 +408,12 @@ Khi cart được lấy khỏi khu tẩy rửa để đưa đi rửa, nhân viê
 Người dùng muốn dừng brainstorm tạm thời và có một file context chi tiết để đưa cho người mới/AI khác.
 - ĐÃ XÁC NHẬN (15/10/2026): Luồng B tự động quét map và chọn cart gần nhất thỏa mãn: (1) cart đã bấm hoàn thành ở CNC trước, (2) CNC gọi là bước hợp lệ tiếp theo của model. Không yêu cầu công nhân chọn trạm nguồn.
 - ĐÃ XÁC NHẬN (15/10/2026): Kế hoạch dọn dẹp codebase Kuka WMS: Xóa toàn bộ module Masan FMCG và giao diện Operator kho cũ; tạm thời giữ lại các trang Admin.
+- ĐÃ XÁC NHẬN (15/10/2026 - Kết quả Grill 5 câu hỏi nghiệp vụ then chốt):
+  1. Khoảng cách xe gần nhất: Tính theo công thức khoảng cách 2D Euclidean sqrt((x2-x1)^2 + (y2-y1)^2) dựa trên tọa độ (map_x, map_y) của trạm trên sơ đồ xưởng.
+  2. Tranh chấp xe & Hàng đợi (Queue): Khi 2 máy song song cùng gọi xe, máy bấm trước được gán xe. Máy bấm sau nhận thông báo không có xe và ĐƯỢC ĐƯA VÀO HÀNG ĐỢI (Queue) để hệ thống tự động quét liên tục; ngay khi có xe hoàn thành ở công đoạn trước thì tự động điều phối tới máy đang chờ.
+  3. Khu tẩy rửa đầy: Giữ xe tại bàn máy CNC cuối và ĐƯA VÀO HÀNG ĐỢI TẨY RỬA. Khi có slot tẩy rửa trống (nhân viên lấy xe đi rửa), hệ thống tự động phát lệnh AMR tới lấy xe ở CNC cuối đưa vào slot trống.
+  4. Cấp nguyên liệu (Luồng A): AMR chở xe trực tiếp từ slot nguyên liệu tới máy CNC đầu tiên trong route của model đó (Phương án A).
+  5. Thao tác thả xe: Robot AMR tự động hạ/nhả xe xuống trạm vật lý và Fleet Manager gửi tín hiệu completed (không bắt công nhân bấm nút xác nhận nhận xe trên tablet).
 
 Câu hỏi AMR tự lấy/thả hay cần công nhân hỗ trợ đã được đặt ra nhưng chưa có câu trả lời. Không coi là đã xác nhận.
 
@@ -506,3 +512,31 @@ Demo HTML: amr_integration_demo.html — mô phỏng nghiệp vụ, chưa tích 
 Tài liệu tổng hợp trước: Tong_hop_nghiep_vu_tich_hop_AMR_ban_lam_viec.docx.
 
 Nếu tài liệu cũ có chi tiết khác với bản này, đừng âm thầm chọn một bên; đối chiếu và hỏi người dùng nếu ảnh hưởng tới nghiệp vụ. Mọi mục 'cần xác minh' vẫn là câu hỏi mở.
+
+## 20. Báo cáo Scan Database hiện tại & Kế hoạch Tái cấu trúc Schema Kuka AMR
+
+### 20.1 Hiện trạng Database WMS cũ (Cần loại bỏ / Đập đi)
+Codebase hiện tại là WMS quản lý kho thương mại/FMCG Masan, phụ thuộc vào các bảng không phù hợp với dây chuyền sản xuất:
+- Nhập/Xuất kho: inbound_order, inbound_order_detail, inbound_order_allocation, outbound_order, outbound_order_detail, outbound_order_allocation.
+- Quản lý tồn kho & Lô hàng: item_stock (quản lý pallet, lot number, hạn sử dụng, số lượng tồn, phân tách lô).
+- Danh mục sản phẩm WMS: item, unit, item_unit (SKU hàng hóa thương mại).
+- Kiểm kê kho: stocktake, stocktake_detail.
+- Lịch sử kho: transaction, history, inventory_daily_snapshot.
+- Bảng phụ: qr_code, item_import_staging_*.
+- Robot Task cũ: robot_task (bị gắn chặt với inbound_order_detail_id và outbound_order_allocation).
+
+### 20.2 Các bảng Tận dụng & Giữ lại
+- Auth & RBAC: user, role, permission, user_warehouses.
+- Phân vùng xưởng: warehouse, zone (đại diện cho các khu vực: Khu nguyên liệu, Khu CNC, Khu tẩy rửa).
+- Trạm máy / Vị trí: location -> Tinh gọn thành station (giữ location_code, map_x, map_y, zone_id, warehouse_id, lược bỏ các quan hệ WMS phức tạp với ItemStock).
+- Thông báo: notification.
+
+### 20.3 Các bảng MỚI cần thiết kế cho Dây chuyền KUKA AMR
+1. product_model: Quản lý danh mục model sản phẩm (Model A, B,...).
+2. production_route: Quản lý quy trình route theo từng model.
+3. route_step: Các bước công đoạn theo thứ tự (hỗ trợ nhóm máy song song/thay thế ví dụ CNC-03 OR CNC-04).
+4. cart: Xe gá phôi (mã xe, model hiện tại, trạm hiện tại, bước vừa hoàn thành, trạng thái khóa, task đang chiếm giữ).
+5. transport_request: Yêu cầu gọi xe từ tablet của công nhân.
+6. fleet_task: Task điều phối gửi sang Fleet Manager (lưu task_id từ FM, request/response payload, trạng thái FM, timestamp).
+7. transport_queue: Hàng đợi điều phối tự động (lưu các trạm đang chờ xe hoặc các xe đang chờ slot tẩy rửa, background task liên tục quét map để giải phóng queue).
+8. production_record: Lịch sử công nhân bấm xác nhận hoàn thành công đoạn tại trạm.
