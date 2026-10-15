@@ -3,7 +3,7 @@ TÍCH HỢP AMR VÀO DÂY CHUYỀN SẢN XUẤT
 
 Bản bàn giao chi tiết cho người mới tiếp quản / AI khác
 
-Phiên bản 1.2 | Cập nhật ngày 15/10/2026 (Chốt 5 câu hỏi nghiệp vụ Grill & Báo cáo Scan Database)
+Phiên bản 1.3 | Cập nhật ngày 15/10/2026 (Đặc tả chi tiết UI PDA 4.2 inch, Wizard 3 bước Nguyên liệu & Popup xác nhận)
 
 Mục đích: cung cấp bối cảnh nghiệp vụ và các quyết định hiện có để người mới có thể tiếp tục công việc mà không phải hỏi lại từ đầu. Đây không phải đặc tả kỹ thuật cuối cùng, cũng không phải tài liệu API đã xác minh.
 
@@ -734,3 +734,28 @@ Nếu tài liệu cũ có chi tiết khác với bản này, đừng âm thầm 
 4. **`transport_queue`**: Hàng đợi tự động (Quản lý hàng đợi khi máy CNC chờ xe sẵn sàng, hoặc xe chờ slot khu tẩy rửa).
 5. **`fleet_task`**: Quản lý task gửi sang Fleet Manager KUKA/AMR (`id`, `transport_request_id`, `fm_task_id`, `pickup_location_id`, `dropoff_location_id`, `status`).
 6. **`production_record`**: Lịch sử công nhân bấm xác nhận hoàn thành công đoạn gia công tại từng trạm máy.
+
+
+## 21. Đặc tả Chi tiết Thiết bị, Giao diện PDA 4.2 Inch & UX Vận hành
+
+### 21.1 Phân định Thiết bị (Device Form Factor)
+- **Giao diện Admin / Quản trị viên**: Chạy trên **MÁY TÍNH (Desktop / PC)** với màn hình lớn, đầy đủ thanh điều hướng, bảng danh sách quản lý, cấu hình Route, sơ đồ 2D canvas toàn cảnh xưởng và phân quyền trạm máy cho User.
+- **Giao diện User / Operator (Công nhân xưởng)**: Chạy trên **PDA CẦM TAY 4.2 INCH** (màn hình dọc ~480x800px).
+  - Không có thanh Menu / Sidebar điều hướng phức tạp.
+  - Người dùng vào thẳng giao diện trạm máy của mình (Modal-first / App-like).
+  - Các nút bấm cảm ứng cực to (chiều cao >= 52px), bo góc, tương phản cao để thao tác bằng 1 ngón cái hoặc khi đeo găng tay bảo hộ.
+
+### 21.2 Quy tắc Hộp thoại Xác nhận (Confirmation Dialogs - Bắt buộc)
+Do môi trường xưởng thao tác nhanh và có thể đeo găng tay, **mọi hành động quan trọng đều phải có Popup xác nhận** trước khi gửi lệnh xuống hệ thống:
+1. **Khu Nguyên liệu**: Sau khi chọn vị trí, model và quét QR -> Hiện popup xác nhận thông tin trước khi lưu.
+2. **Khu CNC - Gọi xe**: Bấm vào vị trí trống để gọi hàng -> Hiện popup: *'Bạn có chắc chắn muốn gọi [Model X] về vị trí [CNC-YY] không?'* [Xác nhận] [Hủy].
+3. **Khu CNC - Hoàn thành công đoạn**: Bấm vào vị trí có hàng để Update Level -> Hiện popup: *'Xác nhận đã gia công xong và nâng lên Level [Z] cho Rack [Mã Rack]?'* [Xác nhận] [Hủy].
+4. **Khu Tẩy rửa - Giải phóng slot**: Bấm vào vị trí đầy -> Hiện popup: *'Xác nhận đã lấy Rack [Mã Rack] đi rửa và giải phóng [Slot W]?'* [Xác nhận] [Hủy].
+
+### 21.3 Luồng Wizard 3 Bước Tuần tự tại Khu Nguyên Liệu (3 Màn hình riêng biệt)
+Để màn hình PDA 4.2 inch không bị quá tải thông tin và tránh bấm nhầm:
+- **Màn hình 1 (Chọn Vị trí)**: Hiển thị 7 nút to bản tương ứng 7 vị trí (VT-01 đến VT-07). Công nhân bấm chọn 1 vị trí -> Tự động chuyển sang Màn hình 2.
+- **Màn hình 2 (Chọn Model)**: Hiển thị danh sách các Model sản phẩm (Model 1 đến Model 7). Bấm chọn Model -> Tự động chuyển sang Màn hình 3. (Có nút [Quay lại] để đổi vị trí).
+- **Màn hình 3 (Quét QR Rack)**: Ô hiển thị mã Rack kèm nút kích hoạt camera quét QR hoặc nhận tín hiệu từ phím cứng scan của PDA.
+  - Sau khi quét được mã Rack -> Bật Popup xác nhận: *'Xác nhận nạp [Model X] vào [Rack ID] tại [Vị trí Y]?'*.
+  - Bấm [Xác nhận] -> Hoàn tất và quay về Màn hình 1 sẵn sàng cho lần nạp tiếp theo.

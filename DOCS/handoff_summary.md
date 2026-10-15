@@ -15,6 +15,7 @@ Other infra: remote connection isolated exclusively to https://github.com/Minowu
 **Queueing:** Background automated queueing enabled for waiting stations (when no cart is ready) and waiting wash slots (when wash area is full); system automatically dispatches as soon as prerequisite condition clears.
 **Architecture:** Retain FastAPI, PostgreSQL, Celery worker queue, WebSocket manager, Auth RBAC, and admin pages. Purge Masan FMCG modules and legacy warehouse operator UI (inbound, outbound, sorting, stocktake).
 **Database:** Keep location table 100% intact for factory stations and map coordinates. Repurpose item as Product Model and item_stock as Cart/WIP (add cart_code, last_completed_step_id, is_locked). Deprecate legacy warehouse order/stocktake tables. Add production_route, route_step, transport_request, transport_queue, fleet_task, production_record.
+**Hardware & UX:** Admin runs on Desktop PC. Operator runs on 4.2-inch handheld PDA (no navigation menu, modal/card-first, big touch buttons). All operator actions must have confirmation dialogs to prevent mis-taps. Raw material infeed uses a 3-step wizard flow (Position -> Model -> QR Scan).
 **Tooling:** Working branch locked to dev; main reserved for stable releases.
 
 ### ACTIVE GOTCHAS
