@@ -34,6 +34,8 @@ Other infra: remote connection isolated exclusively to https://github.com/Minowu
 Full session log: none committed.
 Reference docs:
 - Business context specification: DOCS/Context_chuyen_giao_du_an_tich_hop_AMR_chi_tiet.md (v1.2)
+- Database architecture design (ERD & Data Dictionary): DOCS/database_architecture_design.md
+- Operational workflow and API design (Sequence Diagrams & REST/WS): DOCS/operational_workflow_and_api_design.md
 - Context handoff skill guide: DOCS/summary_context_skill.md
 
 ### NEXT STEP
