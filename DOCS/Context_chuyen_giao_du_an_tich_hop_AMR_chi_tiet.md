@@ -513,30 +513,224 @@ Tài liệu tổng hợp trước: Tong_hop_nghiep_vu_tich_hop_AMR_ban_lam_viec.
 
 Nếu tài liệu cũ có chi tiết khác với bản này, đừng âm thầm chọn một bên; đối chiếu và hỏi người dùng nếu ảnh hưởng tới nghiệp vụ. Mọi mục 'cần xác minh' vẫn là câu hỏi mở.
 
-## 20. Báo cáo Scan Database hiện tại & Kế hoạch Tái cấu trúc Schema Kuka AMR
+## 20. Báo cáo Scan Toàn diện Database Hiện tại (30 Bảng) & Đánh giá Tái cấu trúc cho Kuka AMR
 
-### 20.1 Hiện trạng Database WMS cũ (Cần loại bỏ / Đập đi)
-Codebase hiện tại là WMS quản lý kho thương mại/FMCG Masan, phụ thuộc vào các bảng không phù hợp với dây chuyền sản xuất:
-- Nhập/Xuất kho: inbound_order, inbound_order_detail, inbound_order_allocation, outbound_order, outbound_order_detail, outbound_order_allocation.
-- Quản lý tồn kho & Lô hàng: item_stock (quản lý pallet, lot number, hạn sử dụng, số lượng tồn, phân tách lô).
-- Danh mục sản phẩm WMS: item, unit, item_unit (SKU hàng hóa thương mại).
-- Kiểm kê kho: stocktake, stocktake_detail.
-- Lịch sử kho: transaction, history, inventory_daily_snapshot.
-- Bảng phụ: qr_code, item_import_staging_*.
-- Robot Task cũ: robot_task (bị gắn chặt với inbound_order_detail_id và outbound_order_allocation).
+### 20.1 Phân tích Chuyên sâu về Đề xuất của User: Giữ Location, Tận dụng Item & ItemStock
 
-### 20.2 Các bảng Tận dụng & Giữ lại
-- Auth & RBAC: user, role, permission, user_warehouses.
-- Phân vùng xưởng: warehouse, zone (đại diện cho các khu vực: Khu nguyên liệu, Khu CNC, Khu tẩy rửa).
-- Trạm máy / Vị trí: location -> Tinh gọn thành station (giữ location_code, map_x, map_y, zone_id, warehouse_id, lược bỏ các quan hệ WMS phức tạp với ItemStock).
-- Thông báo: notification.
+#### 1. Đánh giá Bảng `location` (Quyết định: GIỮ NGUYÊN 100%)
+* **Lý do**: Bảng `location` hiện tại đã được tích hợp hoàn chỉnh với `WarehouseMapCanvas` trên Frontend và chứa đầy đủ các trường vị trí: `location_code`, `location_name`, `bin_code`, `map_x`, `map_y`, `warehouse_id`, `zone_id`.
+* **Kế hoạch**: Giữ nguyên toàn bộ cấu trúc bảng `location` để quản lý các vị trí trạm máy `CNC-01`..`CNC-05`, 7 vị trí cấp nguyên liệu và các slot khu tẩy rửa. Chỉ cần gỡ bỏ các ràng buộc/property tính toán tồn kho liên quan đến `ItemStock` và `InboundOrderDetail`.
 
-### 20.3 Các bảng MỚI cần thiết kế cho Dây chuyền KUKA AMR
-1. product_model: Quản lý danh mục model sản phẩm (Model A, B,...).
-2. production_route: Quản lý quy trình route theo từng model.
-3. route_step: Các bước công đoạn theo thứ tự (hỗ trợ nhóm máy song song/thay thế ví dụ CNC-03 OR CNC-04).
-4. cart: Xe gá phôi (mã xe, model hiện tại, trạm hiện tại, bước vừa hoàn thành, trạng thái khóa, task đang chiếm giữ).
-5. transport_request: Yêu cầu gọi xe từ tablet của công nhân.
-6. fleet_task: Task điều phối gửi sang Fleet Manager (lưu task_id từ FM, request/response payload, trạng thái FM, timestamp).
-7. transport_queue: Hàng đợi điều phối tự động (lưu các trạm đang chờ xe hoặc các xe đang chờ slot tẩy rửa, background task liên tục quét map để giải phóng queue).
-8. production_record: Lịch sử công nhân bấm xác nhận hoàn thành công đoạn tại trạm.
+#### 2. Đánh giá Tái sử dụng `item` làm Danh mục Model Sản phẩm (RẤT KHẢ THI - KHUYÊN DÙNG)
+* **Ý tưởng**: Dùng bảng `item` đại diện cho các **Model sản phẩm** (ví dụ Model A, Model B...):
+  * `sku` -> Mã Model (ví dụ `MODEL_A`).
+  * `name` -> Tên Model (ví dụ `Trục khuỷu Model A`).
+  * `description` -> Mô tả kỹ thuật.
+  * `warehouse_id` -> Thuộc xưởng nào.
+* **Cần điều chỉnh**: Cho phép `base_unit`, `max_quantity`, `min_quantity`, `supplier` chuyển sang dạng nullable hoặc set giá trị mặc định để không bắt buộc các trường WMS kho.
+
+#### 3. Đánh giá Tái sử dụng `item_stock` làm Cart (Xe gá phôi / WIP)
+* **Ưu điểm lớn**:
+  * `item_stock` đã có sẵn liên kết tới `item_id` (Model sản phẩm) và `location_id` (vị trí hiện tại trên sơ đồ xưởng).
+  * Đã có sẵn trường phục vụ sản xuất: `manufacturing_machine`, `manufacturing_user`, `qc_user`, `status`.
+  * Frontend map canvas hiện tại đã sẵn sàng render các chấm tròn hiển thị xe/phôi dựa trên `location.stocks`.
+* **Nhược điểm & Các điểm cần bổ sung bắt buộc (Refactor)**:
+  * Cần thêm cột `cart_code` (mã định danh xe thực tế/RFID thay vì chỉ dùng UUID `stock_code`).
+  * Cần thêm cột `last_completed_step_id` (bước công đoạn vừa hoàn thành ở CNC trước).
+  * Cần thêm cờ `is_locked` / `locked_by_task_id` (phục vụ chống tranh chấp xe giữa 2 máy song song).
+  * Gỡ bỏ các FK ràng buộc với WMS kho: `inbound_order_detail_id`, `unit_id`, `available_quantity` tính từ `OutboundOrderAllocation`.
+
+---
+
+### 20.2 Chi tiết Toàn bộ 30 Bảng Database Hiện tại
+
+#### NHÓM 1: VỊ TRÍ, BẢN ĐỒ & KHU VỰC XƯỞNG (GIỮ LẠI & TẬN DỤNG CHÍNH)
+
+##### 1. Bảng `location` (Vị trí trạm máy / Slot xưởng)
+* **Các trường (Columns)**:
+  * `id`: INTEGER [PK]
+  * `location_code`: VARCHAR(50) (Not Null) - Mã node trên sơ đồ
+  * `location_name`: VARCHAR(100) (Not Null) - Tên vị trí (CNC-01, Slot Nguyên liệu 1...)
+  * `bin_code`: VARCHAR(50) (Nullable) - Mã định danh vật lý
+  * `row`, `column`, `level`: VARCHAR(10) (Nullable) - Tọa độ kệ (nếu có)
+  * `node_name`: VARCHAR(50) (Nullable) - Tên node phụ
+  * `map_x`, `map_y`: INTEGER (Nullable) - Tọa độ 2D dùng vẽ canvas và tính khoảng cách Euclidean
+  * `warehouse_id`: INTEGER -> FK(warehouse.id)
+  * `zone_id`: INTEGER -> FK(zone.id)
+  * `is_active`: BOOLEAN (Not Null)
+  * `created_at`, `updated_at`: DATETIME
+* **Chức năng hiện tại**: Quản lý tọa độ từng vị trí ô kệ/trạm trên sơ đồ mặt bằng xưởng.
+* **Đánh giá**: **GIỮ NGUYÊN 100%**. Đây là xương sống để tính khoảng cách xe gần nhất và hiển thị layout 2D.
+
+##### 2. Bảng `warehouse` (Nhà xưởng / Khu vực tổng)
+* **Các trường**: `id` [PK], `code` VARCHAR(20), `name` VARCHAR(100), `description` TEXT.
+* **Chức năng hiện tại**: Đại diện cho kho tổng.
+* **Đánh giá**: **GIỮ NGUYÊN**. Đại diện cho Nhà xưởng KUKA.
+
+##### 3. Bảng `zone` (Khu vực chức năng)
+* **Các trường**: `id` [PK], `warehouse_id` -> FK(warehouse.id), `code` VARCHAR(20), `name` VARCHAR(100), `description` TEXT.
+* **Chức năng hiện tại**: Phân vùng kho.
+* **Đánh giá**: **GIỮ NGUYÊN**. Dùng phân loại: Khu nguyên liệu, Khu trạm máy CNC, Khu tẩy rửa.
+
+##### 4. Bảng `warehouse_map` (Dữ liệu bản đồ import)
+* **Các trường**: `id` [PK], `warehouse_id` -> FK(warehouse.id), `zone_id` -> FK(zone.id), `source` VARCHAR(255), `is_active` BOOLEAN, `created_at` DATETIME.
+* **Chức năng hiện tại**: Lưu file nguồn map layout của xưởng.
+* **Đánh giá**: **GIỮ NGUYÊN**. Phục vụ import bản đồ và cấu hình layout.
+
+---
+
+#### NHÓM 2: SẢN PHẨM & XE GÁ PHÔI (TẬN DỤNG & MỞ RỘNG)
+
+##### 5. Bảng `item` (Danh mục sản phẩm / Model)
+* **Các trường**:
+  * `id`: INTEGER [PK]
+  * `sku`: VARCHAR(50) (Not Null) - Dùng làm Mã Model (Model A, B,...)
+  * `name`: VARCHAR(255) (Not Null) - Tên Model
+  * `description`: TEXT
+  * `base_quantity`: BIGINT (Default 1)
+  * `base_unit`: INTEGER -> FK(unit.id)
+  * `max_quantity`, `min_quantity`: INTEGER
+  * `is_active`: BOOLEAN
+  * `warehouse_id`: INTEGER -> FK(warehouse.id)
+  * `details`: JSON
+  * `supplier`: VARCHAR(50)
+  * `created_at`, `updated_at`: DATETIME
+* **Chức năng hiện tại**: Danh mục SKU sản phẩm trong kho.
+* **Đánh giá**: **TÁI SỬ DỤNG LÀM BẢNG MODEL SẢN PHẨM**. Bỏ bắt buộc `base_unit` và `supplier`.
+
+##### 6. Bảng `item_stock` (Xe gá phôi / Cart WIP)
+* **Các trường**:
+  * `id`: INTEGER [PK]
+  * `stock_code`: UUID (Not Null)
+  * `item_id`: INTEGER -> FK(item.id) (Model sản phẩm đang chở)
+  * `location_id`: INTEGER -> FK(location.id) (Vị trí trạm máy xe đang đỗ)
+  * `inbound_order_detail_id`: INTEGER -> FK (WMS cũ)
+  * `unit_id`: INTEGER -> FK(unit.id)
+  * `quantity`: NUMERIC(12, 3)
+  * `lot_number_from`, `lot_number_to`, `expiry_date`: VARCHAR(50) (WMS cũ)
+  * `status`: VARCHAR(20) (Trạng thái xe: available, in_transit, processing...)
+  * `manufacturing_machine`: VARCHAR(50) (Máy vừa gia công)
+  * `manufacturing_user`, `qc_user`, `packing_user`, `cavity_number`, `stock_level`: VARCHAR/INT
+  * `is_active`: BOOLEAN, `created_at`, `updated_at`: DATETIME
+* **Chức năng hiện tại**: Lưu tồn kho chi tiết tại từng ô vị trí.
+* **Đánh giá**: **TÁI SỬ DỤNG VÀ NÂNG CẤP LÀM BẢNG CART/WIP**. Bổ sung trường `cart_code`, `last_completed_step_id`, `is_locked`. Bỏ các FK liên quan inbound order.
+
+##### 7. Bảng `unit` (Đơn vị tính)
+* **Các trường**: `id` [PK], `name` VARCHAR(100), `description` TEXT, `created_at`, `updated_at`.
+* **Chức năng hiện tại**: Quản lý đơn vị (thùng, cái, cuộn...).
+* **Đánh giá**: **GIỮ TỰ CHỌN** (đơn vị xe / cart / chi tiết), không còn là trọng tâm.
+
+##### 8. Bảng `item_unit` (Chuyển đổi đơn vị)
+* **Các trường**: `id` [PK], `item_id` -> FK, `unit_id` -> FK, `conversion_factor` NUMERIC(12,4).
+* **Đánh giá**: **ĐẬP ĐI (DROP)**. Dây chuyền sản xuất tính theo chiếc/xe cart, không cần hệ số quy đổi thùng/hộp.
+
+##### 9. Bảng `item_stock_relation` (Quan hệ phân tách lô tồn kho)
+* **Các trường**: `id` [PK], `parent_stock_id` -> FK, `child_stock_id` -> FK, `relation_type` VARCHAR(50).
+* **Đánh giá**: **ĐẬP ĐI (DROP)**. Phục vụ chia nhỏ pallet FMCG Masan, không dùng cho Cart cơ khí.
+
+##### 10. Bảng `inventory_daily_snapshot` (Chụp ảnh tồn kho theo ngày)
+* **Các trường**: `id` [PK], `warehouse_id` -> FK, `snapshot_date` DATE, `total_quantity`, `total_inventory_value`.
+* **Đánh giá**: **ĐẬP ĐI (DROP)**. Nghiệp vụ tài chính kho, không dùng cho dây chuyền KUKA.
+
+---
+
+#### NHÓM 3: ĐƠN HÀNG NHẬP / XUẤT KHO WMS MASAN (ĐẬP ĐI / LOẠI BỎ TOÀN BỘ)
+
+##### 11. Bảng `inbound_order` (Lệnh nhập kho)
+* **Các trường**: `id` [PK], `order_code`, `note`, `created_by_id`, `warehouse_id`, `details` JSON.
+* **Đánh giá**: **ĐẬP ĐI (DROP)**.
+
+##### 12. Bảng `inbound_order_detail` (Chi tiết nhập kho)
+* **Các trường**: `id` [PK], `inbound_order_id`, `from_location_id`, `to_location_id`, `details`, `status`, `detail_type`.
+* **Đánh giá**: **ĐẬP ĐI (DROP)**.
+
+##### 13. Bảng `inbound_order_allocation` (Phân bổ vị trí nhập)
+* **Các trường**: `id` [PK], `inbound_order_detail_id`, `item_stock_id`, `unit_id`, `quantity`.
+* **Đánh giá**: **ĐẬP ĐI (DROP)**.
+
+##### 14. Bảng `outbound_order` (Lệnh xuất kho)
+* **Các trường**: `id` [PK], `order_code`, `note`, `created_by_id`, `warehouse_id`, `details` JSON.
+* **Đánh giá**: **ĐẬP ĐI (DROP)**.
+
+##### 15. Bảng `outbound_order_detail` (Chi tiết xuất kho)
+* **Các trường**: `id` [PK], `outbound_order_id`, `item_id`, `quantity`, `unit`, `detail_type`, `details`.
+* **Đánh giá**: **ĐẬP ĐI (DROP)**.
+
+##### 16. Bảng `outbound_order_allocation` (Phân bổ xuất kho và gán Robot)
+* **Các trường**: `id` [PK], `outbound_order_detail_id`, `item_stock_id`, `quantity`, `status`, `from_location_id`, `to_location_id`, `allocation_type`, `robot_task_id`.
+* **Đánh giá**: **ĐẬP ĐI (DROP)**.
+
+##### 17. Bảng `transaction` (Giao dịch chuyển vị trí hàng)
+* **Các trường**: `id` [PK], `from_location_id`, `to_location_id`, `transaction_type`, `item_stock_id`, `quantity`, `created_by_id`.
+* **Đánh giá**: **ĐẬP ĐI (DROP)**. Thay bằng bảng `production_record` và `fleet_task`.
+
+##### 18. Bảng `history` (Lịch sử trạng thái đơn hàng)
+* **Các trường**: `id` [PK], `inbound_order_id`, `outbound_order_id`, `old_status`, `new_status`, `created_by_id`, `description`, `details`.
+* **Đánh giá**: **ĐẬP ĐI (DROP)**.
+
+##### 19. Bảng `qr_code` (Mã QR in dán thùng hàng Masan)
+* **Các trường**: `id` [PK], `code`, `item_id`, `item_stock_id`, `qr_type`.
+* **Đánh giá**: **ĐẬP ĐI (DROP)**.
+
+---
+
+#### NHÓM 4: KIỂM KÊ KHO WMS (ĐẬP ĐI)
+
+##### 20. Bảng `stocktake` (Phiếu kiểm kê)
+* **Các trường**: `id` [PK], `warehouse_id`, `created_by_id`, `description`, `created_at`, `updated_at`.
+* **Đánh giá**: **ĐẬP ĐI (DROP)**.
+
+##### 21. Bảng `stocktake_item` (Chi tiết kiểm đếm kho)
+* **Các trường**: `id` [PK], `stocktake_id`, `item_stock_id`, `lot_number`, `location_id`, `desired_quantity`, `actual_quantity`, `status`.
+* **Đánh giá**: **ĐẬP ĐI (DROP)**.
+
+---
+
+#### NHÓM 5: ROBOT TASK & TÍCH HỢP FLEET (REFACTOR THÀNH FLEET ADAPTER)
+
+##### 22. Bảng `robot_task` (Lệnh gọi robot cũ của Hikrobot/ICS)
+* **Các trường**:
+  * `id`: INTEGER [PK]
+  * `inbound_order_detail_id`: INTEGER -> FK (bị dính cứng với đơn nhập kho cũ)
+  * `order_id`: VARCHAR(50) (Not Null)
+  * `quantity`: INTEGER (Not Null)
+  * `process_code`: VARCHAR(50) (Not Null)
+  * `system_code`: VARCHAR(50) (Not Null)
+  * `task_order_detail`: VARCHAR(255) (Not Null)
+  * `created_at`: DATETIME
+* **Chức năng hiện tại**: Gửi task sang hệ thống Hikrobot ICS.
+* **Đánh giá**: **REFACTOR THÀNH `fleet_task`**. Bỏ liên kết `inbound_order_detail_id`, gắn trực tiếp với `transport_request_id`, lưu điểm lấy `pickup_location_id` và điểm thả `dropoff_location_id`.
+
+##### 23. Bảng `task_status` (Trạng thái callback từ robot)
+* **Các trường**: `id` [PK], `sub_task_status`, `order_id`, `device_code`, `device_num`, `qr_code`, `shelf_number`, `status`.
+* **Chức năng hiện tại**: Nhận webhook cập nhật trạng thái từ robot.
+* **Đánh giá**: **TẬN DỤNG & ĐỒNG BỘ VÀO `fleet_task`**.
+
+---
+
+#### NHÓM 6: XÁC THỰC, TÀI KHOẢN & PHÂN QUYỀN (GIỮ NGUYÊN 100%)
+
+##### 24. Bảng `users`: `id` [PK], `username`, `email`, `hashed_password`, `is_active`, `created_at`, `updated_at`. -> **GIỮ NGUYÊN**
+##### 25. Bảng `roles`: `id` [PK], `name`, `description`. -> **GIỮ NGUYÊN**
+##### 26. Bảng `permissions`: `id` [PK], `code`, `name`, `module`, `description`. -> **GIỮ NGUYÊN**
+##### 27. Bảng `user_roles`: `user_id` [PK], `role_id` [PK]. -> **GIỮ NGUYÊN**
+##### 28. Bảng `user_warehouses`: `user_id` [PK], `warehouse_id` [PK]. -> **GIỮ NGUYÊN**
+##### 29. Bảng `role_permissions`: `role_id` [PK], `permission_id` [PK]. -> **GIỮ NGUYÊN**
+
+---
+
+#### NHÓM 7: HỆ THỐNG CẢNH BÁO (GIỮ NGUYÊN)
+
+##### 30. Bảng `notification`: `id` [PK], `warehouse_id`, `title`, `message`, `action`, `notification_type`, `status`. -> **GIỮ NGUYÊN**.
+
+---
+
+### 20.3 Các Bảng MỚI cần bổ sung cho Hệ thống Dây chuyền KUKA AMR
+
+Để hoàn thiện dây chuyền điều phối KUKA AMR mà không làm xáo trộn các bảng cốt lõi giữ lại:
+1. **`production_route`**: Quản lý quy trình route theo Model (`id`, `item_id` -> FK(item.id), `route_name`, `version`, `is_active`).
+2. **`route_step`**: Các bước gia công trong route (`id`, `route_id`, `step_order`, `step_name`, `location_id` -> hỗ trợ nhóm máy thay thế như CNC-03 OR CNC-04).
+3. **`transport_request`**: Quản lý yêu cầu gọi xe của công nhân trên tablet (`id`, `request_code`, `destination_location_id`, `item_id`, `cart_stock_id`, `status`).
+4. **`transport_queue`**: Hàng đợi tự động (Quản lý hàng đợi khi máy CNC chờ xe sẵn sàng, hoặc xe chờ slot khu tẩy rửa).
+5. **`fleet_task`**: Quản lý task gửi sang Fleet Manager KUKA/AMR (`id`, `transport_request_id`, `fm_task_id`, `pickup_location_id`, `dropoff_location_id`, `status`).
+6. **`production_record`**: Lịch sử công nhân bấm xác nhận hoàn thành công đoạn gia công tại từng trạm máy.

@@ -14,7 +14,7 @@ Other infra: remote connection isolated exclusively to https://github.com/Minowu
 **Product:** Scope is discrete manufacturing line dispatch, not warehouse WMS (do not weaken). Three lifecycles remain decoupled: transport request, cart production progress, and FM task state (do not weaken). Flow B auto-scans map, computes 2D Euclidean distance, and assigns nearest valid cart. Flow A delivers directly to the first CNC station of the model. Autonomous AMR drop-off confirmed (no manual worker confirmation on tablet).
 **Queueing:** Background automated queueing enabled for waiting stations (when no cart is ready) and waiting wash slots (when wash area is full); system automatically dispatches as soon as prerequisite condition clears.
 **Architecture:** Retain FastAPI, PostgreSQL, Celery worker queue, WebSocket manager, Auth RBAC, and admin pages. Purge Masan FMCG modules and legacy warehouse operator UI (inbound, outbound, sorting, stocktake).
-**Database:** Deprecate legacy WMS tables (inbound/outbound orders, item_stock, items, units, stocktakes, transactions); engineer new manufacturing models (product_model, production_route, route_step, cart, transport_request, fleet_task, transport_queue, production_record).
+**Database:** Keep location table 100% intact for factory stations and map coordinates. Repurpose item as Product Model and item_stock as Cart/WIP (add cart_code, last_completed_step_id, is_locked). Deprecate legacy warehouse order/stocktake tables. Add production_route, route_step, transport_request, transport_queue, fleet_task, production_record.
 **Tooling:** Working branch locked to dev; main reserved for stable releases.
 
 ### ACTIVE GOTCHAS
