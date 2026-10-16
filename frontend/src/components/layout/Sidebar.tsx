@@ -22,6 +22,7 @@ import {
   HomeOutlined,
   QrcodeOutlined,
   UnorderedListOutlined,
+  BranchesOutlined,
 } from "@ant-design/icons";
 
 interface SidebarLinkProps {
@@ -266,6 +267,11 @@ export default function Sidebar() {
                   label: "Tổng quan",
                 },
                 { to: "/items", icon: <BoxPlotOutlined />, label: "Sản phẩm" },
+                {
+                  to: "/production/routes",
+                  icon: <BranchesOutlined />,
+                  label: "Quy trình Route",
+                },
                 { to: "/zones", icon: <ClusterOutlined />, label: "Zone" },
                 { to: "/import", icon: <ImportOutlined />, label: "Nhập kho" },
                 { to: "/export", icon: <ExportOutlined />, label: "Xuất kho" },

@@ -5,6 +5,7 @@ import {
   DownloadOutlined,
   UploadOutlined,
   MinusCircleOutlined,
+  BranchesOutlined,
 } from "@ant-design/icons";
 import type { ColumnsType } from "antd/es/table";
 import { Item, CreateItemInput, ItemImportJobStatus } from "@/types/item";
@@ -656,6 +657,13 @@ export default function ItemPage() {
                     loading={downloadImportFileMutation.isPending}
                   >
                     Tải CSV import
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    icon={<BranchesOutlined />}
+                    onClick={() => navigate('/production/routes')}
+                  >
+                    Cấu hình Route
                   </Button>
                   <Button
                     variant="primary"

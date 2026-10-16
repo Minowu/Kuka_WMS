@@ -20,6 +20,7 @@ import StocktakeDetailPage from "@/pages/StocktakeDetailPage";
 import BacklogPage from "@/pages/BacklogPage";
 import NotificationPage from "@/pages/NotificationPage";
 import { RoleHomeRedirect } from "@/components/auth/RoleHomeRedirect";
+import ProductionRoutePage from "@/pages/production/ProductionRoutePage";
 
 // PDA 4.2" Caller Pages (Dedicated per Area)
 import RawMaterialPdaPage from "@/pages/pda/RawMaterialPdaPage";
@@ -90,6 +91,8 @@ export default function AppRoutes() {
         <Route path="dashboard" element={<DashboardPage />} />
         <Route path="items" element={<ItemPage />} />
         <Route path="items/:id" element={<ItemDetailPage />} />
+        <Route path="production/routes" element={<ProductionRoutePage />} />
+        <Route path="routes" element={<Navigate to="/production/routes" replace />} />
         <Route path="zones" element={<ZoneSettingPage />} />
         <Route path="import" element={<ImportPage />} />
         <Route path="import/:id" element={<ImportDetailPage />} />
