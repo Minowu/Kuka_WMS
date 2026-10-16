@@ -1313,7 +1313,8 @@ def _extract_shelves_from_kuka_floor_map(data: dict) -> list[dict]:
                 loc_type = "CNC_SLOT"
                 loc_name = dev_id or f"CNC_Station_{lbl}"
                 bin_code = f"CNC_{lbl}"
-                machine_code = floor_name
+                m_num = dev_id.split("-")[-1] if dev_id and "-" in dev_id else lbl
+                machine_code = f"CNC-{m_num.zfill(2)}"
                 pos_index = 1
             elif ftype == 2:  # Storage rack / buffer slot
                 loc_type = "RAW_MATERIAL"
@@ -1328,7 +1329,8 @@ def _extract_shelves_from_kuka_floor_map(data: dict) -> list[dict]:
                 rel = f.get("relativeNodeLabel")
                 loc_name = f"Docking_{lbl}_to_{rel}" if rel else f"Docking_{lbl}"
                 bin_code = f"DOCK_{lbl}"
-                machine_code = floor_name
+                m_num = str(rel).zfill(2) if rel else lbl.zfill(2)
+                machine_code = f"CNC-{m_num}"
                 pos_index = 2
 
         shelves.append({
