@@ -25,6 +25,7 @@ class Item(Base):
     name = Column(String(255), nullable=False)
     description = Column(Text)
     base_quantity = Column(BigInteger, nullable=False, default=1, server_default="1")
+    standard_quantity_per_cart = Column(Integer, nullable=False, default=120, server_default="120")
     base_unit_id = Column("base_unit", Integer, ForeignKey("unit.id"), nullable=False)
     max_quantity = Column(Integer, nullable=False)
     min_quantity = Column(Integer, nullable=False)

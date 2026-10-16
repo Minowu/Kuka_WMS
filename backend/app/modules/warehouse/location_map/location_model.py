@@ -103,6 +103,15 @@ class Location(Base):
     column = Column("column", String(10))  # 'column' is SQL keyword, use mapped name
     level = Column(String(10))
     node_name = Column(String(50))  # Additional node identifier
+    location_type = Column(String(30), nullable=False, default="CNC_SLOT", server_default="CNC_SLOT")  # RAW_MATERIAL, CNC_SLOT, WASHING_SLOT, EMPTY_CART_BUFFER
+    machine_code = Column(String(50), nullable=True, index=True)  # E.g. 'CNC-01'
+    position_index = Column(Integer, nullable=True)  # 1 or 2 for CNC stations
+    default_stage_level = Column(
+        Integer,
+        nullable=True,
+        index=True,
+        doc="Quy định vị trí thuộc công đoạn CNC Level mấy (1, 2, 3...); NULL nếu là trạm chung hoặc vùng khác",
+    )
     map_x = Column(Integer, nullable=True)
     map_y = Column(Integer, nullable=True)
     warehouse_id = Column(
@@ -144,6 +153,8 @@ class Location(Base):
     zone = relationship("Zone", lazy="joined")
     stocks = relationship(
         "ItemStock",
+        primaryjoin="Location.id == ItemStock.location_id",
+        foreign_keys="[ItemStock.location_id]",
         back_populates="location",
         lazy="selectin"
     )

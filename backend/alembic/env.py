@@ -62,6 +62,15 @@ from app.modules.warehouse.transaction_history.history_model import Transaction,
 from app.modules.warehouse.notificcation.notification_model import Notification  # noqa: F401
 from app.modules.warehouse.dashboard.dashboard_model import InventoryDailySnapshot  # noqa: F401
 from app.modules.robot.robot_model import RobotTask, TaskStatus  # noqa: F401
+from app.modules.production.production_models import (  # noqa: F401
+    UserLocation,
+    ProductionRoute,
+    RouteStep,
+    TransportRequest,
+    TransportQueue,
+    FleetTask,
+    ProductionRecord,
+)
 
 target_metadata = Base.metadata
 

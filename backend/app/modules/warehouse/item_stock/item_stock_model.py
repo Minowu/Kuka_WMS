@@ -79,11 +79,29 @@ class ItemStock(Base):
 
     stock_level = Column(Integer, nullable=True, index=True)
 
+    # WIP Cart & AMR Dispatching fields
+    cart_code = Column(String(50), unique=True, nullable=True, index=True)
+    current_stage_level = Column(Integer, nullable=False, default=0, server_default="0")
+    is_locked = Column(Boolean, nullable=False, default=False, server_default="false")
+    locked_by_task_id = Column(String(100), nullable=True)
+    destination_location_id = Column(
+        Integer,
+        ForeignKey("location.id"),
+        nullable=True,
+        index=True,
+    )
+
     item = relationship("Item", lazy="joined")
     unit = relationship("Unit", foreign_keys=[unit_id], lazy="joined")
     location = relationship(
         "Location",
+        foreign_keys=[location_id],
         back_populates="stocks",
+        lazy="joined"
+    )
+    destination_location = relationship(
+        "Location",
+        foreign_keys=[destination_location_id],
         lazy="joined"
     )
     inbound_order_detail = relationship("InboundOrderDetail", foreign_keys=[inbound_order_detail_id], lazy="joined")
