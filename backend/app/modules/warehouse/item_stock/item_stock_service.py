@@ -48,12 +48,6 @@ def _ensure_item_and_location(db: Session, item_id: int, location_id: int) -> It
     return item
 
 
-def _ensure_unit_exists(db: Session, unit_id: int) -> None:
-    return
-
-
-def _resolve_stock_unit_id(db: Session, item: Item, unit_id: Optional[int]) -> Optional[int]:
-    return unit_id if unit_id is not None else item.base_unit
 
 
 def list_item_stocks(
@@ -107,11 +101,7 @@ def create_item_stock(db: Session, body: ItemStockCreate) -> ItemStock:
     stock = ItemStock(
         item_id=body.item_id,
         location_id=body.location_id,
-        unit_id=_resolve_stock_unit_id(db, item, body.unit_id),
         quantity=body.quantity,
-        lot_number_from=body.lot_number_from,
-        lot_number_to=body.lot_number_to,
-        expiry_date=body.expiry_date,
         status=body.status,
         is_active=True,
     )
@@ -134,26 +124,15 @@ def update_item_stock(
     data = body.model_dump(exclude_unset=True)
     item_id = data.get("item_id", stock.item_id)
     location_id = data.get("location_id", stock.location_id)
-    item: Optional[Item] = None
     if "item_id" in data or "location_id" in data:
-        item = _ensure_item_and_location(db, item_id, location_id)
+        _ensure_item_and_location(db, item_id, location_id)
         stock.item_id = item_id
         stock.location_id = location_id
-    if "unit_id" in data:
-        if item is None:
-            item = (
-                db.query(Item)
-                .filter(Item.id == stock.item_id, Item.is_active.is_(True))
-                .first()
-            )
-            if not item:
-                raise ValueError(f"Item id not found: {stock.item_id}")
-        stock.unit_id = _resolve_stock_unit_id(db, item, data["unit_id"])
     if "quantity" in data:
         if data["quantity"] is not None and data["quantity"] < 0:
             raise ValueError("Quantity must be >= 0")
         stock.quantity = data["quantity"]
-    for field in ("lot_number_from", "lot_number_to", "expiry_date", "status", "is_active"):
+    for field in ("status", "is_active"):
         if field in data:
             setattr(stock, field, data[field])
     try:

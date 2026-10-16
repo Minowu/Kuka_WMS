@@ -40,7 +40,8 @@ def _serialize_item_for_response(data: Any) -> Any:
             "sku": data.sku,
             "name": data.name,
             "description": data.description,
-            "base_unit": data.unit.name if data.unit else "",
+            "base_unit": "Cái",
+            "standard_quantity_per_cart": getattr(data, "standard_quantity_per_cart", 120),
             "base_quantity": data.base_quantity,
             "max_quantity": data.max_quantity,
             "min_quantity": data.min_quantity,
@@ -105,6 +106,7 @@ class ItemResponse(BaseModel):
     name: str
     description: Optional[str] = None
     base_unit: str
+    standard_quantity_per_cart: Optional[int] = 120
     base_quantity: int
     max_quantity: int
     min_quantity: int
