@@ -13,6 +13,10 @@ class LocationCreate(BaseModel):
     column: Optional[str] = Field(None, max_length=10)
     level: Optional[str] = Field(None, max_length=10)
     node_name: Optional[str] = Field(None, max_length=50)
+    location_type: Optional[str] = "CNC_SLOT"
+    machine_code: Optional[str] = None
+    position_index: Optional[int] = None
+    default_stage_level: Optional[int] = None
     map_x: Optional[int] = None
     map_y: Optional[int] = None
     warehouse_id: int
@@ -27,6 +31,10 @@ class LocationUpdate(BaseModel):
     column: Optional[str] = Field(None, max_length=10)
     level: Optional[str] = Field(None, max_length=10)
     node_name: Optional[str] = Field(None, max_length=50)
+    location_type: Optional[str] = None
+    machine_code: Optional[str] = None
+    position_index: Optional[int] = None
+    default_stage_level: Optional[int] = None
     map_x: Optional[int] = None
     map_y: Optional[int] = None
     warehouse_id: Optional[int] = None
@@ -43,6 +51,10 @@ class LocationResponse(BaseModel):
     column: Optional[str] = None
     level: Optional[str] = None
     node_name: Optional[str] = None
+    location_type: Optional[str] = None
+    machine_code: Optional[str] = None
+    position_index: Optional[int] = None
+    default_stage_level: Optional[int] = None
     map_x: Optional[int] = None
     map_y: Optional[int] = None
     warehouse_id: int
@@ -156,6 +168,10 @@ class MapDataResponse(BaseModel):
     type: Optional[str] = None
     x_attr_min: Optional[int] = Field(None, alias="xAttrMin")
     y_attr_min: Optional[int] = Field(None, alias="yAttrMin")
+    floor_list: Optional[list[dict[str, Any]]] = Field(None, alias="floorList")
+    node_list: Optional[list[dict[str, Any]]] = Field(None, alias="nodeList")
+    edge_list: Optional[list[dict[str, Any]]] = Field(None, alias="edgeList")
+    map_format: Optional[str] = Field("legacy", alias="mapFormat")
     model_config = ConfigDict(populate_by_name=True)
 
 

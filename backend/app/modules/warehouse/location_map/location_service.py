@@ -570,7 +570,19 @@ def update_location(
         location.bin_code = data["bin_code"].strip()
     if "location_name" in data:
         location.location_name = data["location_name"].strip()
-    for field in ("row", "column", "level", "node_name", "is_active", "map_x", "map_y"):
+    for field in (
+        "row",
+        "column",
+        "level",
+        "node_name",
+        "is_active",
+        "map_x",
+        "map_y",
+        "location_type",
+        "machine_code",
+        "position_index",
+        "default_stage_level",
+    ):
         if field in data:
             setattr(location, field, data[field])
     db.flush()
@@ -623,12 +635,16 @@ def create_map_metadata(
     db.flush()
     return map
 
-async def _save_uploaded_zip(content: bytes, warehouse_id: int) -> Path:
+async def _save_uploaded_zip(
+    content: bytes, warehouse_id: int, filename: Optional[str] = None
+) -> Path:
     STATIC_MAP_DIR.mkdir(parents=True, exist_ok=True)
     save_dir = STATIC_MAP_DIR / f"warehouse_{warehouse_id}"
     save_dir.mkdir(parents=True, exist_ok=True)
 
-    destination = save_dir / f"{warehouse_id}_{uuid4().hex}"
+    is_json = (filename and filename.lower().endswith(".json")) or content.strip().startswith(b"{")
+    ext = ".json" if is_json else ".zip"
+    destination = save_dir / f"{warehouse_id}_{uuid4().hex}{ext}"
 
     if not content:
         raise ValueError("Uploaded file is empty")
@@ -650,12 +666,12 @@ async def import_warehouse_map(
 
     shelves = extract_shelf_nodes_from_zip(content)
     if not shelves:
-        raise ValueError("ZIP không có shelf node hợp lệ")
+        raise ValueError("File bản đồ không có shelf / location node hợp lệ")
 
     source_path: Path | None = None
 
     try:
-        source_path = await _save_uploaded_zip(content, warehouse_id)
+        source_path = await _save_uploaded_zip(content, warehouse_id, upload.filename)
 
         # Single transaction: match + remap + retire + map metadata.
         # Rollback restores every location if a later step fails.
@@ -721,7 +737,7 @@ async def preview_warehouse_map_import(
 
     shelves = extract_shelf_nodes_from_zip(content)
     if not shelves:
-        raise ValueError("ZIP không có shelf node hợp lệ")
+        raise ValueError("File bản đồ không có shelf / location node hợp lệ")
 
     try:
         result = sync_locations_from_map(
@@ -876,6 +892,10 @@ def _apply_shelf_to_location(
         location.map_x = shelf["map_x"]
     if shelf.get("map_y") is not None:
         location.map_y = shelf["map_y"]
+
+    for field in ("location_type", "machine_code", "position_index", "default_stage_level"):
+        if shelf.get(field) is not None:
+            setattr(location, field, shelf[field])
 
     # Import has no zone information unless the caller supplies one; never wipe it.
     if zone_id is not None:
@@ -1041,6 +1061,10 @@ def sync_locations_from_map(
                 node_name=(shelf.get("node_name") or "")[:NODE_NAME_MAX_LENGTH] or None,
                 map_x=shelf.get("map_x"),
                 map_y=shelf.get("map_y"),
+                location_type=shelf.get("location_type", "CNC_SLOT"),
+                machine_code=shelf.get("machine_code"),
+                position_index=shelf.get("position_index"),
+                default_stage_level=shelf.get("default_stage_level"),
                 warehouse_id=warehouse_id,
                 zone_id=zone_id,
                 is_active=True,
@@ -1218,13 +1242,185 @@ def parse_shelf_node_from_map_node(node: list) -> Optional[ParsedShelfNode]:
         map_y=int(node[1]),
     )
 
+def _is_kuka_floor_map(data: dict) -> bool:
+    return (
+        isinstance(data, dict)
+        and "floorList" in data
+        and isinstance(data["floorList"], list)
+        and len(data["floorList"]) > 0
+    )
+
+
+def _read_map_raw_content(raw: bytes) -> dict:
+    """Detect and parse either raw JSON or ZIP archive containing map data."""
+    stripped = raw.strip()
+    if stripped.startswith(b"{") or stripped.startswith(b"["):
+        try:
+            return json.loads(stripped.decode("utf-8"))
+        except Exception as e:
+            raise ValueError(f"Invalid map JSON format: {e}") from e
+
+    try:
+        with zipfile.ZipFile(io.BytesIO(raw)) as zf:
+            namelist = zf.namelist()
+            # 1. Search for compress.json
+            for name in ("compress/compress.json", "compress.json"):
+                if name in namelist:
+                    return json.loads(zf.read(name).decode("utf-8"))
+
+            # 2. Search for any .json file that looks like map data
+            for name in namelist:
+                if name.endswith(".json"):
+                    try:
+                        data = json.loads(zf.read(name).decode("utf-8"))
+                        if isinstance(data, dict) and ("floorList" in data or "nodeArr" in data):
+                            return data
+                    except Exception:
+                        continue
+
+            raise ValueError("Không tìm thấy dữ liệu bản đồ hợp lệ (compress.json hoặc floorList JSON) trong file ZIP")
+    except zipfile.BadZipFile as e:
+        raise ValueError("File tải lên không phải định dạng ZIP hoặc JSON hợp lệ") from e
+
+
+def _extract_shelves_from_kuka_floor_map(data: dict) -> list[dict]:
+    """Extract location nodes from new KUKA floor format for synchronizing database locations."""
+    shelves = []
+    floor = data["floorList"][0]
+    floor_name = floor.get("floorName", "CNC001")
+    for node in floor.get("nodeList", []):
+        func_list = node.get("functionList", [])
+        if not func_list:
+            continue
+        lbl = str(node.get("nodeLabel") or node.get("nodeNumber"))
+        x_mm = round(float(node.get("xCoordinate", 0)) * 1000)
+        y_mm = round(float(node.get("yCoordinate", 0)) * 1000)
+        node_uuid = str(node.get("nodeUuid") or lbl)
+
+        loc_type = "CNC_SLOT"
+        machine_code = None
+        pos_index = None
+        default_stage_lvl = None
+        loc_name = f"Station_{lbl}"
+        bin_code = f"LOC_{lbl}"
+
+        for f in func_list:
+            ftype = f.get("functionType")
+            dev_id = f.get("deviceId")
+            c_model = f.get("containerModel")
+
+            if ftype == 4:  # Machine station
+                loc_type = "CNC_SLOT"
+                loc_name = dev_id or f"CNC_Station_{lbl}"
+                bin_code = f"CNC_{lbl}"
+                machine_code = floor_name
+                pos_index = 1
+            elif ftype == 2:  # Storage rack / buffer slot
+                loc_type = "RAW_MATERIAL"
+                loc_name = f"Rack_{lbl}" if not c_model else f"Rack_{c_model}_{lbl}"
+                bin_code = f"RACK_{lbl}"
+            elif ftype == 3:  # Charging slot
+                loc_type = "CHARGING_SLOT"
+                loc_name = f"Charging_{lbl}"
+                bin_code = f"CHG_{lbl}"
+            elif ftype == 10:  # Docking / approach node
+                loc_type = "CNC_SLOT"
+                rel = f.get("relativeNodeLabel")
+                loc_name = f"Docking_{lbl}_to_{rel}" if rel else f"Docking_{lbl}"
+                bin_code = f"DOCK_{lbl}"
+                machine_code = floor_name
+                pos_index = 2
+
+        shelves.append({
+            "location_code": lbl,
+            "bin_code": bin_code,
+            "location_name": loc_name,
+            "node_name": node_uuid,
+            "row": None,
+            "column": None,
+            "level": None,
+            "map_x": x_mm,
+            "map_y": y_mm,
+            "location_type": loc_type,
+            "machine_code": machine_code,
+            "position_index": pos_index,
+            "default_stage_level": default_stage_lvl,
+        })
+    return shelves
+
+
+def adapt_kuka_floor_map_to_canvas(data: dict) -> MapDataResponse:
+    """Transform KUKA floorList map (meters) into standard 2D canvas MapDataResponse (millimeters)."""
+    floor = data["floorList"][0]
+    length_mm = round(float(floor.get("floorLength", 200)) * 1000)
+    width_mm = round(float(floor.get("floorWidth", 100)) * 1000)
+    nodes = floor.get("nodeList", [])
+    edges = floor.get("edgeList", [])
+
+    node_keys = ["x", "y", "type", "content", "name", "isTurn", "shelfIsTurn", "extraTypes"]
+    line_keys = ["from", "to", "leftWidth", "rightWidth", "startExpandDistance", "endExpandDistance", "path"]
+
+    node_coords: dict[str, tuple[int, int]] = {}
+    node_arr: list[list[Any]] = []
+    for n in nodes:
+        x_mm = round(float(n.get("xCoordinate", 0)) * 1000)
+        y_mm = round(float(n.get("yCoordinate", 0)) * 1000)
+        lbl = str(n.get("nodeLabel") or n.get("nodeNumber"))
+        node_coords[lbl] = (x_mm, y_mm)
+
+        func_list = n.get("functionList", [])
+        has_func = bool(func_list)
+        node_type = 1 if has_func else 0
+        shelf_turn = 1 if any(f.get("functionType") == 2 for f in func_list) else 0
+        extra = [f.get("functionType") for f in func_list if f.get("functionType") is not None]
+
+        name = lbl
+        if has_func:
+            devs = [f.get("deviceId") for f in func_list if f.get("deviceId")]
+            if devs:
+                name = devs[0]
+            elif any(f.get("functionType") == 2 for f in func_list):
+                name = f"RACK_{lbl}"
+            elif any(f.get("functionType") == 3 for f in func_list):
+                name = f"CHG_{lbl}"
+            elif any(f.get("functionType") == 10 for f in func_list):
+                name = f"DOCK_{lbl}"
+
+        node_arr.append([x_mm, y_mm, node_type, lbl, name, 0, shelf_turn, extra])
+
+    line_arr: list[list[Any]] = []
+    for e in edges:
+        b_lbl = str(e.get("beginNodeLabel"))
+        e_lbl = str(e.get("endNodeLabel"))
+        p1 = node_coords.get(b_lbl)
+        p2 = node_coords.get(e_lbl)
+        if p1 and p2:
+            line_arr.append([b_lbl, e_lbl, 600, 600, 1200, 1200, [[p1[0], p1[1]], [p2[0], p2[1]]]])
+
+    xs = [n[0] for n in node_arr] if node_arr else [0]
+    ys = [n[1] for n in node_arr] if node_arr else [0]
+
+    return MapDataResponse(
+        width=length_mm,
+        height=width_mm,
+        node_keys=node_keys,
+        line_keys=line_keys,
+        node_arr=node_arr,
+        line_arr=line_arr,
+        type="topo",
+        x_attr_min=min(xs),
+        y_attr_min=min(ys),
+        floor_list=data.get("floorList"),
+        node_list=nodes,
+        edge_list=edges,
+        map_format="kuka_v2",
+    )
+
+
 def extract_shelf_nodes_from_zip(raw: bytes) -> list[dict]:
-    with zipfile.ZipFile(io.BytesIO(raw)) as zf:
-        compress_name = next(
-            p for p in ("compress/compress.json", "compress.json")
-            if p in zf.namelist()
-        )
-        data = json.loads(zf.read(compress_name))
+    data = _read_map_raw_content(raw)
+    if _is_kuka_floor_map(data):
+        return _extract_shelves_from_kuka_floor_map(data)
 
     shelves = []
     for node in data.get("nodeArr", []):
@@ -1241,6 +1437,10 @@ def extract_shelf_nodes_from_zip(raw: bytes) -> list[dict]:
             "level": parsed.level,
             "map_x": parsed.map_x,
             "map_y": parsed.map_y,
+            "location_type": "CNC_SLOT",
+            "machine_code": None,
+            "position_index": None,
+            "default_stage_level": None,
         })
     return shelves
 
@@ -1256,15 +1456,8 @@ def resolve_map_zip_path(source: str) -> Path:
 def _load_compress_json(zip_path: Path) -> dict:
     if not zip_path.is_file():
         raise ValueError(f"Map file not found: {zip_path}")
-
-    with zipfile.ZipFile(zip_path) as zf:
-        compress_name = next(
-            (p for p in ("compress/compress.json", "compress.json") if p in zf.namelist()),
-            None,
-        )
-        if not compress_name:
-            raise ValueError("compress.json not found in map ZIP")
-        return json.loads(zf.read(compress_name))
+    raw = zip_path.read_bytes()
+    return _read_map_raw_content(raw)
 
 
 def get_map_data(db: Session, warehouse_id: int) -> MapDataResponse:
@@ -1282,6 +1475,9 @@ def get_map_data(db: Session, warehouse_id: int) -> MapDataResponse:
     zip_path = resolve_map_zip_path(warehouse_map.source)
     data = _load_compress_json(zip_path)
 
+    if _is_kuka_floor_map(data):
+        return adapt_kuka_floor_map_to_canvas(data)
+
     # Chỉ trả field FE cần (MapData contract)
     try:
         return MapDataResponse(
@@ -1294,6 +1490,7 @@ def get_map_data(db: Session, warehouse_id: int) -> MapDataResponse:
             type=data.get("type"),
             x_attr_min=data.get("xAttrMin"),
             y_attr_min=data.get("yAttrMin"),
+            map_format="legacy",
         )
     except KeyError as e:
         raise ValueError(f"Invalid compress.json: missing field {e.args[0]}") from e
@@ -1331,7 +1528,7 @@ def get_zone_map_layout(db: Session, zone_id: int) -> ZoneMapLayoutResponse:
         nodes=nodes,
     )
 
-def export_warehouse_map(db: Session, warehouse_id: int) -> tuple[bytes, str]:
+def export_warehouse_map(db: Session, warehouse_id: int) -> tuple[bytes, str, str]:
     warehouse_map = db.query(WarehouseMap).filter(
         WarehouseMap.warehouse_id == warehouse_id,
         WarehouseMap.is_active.is_(True),
@@ -1347,8 +1544,13 @@ def export_warehouse_map(db: Session, warehouse_id: int) -> tuple[bytes, str]:
     content = zip_path.read_bytes()
     if not content:
         raise ValueError("Map file is empty")
-    filename = f"warehouse-map-{warehouse_id}.zip"
-    return content, filename
+
+    is_json = zip_path.suffix.lower() == ".json" or content.strip().startswith(b"{")
+    ext = ".json" if is_json else ".zip"
+    media_type = "application/json" if is_json else "application/zip"
+    filename = f"warehouse-map-{warehouse_id}{ext}"
+    return content, filename, media_type
+
 
 def get_buffer_locations(db: Session, warehouse_id: int, zone_keys: list[str]) -> list[Location]:
     return (
