@@ -9,54 +9,8 @@ from app.modules.warehouse.item_stock.item_stock_model import (
     countable_stock_level_criterion,
     positive_stock_quantity_criterion,
 )
-from app.modules.warehouse.inbound_order.inbound_order_model import InboundOrderDetail
-from app.modules.warehouse.outbound_order.outbound_order_model import OutboundOrderAllocation
-
-MAPPING_LOCATION_STATUS = {
-    "in_progress": "in_transit",
-    "issued": "in_transit",
-    "initialize": "reserved",
-    "reserved": "reserved",
-}
-
-
-def _detail_at_location_exists(detail_cls, detail_statuses, location_id_col):
-    return exists(
-        select(1)
-        .where(
-            detail_cls.status.in_(detail_statuses),
-            or_(
-                detail_cls.to_location_id == location_id_col,
-                detail_cls.from_location_id == location_id_col,
-            ),
-        )
-        # Without this the EXISTS auto-correlates its own table away, leaving no FROM
-        # clause whenever the expression is rendered outside a SELECT on location.
-        .correlate_except(detail_cls)
-    )
-
-
 def _location_status_expression(location_id_col):
-    statuses_by_location_status: dict[str, list[str]] = {}
-    for detail_status, location_status in MAPPING_LOCATION_STATUS.items():
-        statuses_by_location_status.setdefault(location_status, []).append(detail_status)
-
-    case_whens = [
-        (
-            or_(
-                _detail_at_location_exists(
-                    InboundOrderDetail, detail_statuses, location_id_col
-                ),
-                _detail_at_location_exists(
-                    OutboundOrderAllocation, detail_statuses, location_id_col
-                ),
-            ),
-            location_status,
-        )
-        for location_status, detail_statuses in statuses_by_location_status.items()
-    ]
     return case(
-        *case_whens,
         (
             exists(
                 select(1)
@@ -64,11 +18,22 @@ def _location_status_expression(location_id_col):
                     ItemStock.location_id == location_id_col,
                     ItemStock.quantity > 0,
                     ItemStock.is_active.is_(True),
-                    countable_stock_level_criterion(),
                 )
                 .correlate_except(ItemStock)
             ),
             "has_stock",
+        ),
+        (
+            exists(
+                select(1)
+                .where(
+                    ItemStock.destination_location_id == location_id_col,
+                    ItemStock.is_locked.is_(True),
+                    ItemStock.is_active.is_(True),
+                )
+                .correlate_except(ItemStock)
+            ),
+            "reserved",
         ),
         else_="empty",
     )

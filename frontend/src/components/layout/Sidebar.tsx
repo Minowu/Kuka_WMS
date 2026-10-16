@@ -258,29 +258,21 @@ export default function Sidebar() {
             />
 
             <SidebarGroup
-              label="Quản lý kho"
+              label="Sản xuất & Điều phối"
               icon={<ShopOutlined className="text-lg" />}
               items={[
                 {
                   to: "/dashboard",
                   icon: <AppstoreOutlined />,
-                  label: "Tổng quan",
+                  label: "Tổng quan xưởng",
                 },
-                { to: "/items", icon: <BoxPlotOutlined />, label: "Sản phẩm" },
+                { to: "/items", icon: <BoxPlotOutlined />, label: "Model Sản phẩm" },
                 {
                   to: "/production/routes",
                   icon: <BranchesOutlined />,
                   label: "Quy trình Route",
                 },
-                { to: "/zones", icon: <ClusterOutlined />, label: "Zone" },
-                { to: "/import", icon: <ImportOutlined />, label: "Nhập kho" },
-                { to: "/export", icon: <ExportOutlined />, label: "Xuất kho" },
-                { to: "/inventory", icon: <AuditOutlined />, label: "Kiểm kê" },
-                {
-                  to: "/backlog",
-                  icon: <UnorderedListOutlined />,
-                  label: "Backlog",
-                },
+                { to: "/zones", icon: <ClusterOutlined />, label: "Bản đồ & Trạm" },
               ]}
               collapsed={collapsed}
             />
@@ -292,25 +284,15 @@ export default function Sidebar() {
               badge={unsolvedCount}
             />
             <SidebarGroup
-              label="Cài đặt"
+              label="Cài đặt hệ thống"
               icon={<SettingOutlined className="text-lg" />}
               items={[
                 {
                   to: "/setting/users",
                   icon: <UserOutlined />,
-                  label: "Người dùng",
+                  label: "Tài khoản & Trạm",
                 },
-                { to: "/setting/warehouse", icon: <HomeOutlined />, label: "Kho" },
-                {
-                  to: "/setting/units",
-                  icon: <ExportOutlined />,
-                  label: "Đơn vị",
-                },
-                {
-                  to: "/setting/qr-codes",
-                  icon: <QrcodeOutlined />,
-                  label: "Quản lý QR",
-                },
+                { to: "/setting/warehouse", icon: <HomeOutlined />, label: "Phân xưởng" },
               ]}
               collapsed={collapsed}
             />

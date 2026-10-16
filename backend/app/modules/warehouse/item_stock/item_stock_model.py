@@ -17,30 +17,14 @@ from sqlalchemy import (
     select,
     and_,
 )
-from sqlalchemy.orm import relationship, column_property
+from sqlalchemy.orm import relationship, column_property, synonym
 from sqlalchemy.dialects.postgresql import UUID
 import uuid
 from app.core.database import Base
-from app.modules.warehouse.outbound_order.outbound_order_model import OutboundOrderAllocation
-
-_NON_COUNTABLE_ALLOCATION_STATUSES = ("completed", "failed")
-def countable_allocation_quantity():
-    return case(
-        (
-            and_(
-                OutboundOrderAllocation.allocation_type == "outbound",
-                OutboundOrderAllocation.status.notin_(_NON_COUNTABLE_ALLOCATION_STATUSES),
-            ),
-            OutboundOrderAllocation.quantity,
-        ),
-        else_=0,
-    )
-def pick_allocated_sum():
-    return func.coalesce(func.sum(countable_allocation_quantity()), 0)
 
 
 class ItemStock(Base):
-    """Current item stock rows stored in warehouse locations."""
+    """Current item stock rows stored in warehouse locations (WIP Carts)."""
 
     __tablename__ = "item_stock"
 
@@ -54,8 +38,8 @@ class ItemStock(Base):
         nullable=True,
         index=True,
     )
-    inbound_order_detail_id = Column(Integer, ForeignKey("inbound_order_detail.id"), nullable=True, index=True)
-    unit_id = Column(Integer, ForeignKey("unit.id"), nullable=False, index=True)
+    inbound_order_detail_id = Column(Integer, nullable=True, index=True)
+    unit_id = Column(Integer, nullable=True, index=True)
     quantity = Column(Numeric(12, 3), nullable=False, default=0)
     lot_number_from = Column(String(50), nullable=True, index=True)
     lot_number_to = Column(String(50), nullable=True, index=True)
@@ -92,7 +76,6 @@ class ItemStock(Base):
     )
 
     item = relationship("Item", lazy="joined")
-    unit = relationship("Unit", foreign_keys=[unit_id], lazy="joined")
     location = relationship(
         "Location",
         foreign_keys=[location_id],
@@ -104,27 +87,10 @@ class ItemStock(Base):
         foreign_keys=[destination_location_id],
         lazy="joined"
     )
-    inbound_order_detail = relationship("InboundOrderDetail", foreign_keys=[inbound_order_detail_id], lazy="joined")
-    available_quantity = column_property(
-        quantity
-        - select(
-            func.coalesce(
-                func.sum(countable_allocation_quantity()),
-                0,
-            )
-        )
-        .where(OutboundOrderAllocation.item_stock_id == id)
-        .correlate_except(OutboundOrderAllocation)
-        .scalar_subquery()
-    )
+    available_quantity = synonym("quantity")
 
     __table_args__ = (
         CheckConstraint("quantity >= 0", name="ck_item_stock_quantity_non_negative"),
-        # CheckConstraint(
-        #     "status IN ('available', 'reserved', 'cross_dock_reserved', "
-        #     "'in_transit', 'at_outbound_station', 'damaged', 'quarantine', 'expired')",
-        #     name="ck_item_stock_status",
-        # ),
     )
 
 

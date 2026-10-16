@@ -22,12 +22,7 @@ celery_app = Celery(
     broker=settings.celery_broker_url,
     backend=settings.celery_broker_result_url,
     include=[
-        "app.modules.robot.robot_celery_task",
-        "app.modules.warehouse.inbound_order.inbound_celery_task",
-        "app.modules.warehouse.outbound_order.outbound_celery_task",
-        "app.modules.warehouse.item.item_celery_task",
         "app.modules.warehouse.notificcation.notification_celery_task",
-        "app.modules.warehouse.dashboard.dashboard_celery_task",
     ],
 )
 
@@ -44,7 +39,6 @@ celery_app.conf.update(
     task_reject_on_worker_lost=True, 
     broker_connection_retry_on_startup=True,
 
-
     task_time_limit=300,              
     task_soft_time_limit=270,        
 
@@ -57,24 +51,9 @@ celery_app.conf.update(
         QUEUE_STATUS: {},
     },
     task_routes={
-        "robot.push_task_to_ics": {"queue": QUEUE_LOGIC},
-        "robot.persist_task_status": {"queue": QUEUE_STATUS},
-        "inbound.*": {"queue": QUEUE_LOGIC},
-        "outbound.*": {"queue": QUEUE_LOGIC},
-        "item.*": {"queue": QUEUE_LOGIC},
         "notification.*": {"queue": QUEUE_LOGIC},
-        "dashboard.*": {"queue": QUEUE_LOGIC},
     },
-    beat_schedule={
-        "check-long-holding-stock-daily": {
-            "task": "notification.check_long_holding_stock",
-            "schedule": crontab(hour=11, minute=59),
-        },
-        "snapshot-inventory-daily": {
-            "task": "dashboard.snapshot_inventory_daily",
-            "schedule": crontab(hour=11, minute=59),
-        },
-    },
+    beat_schedule={},
 )
 
 

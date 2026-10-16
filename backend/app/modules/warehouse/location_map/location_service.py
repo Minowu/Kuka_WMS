@@ -34,11 +34,11 @@ from app.modules.warehouse.item_stock.item_stock_model import (
     ItemStock,
     countable_stock_level_criterion,
 )
-from app.modules.warehouse.transaction_history.history_model import Transaction
-from app.modules.warehouse.stocktake.stocktake_model import StocktakeItemStock
-from app.modules.warehouse.inbound_order.inbound_order_model import InboundOrderDetail
-from app.modules.warehouse.outbound_order.outbound_order_model import (
-    OutboundOrderAllocation,
+from app.modules.production.production_models import (
+    FleetTask,
+    ProductionRecord,
+    TransportRequest,
+    UserLocation,
 )
 from pathlib import Path
 from uuid import uuid4
@@ -68,13 +68,13 @@ NODE_NAME_MAX_LENGTH = 50
 # before retiring a location and to move them during a remap.
 LOCATION_FK_COLUMNS: tuple[tuple[type, str], ...] = (
     (ItemStock, "location_id"),
-    (StocktakeItemStock, "location_id"),
-    (Transaction, "from_location_id"),
-    (Transaction, "to_location_id"),
-    (InboundOrderDetail, "from_location_id"),
-    (InboundOrderDetail, "to_location_id"),
-    (OutboundOrderAllocation, "from_location_id"),
-    (OutboundOrderAllocation, "to_location_id"),
+    (ItemStock, "destination_location_id"),
+    (TransportRequest, "source_location_id"),
+    (TransportRequest, "destination_location_id"),
+    (FleetTask, "pickup_location_id"),
+    (FleetTask, "dropoff_location_id"),
+    (ProductionRecord, "location_id"),
+    (UserLocation, "location_id"),
 )
 
 
