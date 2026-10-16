@@ -3,10 +3,6 @@ export interface ReportKpiResponse {
   total_outbound_orders: number;
   total_inventory_value: number | string;
   unsolved_notifications: number;
-  active_carts_count?: number;
-  in_transit_amr_count?: number;
-  queued_requests_count?: number;
-  parts_completed_today?: number;
 }
 
 export type TrendGranularity = "day" | "week";
