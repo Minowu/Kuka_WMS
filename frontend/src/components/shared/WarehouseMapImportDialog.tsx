@@ -119,15 +119,19 @@ const WarehouseMapImportDialog: React.FC<WarehouseMapImportDialogProps> = ({
       return;
     }
 
-    if (!file.name.toLowerCase().endsWith(".zip")) {
-      message.error("Chỉ hỗ trợ file ZIP (.zip)");
+    const fileName = file.name.toLowerCase();
+    const isZip = fileName.endsWith(".zip");
+    const isJson = fileName.endsWith(".json");
+
+    if (!isZip && !isJson) {
+      message.error("Chỉ hỗ trợ file bản đồ ZIP (.zip) hoặc JSON KUKA SLAM (.json)");
       e.target.value = "";
       setSelectedFile(null);
       return;
     }
 
     if (file.size === 0) {
-      message.error("File ZIP trống, vui lòng chọn file khác");
+      message.error("File bản đồ trống, vui lòng chọn file khác");
       e.target.value = "";
       setSelectedFile(null);
       return;
@@ -139,7 +143,7 @@ const WarehouseMapImportDialog: React.FC<WarehouseMapImportDialogProps> = ({
 
   const runPreview = () => {
     if (!selectedFile) {
-      message.warning("Vui lòng chọn file ZIP trước khi kiểm tra");
+      message.warning("Vui lòng chọn file bản đồ trước khi kiểm tra");
       return;
     }
     if (warehouseId <= 0) {
@@ -223,12 +227,12 @@ const WarehouseMapImportDialog: React.FC<WarehouseMapImportDialogProps> = ({
       <div className="space-y-4">
         <div>
           <label className="block text-sm font-medium text-slate-700 mb-2">
-            Chọn file ZIP chứa bản đồ
+            Chọn file bản đồ (.zip hoặc .json KUKA SLAM)
           </label>
           <input
             ref={fileInputRef}
             type="file"
-            accept=".zip,application/zip"
+            accept=".zip,.json,application/zip,application/json"
             onChange={handleFileSelect}
             disabled={isPending}
             className="

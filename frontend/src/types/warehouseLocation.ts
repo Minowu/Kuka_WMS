@@ -9,6 +9,9 @@ export interface WarehouseLocation {
   bin: string | null;
   capacity: number | null;
   location_type?: string;
+  machine_code?: string | null;
+  position_index?: number | null;
+  default_stage_level?: number | null;
   status?: string;
   is_active: boolean;
   created_at: string;
