@@ -20,8 +20,6 @@ from app.modules.warehouse.item_stock.item_stock_schema import (
     ItemStockUpdate,
 )
 from app.modules.warehouse.location_map.location_model import Location
-from app.modules.warehouse.transaction_history.history_model import Transaction
-from app.modules.warehouse.unit.unit_model import Unit
 from app.modules.warehouse.warehouse_zone.warehouse_model import Zone
 
 
@@ -51,14 +49,11 @@ def _ensure_item_and_location(db: Session, item_id: int, location_id: int) -> It
 
 
 def _ensure_unit_exists(db: Session, unit_id: int) -> None:
-    if not db.query(Unit).filter(Unit.id == unit_id).first():
-        raise ValueError(f"Unit id not found: {unit_id}")
+    return
 
 
-def _resolve_stock_unit_id(db: Session, item: Item, unit_id: Optional[int]) -> int:
-    resolved = unit_id if unit_id is not None else item.base_unit_id
-    _ensure_unit_exists(db, resolved)
-    return resolved
+def _resolve_stock_unit_id(db: Session, item: Item, unit_id: Optional[int]) -> Optional[int]:
+    return unit_id if unit_id is not None else item.base_unit
 
 
 def list_item_stocks(
@@ -174,12 +169,8 @@ def delete_item_stock(db: Session, stock_id: int) -> bool:
     stock = get_item_stock_by_id(db, stock_id)
     if not stock:
         return False
-    if (
-        db.query(Transaction)
-        .filter(Transaction.item_stock_id == stock_id)
-        .first()
-    ):
-        raise ValueError("Cannot delete item stock: transactions still exist")
+    if stock.is_locked:
+        raise ValueError("Cannot delete item stock: cart is currently locked in an active transport task")
     stock.is_active = False
     db.commit()
     return True

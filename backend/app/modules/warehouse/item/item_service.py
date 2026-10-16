@@ -33,7 +33,6 @@ from app.modules.warehouse.item.item_schema import (
     QRCodeResponse,
     QRCodeUpdate,
 )
-from app.modules.warehouse.unit.unit_model import Unit
 from app.modules.warehouse.warehouse_zone.warehouse_model import Warehouse, Zone
 from app.modules.warehouse.item_stock.item_stock_model import (
     ItemStock,
@@ -90,8 +89,8 @@ def _ensure_warehouse_exists(db: Session, warehouse_id: int) -> None:
 
 
 def _ensure_unit_exists(db: Session, unit_id: int) -> None:
-    if not db.query(Unit).filter(Unit.id == unit_id).first():
-        raise ValueError(f"Unit id not found: {unit_id}")
+    # Legacy unit table pruned in clean manufacturing architecture
+    return
 
 
 def list_items(

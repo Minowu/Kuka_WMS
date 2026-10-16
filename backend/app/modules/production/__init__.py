@@ -1,7 +1,5 @@
 # Ensure dependent mappers are registered
 import app.modules.auth.auth_model  # noqa: F401
-import app.modules.robot.robot_model  # noqa: F401
-import app.modules.warehouse.unit.unit_model  # noqa: F401
 import app.modules.warehouse.warehouse_zone.warehouse_model  # noqa: F401
 import app.modules.warehouse.notificcation.notification_model  # noqa: F401
 

@@ -18,7 +18,6 @@ from sqlalchemy import func, or_, and_
 from sqlalchemy.orm import Session
 
 from app.modules.auth.auth_model import User  # noqa: F401
-from app.modules.robot.robot_model import RobotTask  # noqa: F401
 from app.modules.warehouse.notificcation.notification_model import Notification  # noqa: F401
 from app.modules.warehouse.location_map.location_model import Location
 from app.modules.warehouse.item_stock.item_stock_model import ItemStock

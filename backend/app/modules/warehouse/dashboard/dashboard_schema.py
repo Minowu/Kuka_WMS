@@ -8,10 +8,14 @@ StockAgingBucketKey = Literal["lte_30", "days_31_60", "gt_60"]
 
 
 class ReportKpiResponse(BaseModel):
-    total_inbound_orders: int
-    total_outbound_orders: int
-    total_inventory_value: Decimal
-    unsolved_notifications: int
+    total_inbound_orders: int = 0
+    total_outbound_orders: int = 0
+    total_inventory_value: Decimal = Decimal(0)
+    unsolved_notifications: int = 0
+    active_carts_count: int = 0
+    in_transit_amr_count: int = 0
+    queued_requests_count: int = 0
+    parts_completed_today: int = 0
 
 
 class ReportTrendPoint(BaseModel):
