@@ -22,7 +22,6 @@ import NotificationPage from "@/pages/NotificationPage";
 import { RoleHomeRedirect } from "@/components/auth/RoleHomeRedirect";
 
 // PDA 4.2" Caller Pages (Dedicated per Area)
-import PdaCallerPage from "@/pages/pda/PdaCallerPage";
 import RawMaterialPdaPage from "@/pages/pda/RawMaterialPdaPage";
 import CncPdaPage from "@/pages/pda/CncPdaPage";
 import WashingPdaPage from "@/pages/pda/WashingPdaPage";
@@ -30,17 +29,43 @@ import WashingPdaPage from "@/pages/pda/WashingPdaPage";
 export default function AppRoutes() {
   return (
     <Routes>
-      {/* ── PDA 4.2" Industrial Caller Dedicated Routes (Full screen standalone, no MainLayout) ── */}
-      <Route path="/caller" element={<PdaCallerPage />} />
-      <Route path="/caller/raw-material" element={<RawMaterialPdaPage />} />
-      <Route path="/caller/cnc" element={<CncPdaPage />} />
-      <Route path="/caller/washing" element={<WashingPdaPage />} />
+      {/* ── PDA 4.2" Dedicated Routes (Full screen standalone, strictly isolated per area) ── */}
+      <Route
+        path="/pda/raw-material"
+        element={
+          <ProtectedRoute>
+            <RawMaterialPdaPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/pda/cnc"
+        element={
+          <ProtectedRoute>
+            <CncPdaPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/pda/washing"
+        element={
+          <ProtectedRoute>
+            <WashingPdaPage />
+          </ProtectedRoute>
+        }
+      />
 
-      {/* /pda Aliases */}
-      <Route path="/pda" element={<PdaCallerPage />} />
-      <Route path="/pda/raw-material" element={<RawMaterialPdaPage />} />
-      <Route path="/pda/cnc" element={<CncPdaPage />} />
-      <Route path="/pda/washing" element={<WashingPdaPage />} />
+      {/* Redirect /pda và /caller trực tiếp theo quyền của tài khoản */}
+      <Route
+        path="/pda"
+        element={
+          <ProtectedRoute>
+            <RoleHomeRedirect />
+          </ProtectedRoute>
+        }
+      />
+      <Route path="/caller" element={<Navigate to="/pda" replace />} />
+      <Route path="/caller/*" element={<Navigate to="/pda" replace />} />
 
       <Route
         path="/login"
@@ -51,7 +76,7 @@ export default function AppRoutes() {
         }
       />
 
-      {/* ── Main app with sidebar (Desktop Admin) ── */}
+      {/* ── Main app with sidebar (Desktop Admin PC) ── */}
       <Route
         path="/"
         element={

@@ -15,8 +15,32 @@ export function isRefreshApiUrl(url?: string): boolean {
 
 export function getHomePathFromUser(user: User | null): string {
   if (!user) return '/login';
-  if (user.access.is_admin) return '/overview';
-  return '/report';
+  if (user.access?.is_admin) return '/dashboard';
+
+  // Định tuyến thẳng vào đúng phân xưởng được phân quyền
+  const roleNames = (user.roles || []).map((r) => (r.name || '').toLowerCase());
+  const uname = (user.username || '').toLowerCase();
+
+  if (
+    roleNames.includes('raw_material') ||
+    roleNames.includes('nguyenlieu') ||
+    uname.includes('raw') ||
+    uname.includes('nguyenlieu')
+  ) {
+    return '/pda/raw-material';
+  }
+
+  if (
+    roleNames.includes('washing') ||
+    roleNames.includes('tayrua') ||
+    uname.includes('wash') ||
+    uname.includes('tayrua')
+  ) {
+    return '/pda/washing';
+  }
+
+  // Mặc định tài khoản đứng máy gia công CNC
+  return '/pda/cnc';
 }
 
 export function hasModuleAccess(

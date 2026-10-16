@@ -9,12 +9,10 @@ export const WashingPdaPage: React.FC = () => {
   const simulateArriveWashing = usePdaStore((s) => s.simulateArriveWashing);
   const showToast = usePdaStore((s) => s.showToast);
 
-  const occupiedCount = washingSlots.filter((s) => s.status === 'OCCUPIED').length;
-
   return (
     <PdaLayoutWrapper
-      title="PDA Khu Vực Tẩy Rửa"
-      badge={`${occupiedCount}/4 Slot Có Hàng`}
+      title="KHU TẨY RỬA"
+      stationSubtitle="4 Slot Tiếp Nhận Phôi Hoàn Thiện"
     >
       <WashingStationModal
         slots={washingSlots}

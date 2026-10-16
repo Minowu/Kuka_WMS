@@ -1,11 +1,4 @@
 import React, { useState } from 'react';
-import {
-  QrcodeOutlined,
-  ArrowLeftOutlined,
-  CheckCircleOutlined,
-  ThunderboltOutlined,
-  CameraOutlined,
-} from '@ant-design/icons';
 import { QrCameraOverlay } from '@/components/qr-scan/QrCameraOverlay';
 import type { PartModel, RawMaterialPosition } from '@/types/pda';
 
@@ -39,33 +32,32 @@ export const RawMaterialWizard: React.FC<RawMaterialWizardProps> = ({
   const handleSelectModel = (modelId: string) => {
     if ('vibrate' in navigator) navigator.vibrate?.(30);
     setSelectedModel(modelId);
-    // Tự sinh mã Rack gợi ý tiện cho thao tác nhanh nếu chưa có
     const randomSuffix = Math.floor(1000 + Math.random() * 9000);
     setRackId(`RCK-${selectedPosition}-${randomSuffix}`);
     setCurrentStep(3);
   };
 
-  // Sinh ngẫu nhiên mã QR Rack để test tức thì
+  // Sinh ngẫu nhiên mã QR Rack để test
   const handleGenerateRandomQr = () => {
     if ('vibrate' in navigator) navigator.vibrate?.(30);
     const randomNum = Math.floor(1000 + Math.random() * 9000);
     const newId = `RCK-${selectedPosition || 'VT'}-${randomNum}`;
     setRackId(newId);
-    showToast(`Đã nạp mã mẫu: ${newId}`, 'info');
+    showToast(`Đã nạp mã: ${newId}`, 'info');
   };
 
-  // Hoàn tất quét QR qua Camera
+  // Quét QR qua Camera
   const handleCameraScanSuccess = (text: string) => {
     setIsScanningCamera(false);
     const cleanText = text.trim();
     setRackId(cleanText);
-    showToast(`Đã nhận diện QR: ${cleanText}`, 'success');
+    showToast(`Đã nhận diện: ${cleanText}`, 'success');
   };
 
-  // Bước 3: Xác nhận Cấp Phôi -> 1 Chạm không hỏi lại
+  // Bước 3: Xác nhận Cấp Phôi
   const handleConfirmSupply = () => {
     if (!rackId.trim()) {
-      showToast('Vui lòng quét hoặc nhập mã QR Rack', 'warning');
+      showToast('Vui lòng nhập hoặc quét mã Rack', 'warning');
       return;
     }
 
@@ -77,12 +69,7 @@ export const RawMaterialWizard: React.FC<RawMaterialWizardProps> = ({
       rackId: rackId.trim().toUpperCase(),
     });
 
-    showToast(
-      `Đã cấp phôi thành công: [${selectedPosition}] - ${selectedModel} - ${rackId.toUpperCase()}`,
-      'success'
-    );
-
-    // Tự động quay về Bước 1 để sẵn sàng cho lần quét tiếp theo
+    // Tự động quay về Bước 1
     setSelectedPosition('');
     setSelectedModel('');
     setRackId('');
@@ -91,50 +78,35 @@ export const RawMaterialWizard: React.FC<RawMaterialWizardProps> = ({
 
   return (
     <div className="flex flex-col flex-1 p-3">
-      {/* Wizard Progress Bar */}
-      <div className="bg-slate-800/80 rounded-xl p-2.5 mb-3 border border-slate-700/60 shadow-sm">
-        <div className="flex items-center justify-between text-xs font-semibold">
+      {/* Thanh tiến trình bước (Clean Steps) */}
+      <div className="bg-slate-900 border border-slate-800 rounded-xl p-2 mb-3">
+        <div className="grid grid-cols-3 gap-1 text-center font-bold text-xs">
           <div
-            className={`flex items-center gap-1.5 px-2 py-1 rounded-lg ${
+            className={`py-1.5 rounded-lg ${
               currentStep === 1
-                ? 'bg-[#FF5800] text-white font-bold'
-                : 'text-slate-400 bg-slate-900/50'
+                ? 'bg-[#FF5800] text-white'
+                : 'text-slate-400 bg-slate-950'
             }`}
           >
-            <span className="w-4 h-4 rounded-full bg-black/30 flex items-center justify-center text-[10px]">
-              1
-            </span>
-            <span>Vị Trí</span>
+            1. VỊ TRÍ
           </div>
-
-          <div className="w-4 h-[2px] bg-slate-700" />
-
           <div
-            className={`flex items-center gap-1.5 px-2 py-1 rounded-lg ${
+            className={`py-1.5 rounded-lg ${
               currentStep === 2
-                ? 'bg-[#FF5800] text-white font-bold'
-                : 'text-slate-400 bg-slate-900/50'
+                ? 'bg-[#FF5800] text-white'
+                : 'text-slate-400 bg-slate-950'
             }`}
           >
-            <span className="w-4 h-4 rounded-full bg-black/30 flex items-center justify-center text-[10px]">
-              2
-            </span>
-            <span>Model</span>
+            2. MODEL
           </div>
-
-          <div className="w-4 h-[2px] bg-slate-700" />
-
           <div
-            className={`flex items-center gap-1.5 px-2 py-1 rounded-lg ${
+            className={`py-1.5 rounded-lg ${
               currentStep === 3
-                ? 'bg-[#FF5800] text-white font-bold'
-                : 'text-slate-400 bg-slate-900/50'
+                ? 'bg-[#FF5800] text-white'
+                : 'text-slate-400 bg-slate-950'
             }`}
           >
-            <span className="w-4 h-4 rounded-full bg-black/30 flex items-center justify-center text-[10px]">
-              3
-            </span>
-            <span>Quét QR</span>
+            3. QUÉT RACK
           </div>
         </div>
       </div>
@@ -143,18 +115,12 @@ export const RawMaterialWizard: React.FC<RawMaterialWizardProps> = ({
       {currentStep === 1 && (
         <div className="flex flex-col flex-1">
           <div className="mb-2 text-center">
-            <span className="text-xs uppercase tracking-wider text-slate-400 font-medium">
-              Bước 1 / 3
-            </span>
-            <h2 className="text-lg font-bold text-white flex items-center justify-center gap-2">
-              <span className="w-2 h-2 rounded-full bg-[#FF5800]" />
+            <h2 className="text-sm font-bold tracking-wider text-slate-300 uppercase">
               CHỌN VỊ TRÍ CẤP PHÔI
             </h2>
-            <p className="text-xs text-slate-400 mt-0.5">Chạm 1 lần để chọn vị trí khay/bàn</p>
           </div>
 
-          {/* 7 Nút to bản [VT-01] đến [VT-07] */}
-          <div className="grid grid-cols-2 gap-2.5 flex-1">
+          <div className="grid grid-cols-2 gap-2 flex-1">
             {positions.map((pos) => {
               const isOccupied = pos.hasRack;
               return (
@@ -163,31 +129,30 @@ export const RawMaterialWizard: React.FC<RawMaterialWizardProps> = ({
                   onClick={() => handleSelectPosition(pos.id)}
                   className={`min-h-[58px] p-3 rounded-xl border flex flex-col justify-center items-start text-left transition-all active:scale-[0.98] ${
                     isOccupied
-                      ? 'bg-amber-950/30 border-amber-500/40 hover:border-amber-500 text-amber-200'
+                      ? 'bg-amber-950/20 border-amber-600/40 text-amber-200'
                       : 'bg-slate-800/90 border-slate-700 hover:border-[#FF5800] text-white'
                   }`}
                 >
                   <div className="flex items-center justify-between w-full">
-                    <span className="text-xl font-black tracking-wide text-white font-mono">
+                    <span className="text-xl font-bold font-mono text-white">
                       {pos.id}
                     </span>
                     <span
                       className={`text-[10px] px-2 py-0.5 rounded font-bold uppercase ${
                         isOccupied
-                          ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
-                          : 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                          ? 'bg-amber-500/20 text-amber-300'
+                          : 'bg-emerald-500/20 text-emerald-300'
                       }`}
                     >
-                      {isOccupied ? 'Đang có Rack' : 'Sẵn sàng'}
+                      {isOccupied ? 'CÓ RACK' : 'TRỐNG'}
                     </span>
                   </div>
-                  {pos.currentModel && (
-                    <div className="text-[11px] text-slate-400 mt-1 truncate w-full">
+                  {pos.currentModel ? (
+                    <div className="text-[11px] text-slate-400 mt-1 truncate w-full font-mono">
                       {pos.currentModel} • {pos.currentRackId}
                     </div>
-                  )}
-                  {!pos.currentModel && (
-                    <div className="text-[11px] text-slate-400 mt-0.5">Vị trí phôi trống</div>
+                  ) : (
+                    <div className="text-[11px] text-slate-400 mt-0.5">Sẵn sàng nạp</div>
                   )}
                 </button>
               );
@@ -199,53 +164,45 @@ export const RawMaterialWizard: React.FC<RawMaterialWizardProps> = ({
       {/* ================= BƯỚC 2: CHỌN MODEL (Model 1 đến Model 7) ================= */}
       {currentStep === 2 && (
         <div className="flex flex-col flex-1">
-          {/* Header & Back Button */}
-          <div className="flex items-center justify-between mb-2">
+          <div className="flex items-center justify-between mb-2.5">
             <button
               onClick={() => setCurrentStep(1)}
-              className="min-h-[46px] px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl flex items-center gap-1.5 text-xs font-bold border border-slate-700 active:scale-95 transition-all"
+              className="min-h-[44px] px-3 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-bold border border-slate-700 active:scale-95"
             >
-              <ArrowLeftOutlined /> Quay lại VT
+              ← Chọn lại Vị trí
             </button>
-            <div className="text-right">
-              <span className="text-xs text-slate-400">Đang chọn cho</span>
-              <span className="ml-1.5 text-sm font-black text-[#FF5800] bg-[#FF5800]/10 px-2 py-0.5 rounded-lg border border-[#FF5800]/30 font-mono">
-                {selectedPosition}
-              </span>
+            <div className="text-xs font-mono font-bold text-slate-300 bg-slate-800 px-2 py-1 rounded">
+              Vị trí: {selectedPosition}
             </div>
           </div>
 
-          <div className="mb-2 text-center">
-            <span className="text-xs uppercase tracking-wider text-slate-400 font-medium">
-              Bước 2 / 3
-            </span>
-            <h2 className="text-lg font-bold text-white flex items-center justify-center gap-2">
-              <span className="w-2 h-2 rounded-full bg-[#FF5800]" />
+          <div className="text-center mb-2">
+            <h2 className="text-sm font-bold tracking-wider text-slate-300 uppercase">
               CHỌN MODEL PHÔI
             </h2>
-            <p className="text-xs text-slate-400 mt-0.5">Chạm 1 lần để chọn mã linh kiện</p>
           </div>
 
-          {/* Danh sách 7 Model */}
           <div className="flex flex-col gap-2 flex-1 overflow-y-auto pr-0.5">
             {models.map((model) => (
               <button
                 key={model.id}
                 onClick={() => handleSelectModel(model.id)}
-                className="min-h-[52px] p-3 rounded-xl bg-slate-800/90 border border-slate-700 hover:border-[#FF5800] text-left flex items-center justify-between transition-all active:scale-[0.98] group"
+                className="min-h-[54px] p-3 rounded-xl bg-slate-800 hover:bg-[#FF5800] border border-slate-700 hover:border-orange-500 text-left flex items-center justify-between group transition-all active:scale-[0.98]"
               >
                 <div className="flex items-center gap-3">
-                  <div className="w-9 h-9 rounded-lg bg-slate-700/80 group-hover:bg-[#FF5800] text-slate-200 group-hover:text-white flex items-center justify-center font-bold text-sm font-mono transition-colors">
+                  <span className="w-8 h-8 rounded-lg bg-slate-900 group-hover:bg-black/30 text-white flex items-center justify-center font-bold text-xs font-mono">
                     {model.code}
-                  </div>
+                  </span>
                   <div>
                     <div className="font-bold text-sm text-white">{model.name}</div>
-                    <div className="text-[11px] text-slate-400">{model.description}</div>
+                    <div className="text-[11px] text-slate-400 group-hover:text-orange-100">
+                      {model.description}
+                    </div>
                   </div>
                 </div>
-                <div className="text-xs font-bold text-[#FF5800] opacity-80 group-hover:opacity-100 flex items-center gap-1">
+                <span className="text-xs font-bold text-slate-400 group-hover:text-white">
                   Chọn →
-                </div>
+                </span>
               </button>
             ))}
           </div>
@@ -255,95 +212,71 @@ export const RawMaterialWizard: React.FC<RawMaterialWizardProps> = ({
       {/* ================= BƯỚC 3: QUÉT QR RACK & XÁC NHẬN ================= */}
       {currentStep === 3 && (
         <div className="flex flex-col flex-1">
-          {/* Header & Back Button */}
-          <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center justify-between mb-2.5">
             <button
               onClick={() => setCurrentStep(2)}
-              className="min-h-[46px] px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl flex items-center gap-1.5 text-xs font-bold border border-slate-700 active:scale-95 transition-all"
+              className="min-h-[44px] px-3 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-bold border border-slate-700 active:scale-95"
             >
-              <ArrowLeftOutlined /> Đổi Model
+              ← Chọn lại Model
             </button>
-            <div className="text-xs text-slate-400 font-medium">Bước 3 / 3</div>
+            <div className="text-xs font-mono font-bold text-slate-300 bg-slate-800 px-2 py-1 rounded">
+              {selectedPosition}
+            </div>
           </div>
 
-          {/* Tóm tắt thông tin đã chọn */}
-          <div className="bg-slate-800/90 rounded-xl p-3 border border-slate-700 mb-3 space-y-2">
-            <div className="flex justify-between items-center text-xs">
-              <span className="text-slate-400">Vị trí cấp phôi:</span>
-              <span className="font-black text-white bg-slate-700 px-2 py-0.5 rounded font-mono text-sm">
-                {selectedPosition}
-              </span>
+          <div className="bg-slate-800 rounded-xl p-3 border border-slate-700 mb-3 space-y-1.5 text-xs">
+            <div className="flex justify-between">
+              <span className="text-slate-400">Vị trí cấp:</span>
+              <span className="font-bold font-mono text-white">{selectedPosition}</span>
             </div>
-            <div className="flex justify-between items-center text-xs">
+            <div className="flex justify-between">
               <span className="text-slate-400">Model đã chọn:</span>
-              <span className="font-bold text-[#FF5800] bg-[#FF5800]/10 px-2 py-0.5 rounded border border-[#FF5800]/30 text-xs">
+              <span className="font-bold text-[#FF5800]">
                 {models.find((m) => m.id === selectedModel)?.name || selectedModel}
               </span>
             </div>
           </div>
 
-          {/* Ô Hiển thị / Nhập mã Rack ID */}
           <div className="mb-3">
-            <label className="block text-xs font-bold uppercase tracking-wider text-slate-300 mb-1.5">
-              Mã QR Rack Phôi:
+            <label className="block text-xs font-bold uppercase tracking-wider text-slate-400 mb-1">
+              Mã Rack Phôi:
             </label>
-            <div className="relative">
-              <input
-                type="text"
-                value={rackId}
-                onChange={(e) => setRackId(e.target.value.toUpperCase())}
-                placeholder="Nhập hoặc quét mã QR..."
-                className="w-full min-h-[52px] bg-slate-950 border-2 border-[#FF5800]/60 focus:border-[#FF5800] rounded-xl px-3.5 text-base font-mono font-bold text-white placeholder-slate-500 outline-none"
-              />
-              <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
-                {rackId && (
-                  <button
-                    onClick={() => setRackId('')}
-                    className="text-xs px-2 py-1 text-slate-400 hover:text-white"
-                  >
-                    Xóa
-                  </button>
-                )}
-              </div>
-            </div>
+            <input
+              type="text"
+              value={rackId}
+              onChange={(e) => setRackId(e.target.value.toUpperCase())}
+              placeholder="Nhập hoặc quét mã barcode/QR..."
+              className="w-full min-h-[52px] bg-slate-950 border-2 border-[#FF5800]/70 focus:border-[#FF5800] rounded-xl px-3 text-base font-mono font-bold text-white placeholder-slate-600 outline-none"
+            />
           </div>
 
-          {/* Các nút hỗ trợ quét nhanh */}
           <div className="grid grid-cols-2 gap-2 mb-4">
             <button
               onClick={() => setIsScanningCamera(true)}
-              className="min-h-[52px] bg-blue-600/20 hover:bg-blue-600/30 text-blue-300 border border-blue-500/40 rounded-xl font-bold text-xs flex items-center justify-center gap-2 active:scale-95 transition-all"
+              className="min-h-[48px] bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-xl font-bold text-xs active:scale-95"
             >
-              <CameraOutlined className="text-base" />
-              <span>Quét Camera</span>
+              Quét Camera
             </button>
 
             <button
               onClick={handleGenerateRandomQr}
-              className="min-h-[52px] bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 rounded-xl font-bold text-xs flex items-center justify-center gap-2 active:scale-95 transition-all"
+              className="min-h-[48px] bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 rounded-xl font-bold text-xs active:scale-95"
             >
-              <ThunderboltOutlined className="text-base" />
-              <span>Sinh Mã Mẫu</span>
+              Sinh Mã Test
             </button>
           </div>
 
-          {/* Nút Cực To XÁC NHẬN CẤP PHÔI */}
           <div className="mt-auto pt-2">
             <button
               onClick={handleConfirmSupply}
-              className="w-full min-h-[58px] bg-[#FF5800] hover:bg-[#e04e00] text-white rounded-xl font-black text-base tracking-wide flex items-center justify-center gap-2.5 shadow-lg shadow-[#FF5800]/25 active:scale-[0.98] transition-all"
+              className="w-full min-h-[58px] bg-[#FF5800] hover:bg-[#e04e00] text-white rounded-xl font-bold text-base tracking-wide flex items-center justify-center shadow-lg active:scale-[0.98] transition-all cursor-pointer"
             >
-              <CheckCircleOutlined className="text-xl" />
-              <span>XÁC NHẬN CẤP PHÔI</span>
+              XÁC NHẬN CẤP PHÔI
             </button>
-            <p className="text-[11px] text-center text-slate-400 mt-2">
-              ⚡ 1 Chạm kích hoạt ngay - Tự động quay lại Bước 1 sau khi nạp
-            </p>
           </div>
         </div>
       )}
 
-      {/* Overlay Camera Quét QR nếu người dùng mở camera */}
       {isScanningCamera && (
         <QrCameraOverlay
           title="Quét QR Rack Phôi"

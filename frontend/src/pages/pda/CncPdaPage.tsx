@@ -11,12 +11,10 @@ export const CncPdaPage: React.FC = () => {
   const fastArriveCnc = usePdaStore((s) => s.fastArriveCnc);
   const showToast = usePdaStore((s) => s.showToast);
 
-  const activeCount = cncStations.filter((s) => s.status !== 'EMPTY').length;
-
   return (
     <PdaLayoutWrapper
-      title="PDA Vận Hành Trạm CNC"
-      badge={`${activeCount}/${cncStations.length} Trạm Hoạt Động`}
+      title="DÂY CHUYỀN CNC"
+      stationSubtitle="Quản Lý Trạm Máy Gia Công"
     >
       <CncLineModal
         stations={cncStations}

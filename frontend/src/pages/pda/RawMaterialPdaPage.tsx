@@ -9,12 +9,10 @@ export const RawMaterialPdaPage: React.FC = () => {
   const supplyRawMaterial = usePdaStore((s) => s.supplyRawMaterial);
   const showToast = usePdaStore((s) => s.showToast);
 
-  const occupiedCount = positions.filter((p) => p.hasRack).length;
-
   return (
     <PdaLayoutWrapper
-      title="PDA Cấp Phôi Nguyên Liệu"
-      badge={`${occupiedCount}/7 Vị Trí Có Rack`}
+      title="KHU NGUYÊN LIỆU"
+      stationSubtitle="7 Vị Trí Cấp Phôi"
     >
       <RawMaterialWizard
         positions={positions}

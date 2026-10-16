@@ -1,11 +1,4 @@
 import React from 'react';
-import {
-  ClearOutlined,
-  CheckCircleOutlined,
-  ClockCircleOutlined,
-  ApartmentOutlined,
-  InboxOutlined,
-} from '@ant-design/icons';
 import type { WashingSlot } from '@/types/pda';
 
 interface WashingStationModalProps {
@@ -21,14 +14,13 @@ export const WashingStationModal: React.FC<WashingStationModalProps> = ({
   onSimulateArrive,
   showToast,
 }) => {
-  // 1-Chạm giải phóng Slot về TRỐNG ngay lập tức
   const handleRelease = (slot: WashingSlot) => {
     if ('vibrate' in navigator) navigator.vibrate?.(60);
 
     const rackCode = slot.currentRack?.rackId || 'Rack';
     onReleaseSlot(slot.id);
     showToast(
-      `Đã lấy đi rửa: Giải phóng [${slot.name}] (${rackCode}) thành công!`,
+      `Đã giải phóng ${slot.name} (${rackCode}) thành công!`,
       'success'
     );
   };
@@ -37,114 +29,83 @@ export const WashingStationModal: React.FC<WashingStationModalProps> = ({
 
   return (
     <div className="flex flex-col flex-1 p-3">
-      {/* Tiêu đề & Thống kê */}
-      <div className="mb-3 flex items-center justify-between">
-        <div>
-          <span className="text-xs uppercase tracking-wider text-slate-400 font-medium">
-            Khu Vực Hậu Cần
-          </span>
-          <h2 className="text-lg font-bold text-white flex items-center gap-2">
-            <span className="w-2.5 h-2.5 rounded-full bg-[#10B981]" />
-            KHU TẨY RỬA (4 SLOTS)
-          </h2>
-        </div>
-        <div className="text-right">
-          <span className="text-[11px] bg-slate-800 text-slate-300 px-2 py-1 rounded-lg border border-slate-700 font-mono">
-            {occupiedCount} / 4 Có Hàng
-          </span>
-        </div>
+      {/* Header trạng thái */}
+      <div className="mb-2.5 flex items-center justify-between">
+        <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">
+          4 VỊ TRÍ TIẾP NHẬN
+        </span>
+        <span className="text-[11px] font-mono font-bold bg-slate-800 text-slate-300 px-2 py-0.5 rounded">
+          {occupiedCount} / 4 Có Hàng
+        </span>
       </div>
 
-      {/* Danh sách 4 Slot cố định */}
-      <div className="flex flex-col gap-3 flex-1 overflow-y-auto pr-0.5">
+      {/* 4 Slot cố định */}
+      <div className="flex flex-col gap-2.5 flex-1 overflow-y-auto pr-0.5">
         {slots.map((slot) => {
-          const isEmpty = slot.status === 'EMPTY';
+          const isOccupied = slot.status === 'OCCUPIED';
           const rack = slot.currentRack;
 
           return (
             <div
               key={slot.id}
-              className={`rounded-2xl border p-3.5 transition-all shadow-sm ${
-                isEmpty
-                  ? 'bg-slate-800/40 border-slate-700/70 border-dashed'
-                  : 'bg-slate-800/90 border-[#FF5800]/60 ring-1 ring-[#FF5800]/20'
+              className={`rounded-xl border p-3 transition-all ${
+                isOccupied
+                  ? 'bg-slate-900 border-slate-700'
+                  : 'bg-slate-900/60 border-slate-800/80'
               }`}
             >
-              {/* Header Thẻ Slot */}
-              <div className="flex items-center justify-between pb-2 border-b border-slate-700/60 mb-2.5">
-                <div className="flex items-center gap-2">
-                  <span className="text-base font-black font-mono text-white">
-                    {slot.name}
-                  </span>
-                </div>
-
-                {isEmpty ? (
-                  <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-slate-700/60 text-slate-400 border border-slate-600">
-                    TRỐNG
-                  </span>
-                ) : (
-                  <span className="text-[11px] font-black px-2 py-0.5 rounded-full bg-[#FF5800]/20 text-[#FF5800] border border-[#FF5800]/40 flex items-center gap-1">
-                    <span className="w-2 h-2 rounded-full bg-[#FF5800] animate-ping" />
-                    CÓ RACK CHỜ RỬA
-                  </span>
-                )}
+              <div className="flex items-center justify-between pb-2 border-b border-slate-800 mb-2">
+                <span className="text-sm font-bold font-mono text-white">
+                  {slot.name}
+                </span>
+                <span
+                  className={`text-[10px] font-bold px-2 py-0.5 rounded font-mono ${
+                    isOccupied
+                      ? 'bg-emerald-500/20 text-emerald-300'
+                      : 'bg-slate-800 text-slate-400'
+                  }`}
+                >
+                  {isOccupied ? 'CÓ HÀNG' : 'TRỐNG'}
+                </span>
               </div>
 
-              {/* Slot Đang Trống */}
-              {isEmpty && (
-                <div className="py-2 flex flex-col items-center justify-center text-center">
-                  <InboxOutlined className="text-2xl text-slate-500 mb-1" />
-                  <div className="text-xs text-slate-400 font-medium">
-                    Vị trí sẵn sàng tiếp nhận hàng từ CNC
+              {isOccupied && rack && (
+                <div className="space-y-2">
+                  <div className="bg-slate-950 p-2 rounded-lg border border-slate-800 space-y-1 text-xs">
+                    <div className="flex justify-between">
+                      <span className="text-slate-400">Mã Rack:</span>
+                      <span className="font-mono font-bold text-white">{rack.rackId}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-slate-400">Model:</span>
+                      <span className="font-bold text-white truncate max-w-[200px]">{rack.model}</span>
+                    </div>
+                    <div className="flex justify-between text-[11px] text-slate-400 pt-0.5">
+                      <span>Nguồn: {rack.fromStation}</span>
+                      <span>Đến: {rack.arrivedAt}</span>
+                    </div>
                   </div>
-                  {/* Nút mô phỏng để test nhanh nhận rack từ CNC */}
-                  {onSimulateArrive && (
-                    <button
-                      onClick={() => onSimulateArrive(slot.id)}
-                      className="mt-2 text-[10px] text-slate-400 hover:text-slate-200 bg-slate-700/50 hover:bg-slate-700 px-2.5 py-1 rounded-lg border border-slate-600 active:scale-95 transition-all"
-                    >
-                      + Mô phỏng AMR đưa hàng vào
-                    </button>
-                  )}
+
+                  <button
+                    onClick={() => handleRelease(slot)}
+                    className="w-full min-h-[48px] bg-[#10B981] hover:bg-[#059669] text-white rounded-xl font-bold text-xs tracking-wide active:scale-[0.98] transition-all cursor-pointer"
+                  >
+                    BÁO XONG: ĐÃ LẤY ĐI RỬA (GIẢI PHÓNG SLOT)
+                  </button>
                 </div>
               )}
 
-              {/* Slot Đã Có Hàng */}
-              {!isEmpty && rack && (
-                <div className="space-y-3">
-                  {/* Chi tiết phôi / rack */}
-                  <div className="bg-slate-900/80 rounded-xl p-2.5 border border-slate-700 space-y-1.5 text-xs">
-                    <div className="flex justify-between items-center">
-                      <span className="text-slate-400">Mã Rack:</span>
-                      <span className="font-mono font-bold text-white bg-slate-800 px-2 py-0.5 rounded border border-slate-600">
-                        {rack.rackId}
-                      </span>
-                    </div>
-                    <div className="flex justify-between items-center">
-                      <span className="text-slate-400">Model chi tiết:</span>
-                      <span className="font-bold text-[#FF5800]">{rack.model}</span>
-                    </div>
-                    <div className="flex justify-between items-center text-[11px] text-slate-400 pt-0.5 border-t border-slate-800">
-                      <span className="flex items-center gap-1">
-                        <ApartmentOutlined /> {rack.fromStation}
-                      </span>
-                      <span className="flex items-center gap-1">
-                        <ClockCircleOutlined /> {rack.arrivedAt}
-                      </span>
-                    </div>
-                  </div>
-
-                  {/* Nút CỰC TO: BẤM UPDATE: ĐÃ LẤY ĐI RỬA */}
+              {!isOccupied && (
+                <div className="flex items-center justify-between pt-1">
+                  <span className="text-[11px] text-slate-500">
+                    Slot sẵn sàng nhận xe từ CNC
+                  </span>
                   <button
-                    onClick={() => handleRelease(slot)}
-                    className="w-full min-h-[56px] bg-[#FF5800] hover:bg-[#e04e00] text-white rounded-xl font-black text-sm tracking-wide flex items-center justify-center gap-2 shadow-lg shadow-[#FF5800]/25 active:scale-[0.98] transition-all"
+                    onClick={() => onSimulateArrive?.(slot.id)}
+                    className="text-[11px] text-slate-400 hover:text-slate-200 px-2 py-1 bg-slate-800 rounded font-mono active:scale-95 cursor-pointer"
                   >
-                    <ClearOutlined className="text-lg" />
-                    <span>BẤM UPDATE: ĐÃ LẤY ĐI RỬA</span>
+                    Mô phỏng xe đến
                   </button>
-                  <p className="text-[10px] text-center text-slate-400">
-                    ⚡ Chạm 1 lần để giải phóng slot về [TRỐNG] ngay lập tức
-                  </p>
                 </div>
               )}
             </div>
