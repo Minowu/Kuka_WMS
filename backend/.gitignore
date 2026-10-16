@@ -239,4 +239,6 @@ scripts/*
 !scripts/sync_location_occupancy_from_stock.py
 !scripts/mock_print_export.py
 !scripts/mock_print_layout.py
+!scripts/seed_production_core.py
+!scripts/test_dispatch_engine.py
 tests/

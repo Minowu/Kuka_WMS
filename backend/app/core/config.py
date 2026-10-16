@@ -1,4 +1,5 @@
 import json
+import os
 
 from pydantic_settings import BaseSettings
 from pydantic import field_validator
@@ -72,7 +73,7 @@ class Settings(BaseSettings):
         return _parse_int_id_list(value)
 
     class Config:
-        env_file = ".env"
+        env_file = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), ".env")
         case_sensitive = False
 
 settings = Settings()
