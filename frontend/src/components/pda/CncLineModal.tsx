@@ -68,10 +68,15 @@ export const CncLineModal: React.FC<CncLineModalProps> = ({
             >
               {/* Header trạm */}
               <div className="flex items-center justify-between pb-2 border-b border-slate-800 mb-2.5">
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 flex-wrap">
                   <span className="text-base font-bold font-mono text-white">
                     {st.name}
                   </span>
+                  {st.positionIndex && (
+                    <span className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded bg-blue-900/60 text-blue-300 border border-blue-700/50">
+                      P{st.positionIndex}
+                    </span>
+                  )}
                   <span className="text-[11px] font-mono font-bold px-2 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-700">
                     Level {st.assignedStageLevel}: {st.stageName}
                   </span>

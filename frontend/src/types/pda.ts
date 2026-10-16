@@ -16,7 +16,9 @@ export interface PartModel {
 }
 
 export interface CncMachineStation {
-  id: string; // 'CNC-01' -> 'CNC-04'
+  id: string; // 'CNC01_POS1' -> 'CNC04_POS2'
+  machineCode?: string; // 'CNC-01' -> 'CNC-04'
+  positionIndex?: number; // 1 hoặc 2
   name: string;
   assignedStageLevel: number; // Cấp độ công đoạn ĐƯỢC CHỈ ĐỊNH cho máy này (VD: CNC-01: 1, CNC-02: 1, CNC-03: 2, CNC-04: 3)
   stageName: string; // Tên công đoạn: 'Phay thô', 'Phay tinh', 'Hoàn tất CNC'

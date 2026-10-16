@@ -29,19 +29,35 @@ const INITIAL_MODELS: PartModel[] = [
   { id: 'model-7', code: 'MDL-07', name: 'Model 7: Bàn Nâng AMR', description: 'Mặt bàn nâng thủy lực tích hợp' },
 ];
 
-// 4 Trạm máy CNC với LEVEL ĐƯỢC CHỈ ĐỊNH CỐ ĐỊNH
+// 8 Vị trí CNC (4 máy x 2 vị trí độc lập Vào & Ra - Double Buffering / Zero CNC Starvation)
 const INITIAL_CNC_STATIONS: CncMachineStation[] = [
+  // Máy CNC-01 (Level 1: Phay Thô)
   {
-    id: 'CNC-01',
-    name: 'CNC-01',
+    id: 'CNC01_POS1',
+    machineCode: 'CNC-01',
+    positionIndex: 1,
+    name: 'CNC-01 (Vị trí 1)',
     assignedStageLevel: 1,
     stageName: 'Phay Thô',
     status: 'EMPTY',
     currentRack: null,
   },
   {
-    id: 'CNC-02',
-    name: 'CNC-02',
+    id: 'CNC01_POS2',
+    machineCode: 'CNC-01',
+    positionIndex: 2,
+    name: 'CNC-01 (Vị trí 2)',
+    assignedStageLevel: 1,
+    stageName: 'Phay Thô',
+    status: 'EMPTY',
+    currentRack: null,
+  },
+  // Máy CNC-02 (Level 1: Phay Thô Song Song)
+  {
+    id: 'CNC02_POS1',
+    machineCode: 'CNC-02',
+    positionIndex: 1,
+    name: 'CNC-02 (Vị trí 1)',
     assignedStageLevel: 1,
     stageName: 'Phay Thô (Song Song)',
     status: 'OCCUPIED',
@@ -53,8 +69,21 @@ const INITIAL_CNC_STATIONS: CncMachineStation[] = [
     },
   },
   {
-    id: 'CNC-03',
-    name: 'CNC-03',
+    id: 'CNC02_POS2',
+    machineCode: 'CNC-02',
+    positionIndex: 2,
+    name: 'CNC-02 (Vị trí 2)',
+    assignedStageLevel: 1,
+    stageName: 'Phay Thô (Song Song)',
+    status: 'EMPTY',
+    currentRack: null,
+  },
+  // Máy CNC-03 (Level 2: Phay Tinh)
+  {
+    id: 'CNC03_POS1',
+    machineCode: 'CNC-03',
+    positionIndex: 1,
+    name: 'CNC-03 (Vị trí 1)',
     assignedStageLevel: 2,
     stageName: 'Phay Tinh',
     status: 'OCCUPIED',
@@ -66,8 +95,21 @@ const INITIAL_CNC_STATIONS: CncMachineStation[] = [
     },
   },
   {
-    id: 'CNC-04',
-    name: 'CNC-04',
+    id: 'CNC03_POS2',
+    machineCode: 'CNC-03',
+    positionIndex: 2,
+    name: 'CNC-03 (Vị trí 2)',
+    assignedStageLevel: 2,
+    stageName: 'Phay Tinh',
+    status: 'EMPTY',
+    currentRack: null,
+  },
+  // Máy CNC-04 (Level 3: Khoan Tappi & Hoàn Tất CNC)
+  {
+    id: 'CNC04_POS1',
+    machineCode: 'CNC-04',
+    positionIndex: 1,
+    name: 'CNC-04 (Vị trí 1)',
     assignedStageLevel: 3,
     stageName: 'Khoan Tappi & Hoàn Tất',
     status: 'OCCUPIED',
@@ -77,6 +119,16 @@ const INITIAL_CNC_STATIONS: CncMachineStation[] = [
       level: 2, // Nhận phôi đã xong B2 (Level 2), chuẩn bị gia công lên Level 3
       startedAt: '09:15',
     },
+  },
+  {
+    id: 'CNC04_POS2',
+    machineCode: 'CNC-04',
+    positionIndex: 2,
+    name: 'CNC-04 (Vị trí 2)',
+    assignedStageLevel: 3,
+    stageName: 'Khoan Tappi & Hoàn Tất',
+    status: 'EMPTY',
+    currentRack: null,
   },
 ];
 
