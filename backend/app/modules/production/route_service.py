@@ -88,7 +88,11 @@ def create_route(db: Session, payload: ProductionRouteCreate) -> ProductionRoute
             route_id=route.id,
             step_number=step_data.step_number,
             stage_level=step_data.stage_level,
+            operation_code=step_data.operation_code.strip() if step_data.operation_code else f"OP{step_data.step_number * 10}",
             step_name=step_data.step_name.strip(),
+            machine_type=step_data.machine_type,
+            cycle_time_minutes=step_data.cycle_time_minutes or 15,
+            program_number=step_data.program_number.strip() if step_data.program_number else None,
             allowed_machines=step_data.allowed_machines,
             is_final_cnc_step=step_data.is_final_cnc_step,
         )
@@ -132,7 +136,11 @@ def update_route(
                 route_id=route.id,
                 step_number=step_data.step_number,
                 stage_level=step_data.stage_level,
+                operation_code=step_data.operation_code.strip() if step_data.operation_code else f"OP{step_data.step_number * 10}",
                 step_name=step_data.step_name.strip(),
+                machine_type=step_data.machine_type,
+                cycle_time_minutes=step_data.cycle_time_minutes or 15,
+                program_number=step_data.program_number.strip() if step_data.program_number else None,
                 allowed_machines=step_data.allowed_machines,
                 is_final_cnc_step=step_data.is_final_cnc_step,
             )
@@ -186,8 +194,8 @@ def get_available_machines(db: Session) -> List[AvailableMachineResponse]:
         m_code = loc.machine_code.strip()
         if m_code not in machine_map:
             machine_map[m_code] = []
-        if loc.code:
-            machine_map[m_code].append(loc.code)
+        pos_label = loc.bin_code or loc.location_code or f"POS_{loc.position_index}"
+        machine_map[m_code].append(pos_label)
 
     # If database has no locations configured yet, return standard 4 CNC machines as fallback
     if not machine_map:

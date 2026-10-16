@@ -78,6 +78,10 @@ class RouteStep(Base):
     step_number = Column(Integer, nullable=False)
     stage_level = Column(Integer, nullable=False)
     step_name = Column(String(100), nullable=False)
+    operation_code = Column(String(20), nullable=False, default="OP10", server_default="OP10")
+    machine_type = Column(String(30), nullable=True, default="CNC_MILLING", server_default="CNC_MILLING")
+    cycle_time_minutes = Column(Integer, nullable=True, default=15, server_default="15")
+    program_number = Column(String(50), nullable=True)
     allowed_machines = Column(
         JSON().with_variant(JSONB, "postgresql"),
         nullable=False,

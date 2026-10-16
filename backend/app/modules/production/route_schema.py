@@ -8,7 +8,11 @@ from pydantic import BaseModel, Field
 class RouteStepBase(BaseModel):
     step_number: int = Field(..., ge=1, description="Thứ tự bước gia công (1, 2, 3...)")
     stage_level: int = Field(..., ge=1, description="Công đoạn gia công (Stage Level 1, 2, 3...)")
-    step_name: str = Field(..., max_length=100, description="Tên công đoạn (ví dụ: Phay thô OP10)")
+    operation_code: str = Field(default="OP10", description="Mã nguyên công chuẩn cơ khí (ví dụ: OP10, OP20, OP30)")
+    step_name: str = Field(..., max_length=100, description="Tên công đoạn (ví dụ: Tiện thô mặt đầu & tiện bậc)")
+    machine_type: Optional[str] = Field(default="CNC_MILLING", description="Loại máy yêu cầu (CNC_LATHE, CNC_MILLING, GRINDING)")
+    cycle_time_minutes: Optional[int] = Field(default=15, ge=1, description="Thời gian gia công ước tính 1 mẻ xe (phút)")
+    program_number: Optional[str] = Field(None, max_length=50, description="Mã file chương trình CNC (ví dụ: O1001.NC)")
     allowed_machines: List[str] = Field(
         default_factory=list,
         description="Danh sách mã máy CNC được phép thực hiện (ví dụ: ['CNC-01', 'CNC-02'])",
@@ -27,7 +31,11 @@ class RouteStepUpdate(BaseModel):
     id: Optional[int] = None
     step_number: int
     stage_level: int
+    operation_code: str = "OP10"
     step_name: str
+    machine_type: Optional[str] = "CNC_MILLING"
+    cycle_time_minutes: Optional[int] = 15
+    program_number: Optional[str] = None
     allowed_machines: List[str] = Field(default_factory=list)
     is_final_cnc_step: bool = False
 
