@@ -1,10 +1,20 @@
-"""Item model for warehouse inventory."""
+"""Item model for warehouse / CNC production inventory."""
 
-from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, BigInteger, JSON, String, Text, func, or_, select
+from sqlalchemy import (
+    BigInteger,
+    Boolean,
+    Column,
+    DateTime,
+    ForeignKey,
+    Integer,
+    JSON,
+    String,
+    Text,
+    func,
+    select,
+)
 from sqlalchemy.dialects.postgresql import JSONB
-from sqlalchemy.orm import relationship
-from sqlalchemy.orm import column_property
-from app.core.config import settings
+from sqlalchemy.orm import column_property, relationship
 
 from app.core.database import Base
 from app.modules.warehouse.item_stock.item_stock_model import (
@@ -13,13 +23,13 @@ from app.modules.warehouse.item_stock.item_stock_model import (
     positive_stock_quantity_criterion,
 )
 from app.modules.warehouse.location_map.location_model import Location
-from app.modules.warehouse.warehouse_zone.warehouse_model import Zone
 
 
 class Item(Base):
-    """Item master data - represents physical items in warehouse."""
+    """Item master data - represents product models / workpieces in CNC production."""
 
     __tablename__ = "item"
+
     id = Column(Integer, primary_key=True, index=True)
     sku = Column(String(50), unique=True, nullable=False, index=True)
     name = Column(String(255), nullable=False)
@@ -43,6 +53,14 @@ class Item(Base):
 
     warehouse = relationship("Warehouse", lazy="joined")
 
+    @property
+    def unit_id(self):
+        return self.base_unit_id
+
+    @unit_id.setter
+    def unit_id(self, value):
+        self.base_unit_id = value
+
     quantity = column_property(
         select(func.coalesce(func.sum(ItemStock.quantity), 0))
         .where(
@@ -52,28 +70,13 @@ class Item(Base):
             positive_stock_quantity_criterion(),
             ItemStock.location_id.in_(
                 select(Location.id)
-                .join(Zone, Location.zone_id == Zone.id)
                 .where(
                     Location.warehouse_id == warehouse_id,
                     Location.is_active.is_(True),
-                    Zone.code.in_(settings.zone_storage),
                 )
-                .correlate_except(Location, Zone)
+                .correlate_except(Location)
             ),
         )
         .correlate_except(ItemStock)
         .scalar_subquery()
     )
-
-class QR_Code(Base):
-    __tablename__ = "qr_code"
-
-    id = Column(Integer, primary_key=True, index=True)
-    code = Column(String(50), unique=True, nullable=False, index=True)
-    item_id = Column(Integer, ForeignKey("item.id"), nullable=False, index=True)
-    item_stock_id = Column(Integer, ForeignKey("item_stock.id"), nullable=True, index=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    qr_type = Column(String(50), nullable=False, default="item")
-
-    item = relationship("Item", lazy="joined")
-    item_stock = relationship("ItemStock", foreign_keys=[item_stock_id], lazy="joined")

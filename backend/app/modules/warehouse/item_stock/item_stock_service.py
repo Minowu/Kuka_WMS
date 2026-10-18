@@ -20,7 +20,6 @@ from app.modules.warehouse.item_stock.item_stock_schema import (
     ItemStockUpdate,
 )
 from app.modules.warehouse.location_map.location_model import Location
-from app.modules.warehouse.warehouse_zone.warehouse_model import Zone
 
 
 def _stock_query(db: Session, *, include_inactive: bool = False):
@@ -158,11 +157,10 @@ def get_stock_split(db: Session, item_id: int) -> ItemStockSplitListResponse:
     stocks = (
         _stock_query(db)
         .join(Location, Location.id == ItemStock.location_id)
-        .join(Zone, Zone.id == Location.zone_id)
         .filter(
             ItemStock.item_id == item_id,
             ItemStock.status == "split",
-            Zone.code.in_(settings.zone_storage),
+            Location.is_active.is_(True),
             ItemStock.available_quantity > 0,
             positive_stock_quantity_criterion(),
             countable_stock_level_criterion(),

@@ -1,4 +1,4 @@
-"""Item API."""
+"""Item API (Product / CNC Model master data)."""
 
 from typing import Annotated, Optional
 
@@ -7,7 +7,7 @@ from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.core.dependencies import require_permission, get_current_user
+from app.core.dependencies import get_current_user, require_permission
 from app.modules.warehouse.item import item_service
 from app.modules.warehouse.item.item_schema import (
     ItemAnalyzeResponse,
@@ -18,12 +18,6 @@ from app.modules.warehouse.item.item_schema import (
     ItemListResponse,
     ItemResponse,
     ItemUpdate,
-    QRCodeCreate,
-    QRCodeListResponse,
-    QRCodePrintCreateBody,
-    QRCodeRecentListResponse,
-    QRCodeResponse,
-    QRCodeUpdate,
 )
 
 router = APIRouter(tags=["Item"])
@@ -165,182 +159,4 @@ def delete_item(item_id: int, db: DbSession):
         raise HTTPException(status_code=400, detail=str(e)) from e
     if not deleted:
         raise HTTPException(status_code=404, detail="Item not found")
-    return None
-
-
-# --- QR Code ---
-
-@router.get(
-    "/qr-codes",
-    response_model=QRCodeListResponse,
-    dependencies=[Depends(require_permission("item:read"))],
-)
-def list_qr_codes(
-    db: DbSession,
-    page: int = Query(1, ge=1),
-    page_size: int = Query(20, ge=1, le=100),
-    item_id: Optional[int] = Query(None),
-    item_stock_id: Optional[int] = Query(None),
-    q: Optional[str] = Query(None),
-):
-    return item_service.list_qr_codes(
-        db,
-        page=page,
-        page_size=page_size,
-        item_id=item_id,
-        item_stock_id=item_stock_id,
-        q=q,
-    )
-
-
-@router.get(
-    "/qr-codes/by-item/{item_id}/recent",
-    response_model=QRCodeRecentListResponse,
-    dependencies=[Depends(require_permission("item:read"))],
-)
-def list_recent_qr_codes_by_item(item_id: int, db: DbSession):
-    try:
-        return item_service.list_recent_qr_codes_by_item(db, item_id)
-    except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e)) from e
-
-
-@router.get(
-    "/qr-codes/recent",
-    response_model=QRCodeRecentListResponse,
-    dependencies=[Depends(require_permission("item:read"))],
-)
-def list_recent_qr_codes(
-    db: DbSession,
-    warehouse_id: Optional[int] = Query(None),
-    item_id: Optional[int] = Query(None),
-    page: int = Query(1, ge=1),
-    page_size: int = Query(20, ge=1, le=100),
-):
-    return item_service.list_recent_qr_codes(
-        db,
-        warehouse_id=warehouse_id,
-        item_id=item_id,
-        page=page,
-        page_size=page_size,
-    )
-
-
-@router.post(
-    "/qr-codes/preview",
-    dependencies=[Depends(require_permission("item:read"))],
-)
-def preview_qr_codes(
-    db: DbSession,
-    item_id: int = Query(..., gt=0),
-    quantity: int = Query(..., gt=0, le=50),
-    qr_type: str = Query("item"),
-):
-    try:
-        return item_service.preview_qr_codes(db, item_id, quantity, qr_type)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
-
-
-@router.post(
-    "/qr-codes/create",
-    dependencies=[Depends(require_permission("item:create"))],
-)
-def create_qr_codes_batch(
-    body: QRCodePrintCreateBody,
-    db: DbSession,
-    item_id: int = Query(..., gt=0),
-    quantity: int = Query(..., gt=0, le=50),
-):
-    try:
-        return item_service.create_qr_codes(
-            db,
-            item_id,
-            quantity,
-            codes=body.qr_ids,
-            display_codes=body.display_codes,
-            qr_type=body.qr_type,
-        )
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
-
-
-@router.post(
-    "/qr-codes/generate",
-    dependencies=[Depends(require_permission("item:create"))],
-)
-def generate_qr_codes(
-    db: DbSession,
-    item_id: int = Query(..., gt=0),
-    quantity: int = Query(..., gt=0, le=50),
-    qr_type: str = Query("item"),
-):
-    try:
-        preview = item_service.preview_qr_codes(db, item_id, quantity, qr_type)
-        item_service.create_qr_codes(
-            db,
-            item_id,
-            quantity,
-            codes=preview["qr_ids"],
-            display_codes=preview["display_codes"],
-            qr_type=qr_type,
-        )
-        return preview
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
-
-
-@router.post(
-    "/qr-codes",
-    response_model=QRCodeResponse,
-    status_code=status.HTTP_201_CREATED,
-    dependencies=[Depends(require_permission("item:create"))],
-)
-def create_qr_code(body: QRCodeCreate, db: DbSession):
-    try:
-        qr_code = item_service.create_qr_code(db, body)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
-    return QRCodeResponse.model_validate(qr_code)
-
-
-@router.get(
-    "/qr-codes/{qr_code_id}",
-    response_model=QRCodeResponse,
-    dependencies=[Depends(require_permission("item:read"))],
-)
-def get_qr_code(qr_code_id: int, db: DbSession):
-    qr_code = item_service.get_qr_code_by_id(db, qr_code_id)
-    if not qr_code:
-        raise HTTPException(status_code=404, detail="QR code not found")
-    return QRCodeResponse.model_validate(qr_code)
-
-
-@router.patch(
-    "/qr-codes/{qr_code_id}",
-    response_model=QRCodeResponse,
-    dependencies=[Depends(require_permission("item:update"))],
-)
-def update_qr_code(qr_code_id: int, body: QRCodeUpdate, db: DbSession):
-    try:
-        qr_code = item_service.update_qr_code(db, qr_code_id, body)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
-    if not qr_code:
-        raise HTTPException(status_code=404, detail="QR code not found")
-    return QRCodeResponse.model_validate(qr_code)
-
-
-@router.delete(
-    "/qr-codes/{qr_code_id}",
-    status_code=status.HTTP_204_NO_CONTENT,
-    dependencies=[Depends(require_permission("item:delete"))],
-)
-def delete_qr_code(qr_code_id: int, db: DbSession):
-    try:
-        deleted = item_service.delete_qr_code(db, qr_code_id)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
-    if not deleted:
-        raise HTTPException(status_code=404, detail="QR code not found")
     return None

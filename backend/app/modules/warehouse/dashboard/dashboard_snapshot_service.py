@@ -7,7 +7,6 @@ from zoneinfo import ZoneInfo
 from sqlalchemy import Numeric, cast, func
 from sqlalchemy.orm import Session
 
-from app.core.config import settings
 from app.modules.warehouse.item.item_model import Item
 from app.modules.warehouse.item_stock.item_stock_model import (
     ItemStock,
@@ -15,7 +14,6 @@ from app.modules.warehouse.item_stock.item_stock_model import (
     positive_stock_quantity_criterion,
 )
 from app.modules.warehouse.location_map.location_model import Location
-from app.modules.warehouse.warehouse_zone.warehouse_model import Warehouse, Zone
 
 VN_TZ = ZoneInfo("Asia/Ho_Chi_Minh")
 
@@ -32,7 +30,6 @@ def _storage_stock_filters(warehouse_id: int):
         countable_stock_level_criterion(),
         positive_stock_quantity_criterion(),
         Location.is_active.is_(True),
-        Zone.code.in_(settings.zone_storage),
     )
 
 
@@ -41,7 +38,6 @@ def compute_live_total_quantity(db: Session, warehouse_id: int) -> Decimal:
         db.query(func.coalesce(func.sum(ItemStock.quantity), 0))
         .join(Item, Item.id == ItemStock.item_id)
         .join(Location, Location.id == ItemStock.location_id)
-        .join(Zone, Zone.id == Location.zone_id)
         .filter(*_storage_stock_filters(warehouse_id))
         .scalar()
     )
@@ -65,7 +61,6 @@ def compute_live_total_inventory_value(db: Session, warehouse_id: int) -> Decima
         )
         .join(Item, Item.id == ItemStock.item_id)
         .join(Location, Location.id == ItemStock.location_id)
-        .join(Zone, Zone.id == Location.zone_id)
         .filter(*_storage_stock_filters(warehouse_id))
         .scalar()
     )

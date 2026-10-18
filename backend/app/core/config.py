@@ -39,17 +39,10 @@ class Settings(BaseSettings):
     access_token_expire_minutes: int = 60
     refresh_token_expire_minutes: int = 10080
 
-    #ICS
+    # ICS / KUKA Fleet Manager
     ics_base_url: str = "Your RCS Server path"
     inbound_process_code: str = "to_storage"
     outbound_process_code: str = "out_storage"
-
-    # Zone
-    zone_inbound: list[str] = ["Zone_1.1", "Zone_2.2"]
-    zone_outbound: list[str] = ["Zone_7"]
-    zone_storage: list[str] = ["Zone_3"]
-    zone_qc: list[str] = ["Zone_2.1"]
-    zone_split: list[str] = ["Zone_split"]
 
     # Warehouses using manual (full-form) print templates — JSON array or comma list, e.g. [2]
     manual_warehouse_ids: list[int] = []

@@ -1,14 +1,28 @@
 from sqlalchemy import (
-    Boolean, Column, DateTime, ForeignKey, Index, Integer, String, UniqueConstraint, func,
-    select, case, exists, or_, text,
+    Boolean,
+    Column,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    UniqueConstraint,
+    case,
+    exists,
+    func,
+    select,
+    text,
 )
-from sqlalchemy.orm import relationship, column_property
+from sqlalchemy.orm import column_property, relationship
+
 from app.core.database import Base
 from app.modules.warehouse.item_stock.item_stock_model import (
     ItemStock,
     countable_stock_level_criterion,
     positive_stock_quantity_criterion,
 )
+
+
 def _location_status_expression(location_id_col):
     return case(
         (
@@ -16,7 +30,6 @@ def _location_status_expression(location_id_col):
                 select(1)
                 .where(
                     ItemStock.location_id == location_id_col,
-                    ItemStock.quantity > 0,
                     ItemStock.is_active.is_(True),
                 )
                 .correlate_except(ItemStock)
@@ -68,7 +81,18 @@ class Location(Base):
     column = Column("column", String(10))  # 'column' is SQL keyword, use mapped name
     level = Column(String(10))
     node_name = Column(String(50))  # Additional node identifier
-    location_type = Column(String(30), nullable=False, default="CNC_SLOT", server_default="CNC_SLOT")  # RAW_MATERIAL, CNC_SLOT, WASHING_SLOT, EMPTY_CART_BUFFER
+    location_type = Column(
+        String(30),
+        nullable=False,
+        default="CNC_SLOT",
+        server_default="CNC_SLOT",
+    )  # RAW_MATERIAL, CNC_SLOT, WASHING_SLOT, EMPTY_CART_BUFFER
+    machine_id = Column(
+        Integer,
+        ForeignKey("machine.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
     machine_code = Column(String(50), nullable=True, index=True)  # E.g. 'CNC-01'
     position_index = Column(Integer, nullable=True)  # 1 or 2 for CNC stations
     default_stage_level = Column(
@@ -85,23 +109,12 @@ class Location(Base):
         nullable=False,
         index=True,
     )
-    zone_id = Column(
-        Integer,
-        ForeignKey("zone.id"),
-        nullable=True,
-        index=True,
-    )
     is_active = Column(Boolean, default=True, nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
     occupied_quantity = column_property(
-        select(
-            func.coalesce(
-                func.sum(ItemStock.quantity),
-                0
-            )
-        )
+        select(func.coalesce(func.sum(ItemStock.quantity), 0))
         .where(
             ItemStock.location_id == id,
             ItemStock.is_active.is_(True),
@@ -115,14 +128,18 @@ class Location(Base):
     status = column_property(_location_status_expression(id))
 
     warehouse = relationship("Warehouse", lazy="joined")
-    zone = relationship("Zone", lazy="joined")
+    machine = relationship("Machine", back_populates="locations", lazy="joined")
     stocks = relationship(
         "ItemStock",
         primaryjoin="Location.id == ItemStock.location_id",
         foreign_keys="[ItemStock.location_id]",
         back_populates="location",
-        lazy="selectin"
+        lazy="selectin",
     )
+
+    @property
+    def zone_id(self):
+        return None
 
 
 class WarehouseMap(Base):
@@ -135,15 +152,12 @@ class WarehouseMap(Base):
         nullable=False,
         index=True,
     )
-    zone_id = Column(
-        Integer,
-        ForeignKey("zone.id"),
-        nullable=True,
-        index=True,
-    )
     source = Column(String(255), nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     is_active = Column(Boolean, default=True, nullable=False)
 
-    zone = relationship("Zone", lazy="joined")
     warehouse = relationship("Warehouse", lazy="joined")
+
+    @property
+    def zone_id(self):
+        return None

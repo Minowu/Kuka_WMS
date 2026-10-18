@@ -14,6 +14,7 @@ class LocationCreate(BaseModel):
     level: Optional[str] = Field(None, max_length=10)
     node_name: Optional[str] = Field(None, max_length=50)
     location_type: Optional[str] = "CNC_SLOT"
+    machine_id: Optional[int] = None
     machine_code: Optional[str] = None
     position_index: Optional[int] = None
     default_stage_level: Optional[int] = None
@@ -32,6 +33,7 @@ class LocationUpdate(BaseModel):
     level: Optional[str] = Field(None, max_length=10)
     node_name: Optional[str] = Field(None, max_length=50)
     location_type: Optional[str] = None
+    machine_id: Optional[int] = None
     machine_code: Optional[str] = None
     position_index: Optional[int] = None
     default_stage_level: Optional[int] = None
@@ -52,6 +54,7 @@ class LocationResponse(BaseModel):
     level: Optional[str] = None
     node_name: Optional[str] = None
     location_type: Optional[str] = None
+    machine_id: Optional[int] = None
     machine_code: Optional[str] = None
     position_index: Optional[int] = None
     default_stage_level: Optional[int] = None
@@ -81,7 +84,6 @@ class LocationsByLogicResponse(BaseModel):
 class MapCreate(BaseModel):
     source: str = Field(..., min_length=1, max_length=255)
     warehouse_id: int
-    zone_id: Optional[int] = None
     is_active: bool = Field(default=True)
 
 

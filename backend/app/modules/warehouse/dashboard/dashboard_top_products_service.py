@@ -1,6 +1,5 @@
 """Top products by stock decoupled for CNC AMR architecture."""
 
-from datetime import date, timedelta
 from typing import Literal
 
 from sqlalchemy import func
@@ -12,12 +11,10 @@ from app.modules.warehouse.dashboard.dashboard_schema import (
 )
 from app.modules.warehouse.dashboard.dashboard_snapshot_service import (
     _storage_stock_filters,
-    vn_today,
 )
 from app.modules.warehouse.item.item_model import Item
 from app.modules.warehouse.item_stock.item_stock_model import ItemStock
 from app.modules.warehouse.location_map.location_model import Location
-from app.modules.warehouse.warehouse_zone.warehouse_model import Zone
 from app.modules.warehouse.warehouse_zone.warehouse_service import _ensure_warehouse_exists
 
 VN_TIMEZONE = "Asia/Ho_Chi_Minh"
@@ -53,7 +50,6 @@ def _top_stock(db: Session, *, warehouse_id: int) -> list[TopProductRow]:
         )
         .join(ItemStock, ItemStock.item_id == Item.id)
         .join(Location, Location.id == ItemStock.location_id)
-        .join(Zone, Zone.id == Location.zone_id)
         .filter(*_storage_stock_filters(warehouse_id))
         .group_by(Item.id, Item.sku, Item.name)
         .order_by(total_qty.desc())
