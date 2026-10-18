@@ -3,11 +3,7 @@ export interface RouteStep {
   route_id?: number;
   step_number: number;
   stage_level: number;
-  operation_code: string;
   step_name: string;
-  machine_type?: string;
-  cycle_time_minutes?: number;
-  program_number?: string;
   allowed_machines: string[];
   is_final_cnc_step: boolean;
   created_at?: string;
@@ -37,11 +33,7 @@ export interface ProductionRoute {
 export interface RouteStepInput {
   step_number: number;
   stage_level: number;
-  operation_code: string;
   step_name: string;
-  machine_type?: string;
-  cycle_time_minutes?: number;
-  program_number?: string;
   allowed_machines: string[];
   is_final_cnc_step: boolean;
 }
@@ -63,7 +55,10 @@ export interface ProductionRouteUpdate {
 }
 
 export interface AvailableMachine {
+  id?: number;
   machine_code: string;
+  machine_name?: string;
+  default_stage_level?: number;
   location_count: number;
   positions: string[];
 }

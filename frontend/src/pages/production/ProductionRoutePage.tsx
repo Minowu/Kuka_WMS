@@ -7,7 +7,6 @@ import {
   Modal,
   Form,
   Input,
-  InputNumber,
   Select,
   Switch,
   Card,
@@ -16,7 +15,6 @@ import {
   Typography,
   Divider,
   Badge,
-  Alert,
 } from 'antd';
 import {
   PlusOutlined,
@@ -26,9 +24,6 @@ import {
   EditOutlined,
   ArrowRightOutlined,
   ToolOutlined,
-  ClockCircleOutlined,
-  CodeOutlined,
-  InfoCircleOutlined,
 } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import {
@@ -48,14 +43,6 @@ import type {
 } from '@/types/productionRoute';
 
 const { Title, Text } = Typography;
-
-const MACHINE_TYPES = [
-  { label: 'Máy Tiện CNC (CNC Lathe)', value: 'CNC_LATHE' },
-  { label: 'Máy Phay CNC (CNC Milling)', value: 'CNC_MILLING' },
-  { label: 'Máy Mài Tròn/Phẳng (Grinding)', value: 'CNC_GRINDING' },
-  { label: 'Máy Cắt dây / Xung điện (EDM)', value: 'CNC_EDM' },
-  { label: 'Trung tâm Gia công 5 trục (5-Axis VMC)', value: '5AXIS_CNC' },
-];
 
 export default function ProductionRoutePage() {
   const selectedWarehouseId = useAppStore((state) => state.selectedWarehouseId) || 1;
@@ -86,7 +73,7 @@ export default function ProductionRoutePage() {
   // Route Detail for editing
   const { data: detailData } = useProductionRouteDetail(editingRoute?.id);
 
-  // Open modal for Create with realistic mechanical engineering default steps
+  // Open modal for Create with clean 3NF default steps
   const handleOpenCreate = () => {
     setEditingRoute(null);
     form.resetFields();
@@ -97,33 +84,21 @@ export default function ProductionRoutePage() {
         {
           step_number: 1,
           stage_level: 1,
-          operation_code: 'OP10',
           step_name: 'Tiện thô mặt đầu & tiện bậc ngoài',
-          machine_type: 'CNC_LATHE',
-          cycle_time_minutes: 12,
-          program_number: 'O1001.NC',
           allowed_machines: ['CNC-01', 'CNC-02'],
           is_final_cnc_step: false,
         },
         {
           step_number: 2,
           stage_level: 2,
-          operation_code: 'OP20',
           step_name: 'Phay rãnh then & khoan 4 lỗ taro M8',
-          machine_type: 'CNC_MILLING',
-          cycle_time_minutes: 18,
-          program_number: 'O2001.NC',
           allowed_machines: ['CNC-03'],
           is_final_cnc_step: false,
         },
         {
           step_number: 3,
           stage_level: 3,
-          operation_code: 'OP30',
           step_name: 'Tiện tinh & mài bóng đạt Ra 0.8',
-          machine_type: 'CNC_LATHE',
-          cycle_time_minutes: 15,
-          program_number: 'O3001.NC',
           allowed_machines: ['CNC-04'],
           is_final_cnc_step: true,
         },
@@ -147,17 +122,14 @@ export default function ProductionRoutePage() {
         item_id: detailData.item_id,
         version: detailData.version,
         is_active: detailData.is_active,
-        steps: detailData.steps?.map((s, idx) => ({
-          step_number: s.step_number || idx + 1,
-          stage_level: s.stage_level || idx + 1,
-          operation_code: s.operation_code || `OP${(idx + 1) * 10}`,
-          step_name: s.step_name,
-          machine_type: s.machine_type || 'CNC_MILLING',
-          cycle_time_minutes: s.cycle_time_minutes || 15,
-          program_number: s.program_number || '',
-          allowed_machines: s.allowed_machines || [],
-          is_final_cnc_step: !!s.is_final_cnc_step,
-        })) || [],
+        steps:
+          detailData.steps?.map((s, idx) => ({
+            step_number: s.step_number || idx + 1,
+            stage_level: s.stage_level || idx + 1,
+            step_name: s.step_name,
+            allowed_machines: s.allowed_machines || [],
+            is_final_cnc_step: !!s.is_final_cnc_step,
+          })) || [],
       });
     }
   }, [editingRoute, detailData, isModalOpen, form]);
@@ -170,11 +142,7 @@ export default function ProductionRoutePage() {
         (s: any, idx: number) => ({
           step_number: idx + 1,
           stage_level: Number(s.stage_level),
-          operation_code: (s.operation_code || `OP${(idx + 1) * 10}`).trim().toUpperCase(),
           step_name: s.step_name.trim(),
-          machine_type: s.machine_type || 'CNC_MILLING',
-          cycle_time_minutes: Number(s.cycle_time_minutes) || 15,
-          program_number: s.program_number?.trim() || undefined,
           allowed_machines: s.allowed_machines || [],
           is_final_cnc_step: !!s.is_final_cnc_step,
         }),
@@ -273,7 +241,7 @@ export default function ProductionRoutePage() {
       align: 'center',
       render: (count: number) => (
         <Badge
-          count={`${count} nguyên công`}
+          count={`${count} công đoạn`}
           style={{ backgroundColor: '#0284c7', fontWeight: 600 }}
         />
       ),
@@ -349,10 +317,10 @@ export default function ProductionRoutePage() {
             </div>
             <div>
               <Title level={3} className="!mb-0 text-slate-800">
-                Quy trình Công nghệ Gia công CNC (Routing Sheet)
+                Quy trình Công nghệ Gia công CNC (Routing 3NF)
               </Title>
               <Text type="secondary" className="text-sm">
-                Thiết lập chuỗi nguyên công OP10, OP20, OP30, máy CNC thực hiện và thời gian chu kỳ điều phối AMR
+                Thiết lập chuỗi công đoạn Stage Level và danh sách máy CNC thực hiện để điều phối AMR tự động
               </Text>
             </div>
           </div>
@@ -410,7 +378,7 @@ export default function ProductionRoutePage() {
         open={isModalOpen}
         onCancel={() => setIsModalOpen(false)}
         onOk={handleFormSubmit}
-        width={850}
+        width={800}
         okText={editingRoute ? 'Lưu thay đổi' : 'Tạo quy trình'}
         cancelText="Hủy"
         confirmLoading={createMutation.isPending || updateMutation.isPending}
@@ -473,7 +441,7 @@ export default function ProductionRoutePage() {
           </Form.Item>
 
           <Divider orientation="left" className="!text-sm !font-bold text-slate-700">
-            DANH SÁCH CÁC NGUYÊN CÔNG GIA CÔNG (OPERATIONS: OP10, OP20...)
+            DANH SÁCH CÁC CÔNG ĐOẠN GIA CÔNG (STAGE LEVEL & MÁY CNC)
           </Divider>
 
           <Form.List name="steps">
@@ -490,7 +458,7 @@ export default function ProductionRoutePage() {
                           <Tag color="red" className="font-mono font-bold">
                             BƯỚC {index + 1}
                           </Tag>
-                          <span>CÔNG ĐOẠN LEVEL {index + 1}</span>
+                          <span>CÔNG ĐOẠN GIA CÔNG</span>
                         </span>
                         {fields.length > 1 && (
                           <Button
@@ -506,22 +474,12 @@ export default function ProductionRoutePage() {
                       </div>
                     }
                   >
-                    <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
-                      <Form.Item
-                        {...field}
-                        name={[field.name, 'operation_code']}
-                        label="Mã OP"
-                        rules={[{ required: true, message: 'Nhập mã OP' }]}
-                        className="!mb-2"
-                      >
-                        <Input placeholder="OP10" className="font-mono uppercase font-bold" />
-                      </Form.Item>
-
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                       <Form.Item
                         {...field}
                         name={[field.name, 'step_name']}
-                        label="Tên nguyên công"
-                        rules={[{ required: true, message: 'Nhập tên nguyên công' }]}
+                        label="Tên công đoạn"
+                        rules={[{ required: true, message: 'Nhập tên công đoạn' }]}
                         className="md:col-span-2 !mb-2"
                       >
                         <Input placeholder="Ví dụ: Tiện thô mặt đầu & tiện bậc" />
@@ -544,46 +502,17 @@ export default function ProductionRoutePage() {
                       </Form.Item>
                     </div>
 
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mt-1">
-                      <Form.Item
-                        {...field}
-                        name={[field.name, 'machine_type']}
-                        label="Loại máy yêu cầu"
-                        className="!mb-2"
-                      >
-                        <Select options={MACHINE_TYPES} placeholder="Chọn loại máy" />
-                      </Form.Item>
-
-                      <Form.Item
-                        {...field}
-                        name={[field.name, 'cycle_time_minutes']}
-                        label="Thời gian chu kỳ (phút/xe)"
-                        className="!mb-2"
-                      >
-                        <InputNumber min={1} max={999} className="w-full" prefix={<ClockCircleOutlined />} />
-                      </Form.Item>
-
-                      <Form.Item
-                        {...field}
-                        name={[field.name, 'program_number']}
-                        label="Mã chương trình CNC"
-                        className="!mb-2"
-                      >
-                        <Input placeholder="O1001.NC" className="font-mono" prefix={<CodeOutlined />} />
-                      </Form.Item>
-                    </div>
-
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-1 pt-2 border-t border-slate-100">
                       <Form.Item
                         {...field}
                         name={[field.name, 'allowed_machines']}
-                        label="Máy CNC được phép thực hiện (Gán theo Layout xưởng)"
+                        label="Máy CNC được phép thực hiện (Liên kết bảng Machine)"
                         rules={[{ required: true, message: 'Chọn ít nhất 1 máy' }]}
                         className="!mb-2"
                       >
                         <Select
                           mode="multiple"
-                          placeholder="Chọn các máy CNC thực hiện nguyên công này"
+                          placeholder="Chọn các máy CNC thực hiện công đoạn này"
                           options={machines.map((m) => ({
                             label: `${m.machine_code} (${m.location_count} vị trí đỗ: ${m.positions.join(', ')})`,
                             value: m.machine_code,
@@ -613,11 +542,7 @@ export default function ProductionRoutePage() {
                     add({
                       step_number: fields.length + 1,
                       stage_level: fields.length + 1,
-                      operation_code: `OP${(fields.length + 1) * 10}`,
-                      step_name: `Nguyên công ${fields.length + 1}`,
-                      machine_type: 'CNC_MILLING',
-                      cycle_time_minutes: 15,
-                      program_number: '',
+                      step_name: `Công đoạn ${fields.length + 1}`,
                       allowed_machines: [],
                       is_final_cnc_step: false,
                     })
@@ -626,7 +551,7 @@ export default function ProductionRoutePage() {
                   icon={<PlusOutlined />}
                   className="h-10 text-amber-600 border-amber-300 hover:border-amber-500 font-medium"
                 >
-                  + Thêm nguyên công gia công (OP)
+                  + Thêm công đoạn gia công
                 </Button>
               </div>
             )}
@@ -658,7 +583,7 @@ function RouteDetailTimeline({ routeId }: { routeId: number }) {
   return (
     <div className="p-4 bg-slate-50/70 rounded-xl border border-slate-200">
       <div className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-3">
-        Sơ đồ luồng công nghệ & Chu kỳ gia công KUKA AMR:
+        Sơ đồ luồng công nghệ & Chu kỳ điều phối KUKA AMR:
       </div>
       <div className="flex flex-wrap items-center gap-3">
         {/* Nguyên liệu xuất phát */}
@@ -668,7 +593,7 @@ function RouteDetailTimeline({ routeId }: { routeId: number }) {
           </div>
           <div>
             <div className="font-semibold text-xs text-slate-800">Kho Nguyên Liệu</div>
-            <div className="text-[11px] text-slate-400">Phôi thô đúc/cắt (FIFO)</div>
+            <div className="text-[11px] text-slate-400">Quét QR Rack + Cấp phôi (FIFO)</div>
           </div>
         </div>
 
@@ -685,61 +610,33 @@ function RouteDetailTimeline({ routeId }: { routeId: number }) {
               }`}
             >
               <div className="flex items-center gap-2 mb-1">
-                <Tag color="volcano" className="!mr-0 font-bold font-mono">
-                  {s.operation_code || `OP${s.step_number * 10}`}
-                </Tag>
                 <Tag color={s.is_final_cnc_step ? 'orange' : 'blue'} className="!mr-0 font-medium">
                   Level {s.stage_level}
                 </Tag>
                 <span className="font-semibold text-xs text-slate-800">{s.step_name}</span>
               </div>
 
-              <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
-                {s.machine_type && (
-                  <Tag color="purple" className="text-[10px] !mr-0">
-                    {s.machine_type.replace('CNC_', '')}
-                  </Tag>
-                )}
-                {s.cycle_time_minutes && (
-                  <Tag color="geekblue" className="text-[10px] !mr-0">
-                    ⏱ {s.cycle_time_minutes}p
-                  </Tag>
-                )}
-                {s.program_number && (
-                  <Tag color="default" className="text-[10px] !mr-0 font-mono">
-                    {s.program_number}
-                  </Tag>
-                )}
-                <span className="text-[11px] text-slate-400 ml-1">Máy:</span>
-                {(s.allowed_machines || []).map((m) => (
-                  <Tag key={m} color="cyan" className="text-[10px] !mr-0.5 font-mono">
+              <div className="flex items-center gap-1 flex-wrap mt-2 pt-1.5 border-t border-slate-100">
+                <span className="text-[11px] text-slate-400">Máy cho phép:</span>
+                {s.allowed_machines?.map((m) => (
+                  <Tag key={m} color="geekblue" className="!m-0 text-[11px] font-mono">
                     {m}
                   </Tag>
                 ))}
-                {s.is_final_cnc_step && (
-                  <Tag color="red" className="text-[10px] !mr-0 font-bold">
-                    🚀 CHUYỂN TẨY RỬA
-                  </Tag>
-                )}
               </div>
             </div>
-
-            {idx < steps.length - 1 ? (
-              <ArrowRightOutlined className="text-slate-400" />
-            ) : null}
+            <ArrowRightOutlined className="text-slate-400" />
           </React.Fragment>
         ))}
 
-        <ArrowRightOutlined className="text-slate-400" />
-
-        {/* Tẩy Rửa */}
+        {/* Tẩy rửa */}
         <div className="bg-emerald-50 p-3 rounded-lg border border-emerald-300 shadow-sm flex items-center gap-2">
-          <div className="w-8 h-8 rounded bg-emerald-100 flex items-center justify-center font-bold text-xs text-emerald-700">
+          <div className="w-8 h-8 rounded bg-emerald-600 text-white flex items-center justify-center font-bold text-xs">
             WASH
           </div>
           <div>
-            <div className="font-semibold text-xs text-emerald-900">Khu Tẩy Rửa</div>
-            <div className="text-[11px] text-emerald-600">Slot 1 - 4 (Giải phóng xe)</div>
+            <div className="font-semibold text-xs text-emerald-900">Trạm Tẩy Rửa</div>
+            <div className="text-[11px] text-emerald-700">Hoàn thiện & Trả xe rỗng</div>
           </div>
         </div>
       </div>

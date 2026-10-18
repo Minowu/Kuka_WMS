@@ -1,25 +1,22 @@
-"""Schemas for Production Route and Route Step management."""
+"""Pydantic schemas for Production Routing, Rack Registration & AMR Dispatch API."""
 
 from datetime import datetime
-from typing import List, Optional
-from pydantic import BaseModel, Field
+from typing import Optional
+
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class RouteStepBase(BaseModel):
-    step_number: int = Field(..., ge=1, description="Thứ tự bước gia công (1, 2, 3...)")
-    stage_level: int = Field(..., ge=1, description="Công đoạn gia công (Stage Level 1, 2, 3...)")
-    operation_code: str = Field(default="OP10", description="Mã nguyên công chuẩn cơ khí (ví dụ: OP10, OP20, OP30)")
-    step_name: str = Field(..., max_length=100, description="Tên công đoạn (ví dụ: Tiện thô mặt đầu & tiện bậc)")
-    machine_type: Optional[str] = Field(default="CNC_MILLING", description="Loại máy yêu cầu (CNC_LATHE, CNC_MILLING, GRINDING)")
-    cycle_time_minutes: Optional[int] = Field(default=15, ge=1, description="Thời gian gia công ước tính 1 mẻ xe (phút)")
-    program_number: Optional[str] = Field(None, max_length=50, description="Mã file chương trình CNC (ví dụ: O1001.NC)")
-    allowed_machines: List[str] = Field(
+    step_number: int = Field(..., ge=1, description="Thứ tự bước trong quy trình (1, 2, 3...)")
+    stage_level: int = Field(..., ge=1, description="Cấp độ công đoạn gia công (Level 1, 2, 3...)")
+    step_name: str = Field(..., min_length=1, max_length=100, description="Tên nguyên công (VD: Tiện thô mặt đầu)")
+    allowed_machines: list[str] = Field(
         default_factory=list,
-        description="Danh sách mã máy CNC được phép thực hiện (ví dụ: ['CNC-01', 'CNC-02'])",
+        description="Danh sách mã máy CNC được phép thực hiện (VD: ['CNC-01', 'CNC-02'])",
     )
     is_final_cnc_step: bool = Field(
         default=False,
-        description="Là công đoạn CNC cuối cùng (AMR tự động chuyển sang Khu Tẩy Rửa khi hoàn thành)",
+        description="True nếu đây là nguyên công CNC cuối cùng trước khi chuyển sang Tẩy rửa",
     )
 
 
@@ -27,79 +24,101 @@ class RouteStepCreate(RouteStepBase):
     pass
 
 
-class RouteStepUpdate(BaseModel):
-    id: Optional[int] = None
-    step_number: int
-    stage_level: int
-    operation_code: str = "OP10"
-    step_name: str
-    machine_type: Optional[str] = "CNC_MILLING"
-    cycle_time_minutes: Optional[int] = 15
-    program_number: Optional[str] = None
-    allowed_machines: List[str] = Field(default_factory=list)
-    is_final_cnc_step: bool = False
-
-
 class RouteStepResponse(RouteStepBase):
     id: int
     route_id: int
     created_at: Optional[datetime] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class ItemSummary(BaseModel):
     id: int
     sku: str
     name: str
-    standard_quantity_per_cart: Optional[int] = 120
+    standard_quantity_per_cart: int = 120
 
-    class Config:
-        from_attributes = True
-
-
-class ProductionRouteBase(BaseModel):
-    route_code: str = Field(..., max_length=50, description="Mã quy trình (ví dụ: RT-MDL01-V1)")
-    route_name: str = Field(..., max_length=100, description="Tên quy trình gia công")
-    item_id: int = Field(..., description="ID sản phẩm / Model chi tiết")
-    version: int = Field(default=1, ge=1, description="Phiên bản quy trình")
-    is_active: bool = Field(default=True, description="Trạng thái kích hoạt áp dụng")
+    model_config = ConfigDict(from_attributes=True)
 
 
-class ProductionRouteCreate(ProductionRouteBase):
-    steps: List[RouteStepCreate] = Field(
-        default_factory=list,
-        description="Danh sách các bước công nghệ gia công tuần tự",
-    )
+class ProductionRouteCreate(BaseModel):
+    route_code: str = Field(..., min_length=1, max_length=50, description="Mã quy trình (VD: RT-MDL01-V1)")
+    route_name: str = Field(..., min_length=1, max_length=100, description="Tên quy trình công nghệ")
+    item_id: int = Field(..., gt=0, description="ID của Model sản phẩm (Item)")
+    version: int = Field(default=1, ge=1)
+    is_active: bool = Field(default=True)
+    steps: list[RouteStepCreate] = Field(default_factory=list)
 
 
 class ProductionRouteUpdate(BaseModel):
-    route_name: Optional[str] = None
-    version: Optional[int] = None
+    route_name: Optional[str] = Field(None, min_length=1, max_length=100)
+    version: Optional[int] = Field(None, ge=1)
     is_active: Optional[bool] = None
-    steps: Optional[List[RouteStepCreate]] = None
+    steps: Optional[list[RouteStepCreate]] = None
 
 
-class ProductionRouteResponse(ProductionRouteBase):
+class ProductionRouteResponse(BaseModel):
     id: int
+    route_code: str
+    route_name: str
+    item_id: int
+    version: int
+    is_active: bool
+    step_count: int = 0
+    item: Optional[ItemSummary] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
-    item: Optional[ItemSummary] = None
-    step_count: int = 0
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class ProductionRouteDetailResponse(ProductionRouteResponse):
-    steps: List[RouteStepResponse] = []
-
-    class Config:
-        from_attributes = True
+    steps: list[RouteStepResponse] = Field(default_factory=list)
 
 
 class AvailableMachineResponse(BaseModel):
+    id: Optional[int] = None
     machine_code: str
-    location_count: int = 0
-    positions: List[str] = []
+    machine_name: Optional[str] = None
+    default_stage_level: Optional[int] = None
+    location_count: int
+    positions: list[str] = Field(default_factory=list)
+
+
+class RackRegistrationRequest(BaseModel):
+    location_id: int = Field(..., gt=0, description="ID vị trí khu Nguyên liệu (RAW_MATERIAL)")
+    item_id: int = Field(..., gt=0, description="ID Model sản phẩm (Item)")
+    cart_code: str = Field(..., min_length=1, max_length=50, description="Mã QR của Rack/Xe phôi (tái sử dụng)")
+    quantity: Optional[int] = Field(None, gt=0, description="Số lượng phôi trên rack (mặc định theo chuẩn của Model)")
+    lot_number: Optional[str] = Field(None, max_length=100, description="Mã lô sản xuất (tùy chọn)")
+
+
+class RackRegistrationResponse(BaseModel):
+    cart_id: int
+    cart_code: str
+    item_id: int
+    sku: str
+    location_id: int
+    location_code: str
+    quantity: int
+    current_stage_level: int
+    is_locked: bool
+    fleet_inserted: bool
+    resolved_queue_count: int = 0
+    dispatched_task_code: Optional[str] = None
+
+
+class CallMaterialRequest(BaseModel):
+    destination_location_id: int = Field(..., gt=0, description="ID vị trí máy CNC đang gọi phôi")
+    item_id: int = Field(..., gt=0, description="ID Model sản phẩm cần gọi")
+    required_stage_level: int = Field(default=0, ge=0, description="Stage level cần gọi (mặc định 0: phôi thô)")
+    priority: int = Field(default=10, ge=1)
+
+
+class CompleteStageRequest(BaseModel):
+    cart_code: str = Field(..., min_length=1, max_length=50, description="Mã QR của Rack vừa gia công xong")
+    notes: Optional[str] = None
+
+
+class CartActionRequest(BaseModel):
+    cart_code: str = Field(..., min_length=1, max_length=50, description="Mã QR của Rack/Xe phôi")
