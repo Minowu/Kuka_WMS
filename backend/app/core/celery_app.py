@@ -23,6 +23,7 @@ celery_app = Celery(
     backend=settings.celery_broker_result_url,
     include=[
         "app.modules.warehouse.notificcation.notification_celery_task",
+        "app.modules.production.production_celery_task",
     ],
 )
 
@@ -52,6 +53,7 @@ celery_app.conf.update(
     },
     task_routes={
         "notification.*": {"queue": QUEUE_LOGIC},
+        "robot.*": {"queue": QUEUE_STATUS},
     },
     beat_schedule={},
 )

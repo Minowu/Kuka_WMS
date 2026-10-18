@@ -1,162 +1,243 @@
-"""Test script for KUKA AMR Dispatch Engine.
+"""
+End-to-End Verification Script for CNC Production & KUKA AMR Dispatch Engine (3NF).
 
 Verifies:
-1. Euclidean distance calculation and nearest cart selection.
-2. Material request dispatching and cart locking.
-3. Intermediate stage completion and automated queue resolution.
-4. Final stage completion and automatic washing transfer.
-5. Wash slot release and empty cart return to buffer.
+1. User Location Assignment Constraint (Max 3 locations per user).
+2. Scenario 1 & 2 (FIFO Cart Selection + POS1/POS2 Buffering at CNC-01).
+3. Scenario 3 (Multi-Stage Progression Level 1 -> Level 2 -> Level 3 -> Washing -> Empty Cart Return).
+4. Queueing (`TransportQueue` WAITING_CART) & Raw Material Rack QR Registration (`register_rack_at_raw_material` reusing rack QR + auto-dispatching to waiting CNC).
+5. KUKA Fleet Webhook Callback (`receive_task_status` -> `TaskStatus` + `FleetTask` + `ItemStock` settlement).
 """
 
-import os
+from pathlib import Path
 import sys
 
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+BACKEND_DIR = Path(__file__).resolve().parents[1]
+if str(BACKEND_DIR) not in sys.path:
+    sys.path.insert(0, str(BACKEND_DIR))
 
-try:
-    if hasattr(sys.stdout, "reconfigure"):
-        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
-except Exception:
-    pass
-
-from sqlalchemy.orm import Session
 from app.core.database import SessionLocal
 from app.modules.auth.auth_model import User
-from app.modules.warehouse.location_map.location_model import Location
-from app.modules.warehouse.item_stock.item_stock_model import ItemStock
-from app.modules.warehouse.item.item_model import Item
+from app.modules.production.dispatch_service import dispatch_service
 from app.modules.production.production_models import (
-    TransportRequest,
-    TransportQueue,
     FleetTask,
+    Machine,
     ProductionRecord,
+    RouteStepMachine,
+    TaskStatus,
+    TransportQueue,
+    TransportRequest,
+    UserLocation,
 )
-from app.modules.production.dispatch_service import DispatchService
+from app.modules.warehouse.item.item_model import Item
+from app.modules.warehouse.item_stock.item_stock_model import ItemStock
+from app.modules.warehouse.location_map.location_model import Location
+from scripts.seed_production_core import seed_production_core
 
 
-def run_tests():
-    db: Session = SessionLocal()
+def reset_runtime_tables(db) -> None:
+    """Clear runtime dispatch tables before running deterministic test scenarios."""
+    db.query(TaskStatus).delete()
+    db.query(ProductionRecord).delete()
+    db.query(FleetTask).delete()
+    db.query(TransportQueue).delete()
+    db.query(TransportRequest).delete()
+    db.query(UserLocation).delete()
+    db.commit()
+
+
+def run_verification() -> None:
+    print("🚀 Bắt đầu kiểm thử End-to-End Dispatch Engine (3NF + Fleet Webhook + Rack QR)...")
+    db = SessionLocal()
     try:
-        # Reset state for idempotent test runs
-        vt1 = db.query(Location).filter(Location.location_code == "VT-01").first()
-        rck1 = db.query(ItemStock).filter(ItemStock.cart_code == "RCK-VT01-1021").first()
-        if vt1 and rck1:
-            rck1.location_id = vt1.id
-            rck1.current_stage_level = 0
-            rck1.is_locked = False
-            rck1.locked_by_task_id = None
-            rck1.destination_location_id = None
-            rck1.status = "available"
-            db.commit()
+        reset_runtime_tables(db)
+    finally:
+        db.close()
 
-        cnc4 = db.query(Location).filter(Location.location_code == "CNC04_POS1").first()
-        rck4 = db.query(ItemStock).filter(ItemStock.cart_code == "RCK-CNC04-4101").first()
-        if cnc4 and rck4:
-            rck4.location_id = cnc4.id
-            rck4.current_stage_level = 3
-            rck4.is_locked = False
-            rck4.locked_by_task_id = None
-            rck4.destination_location_id = None
-            rck4.status = "available"
-            db.commit()
+    seed_production_core()
 
-        # Cancel any pending/assigned transport requests to CNC-01 test positions
-        cnc01_locs = db.query(Location.id).filter(Location.machine_code == "CNC-01").all()
-        cnc01_ids = [l[0] for l in cnc01_locs]
-        db.query(TransportRequest).filter(
-            TransportRequest.destination_location_id.in_(cnc01_ids),
-            TransportRequest.status.in_(["pending", "assigned", "in_progress"]),
-        ).update({"status": "cancelled"}, synchronize_session=False)
-        db.commit()
+    db = SessionLocal()
+    try:
+        # Verify 3NF Machine & RouteStepMachine tables
+        machine_count = db.query(Machine).count()
+        step_machine_count = db.query(RouteStepMachine).count()
+        assert machine_count >= 4, f"Expected >= 4 Machine rows, got {machine_count}"
+        assert step_machine_count >= 5, f"Expected >= 5 RouteStepMachine rows, got {step_machine_count}"
+        print(f"  ✔ [Test 0] Chuẩn hóa 3NF thành công: {machine_count} Machines, {step_machine_count} RouteStepMachine links!")
 
-        print("\n--- TEST 1: Nearest Cart Selection via 2D Euclidean Distance ---")
-        cnc01_p1 = db.query(Location).filter(Location.location_code == "CNC01_POS1").first()
-        m1 = db.query(Item).filter(Item.sku == "MDL-01").first()
-        assert cnc01_p1 is not None, "CNC01_POS1 not found"
-        assert m1 is not None, "MDL-01 not found"
+        # Lookup seeded entities
+        model_a = db.query(Item).filter(Item.sku == "MODEL-A").first()
+        model_b = db.query(Item).filter(Item.sku == "MODEL-B").first()
+        cnc01_pos1 = db.query(Location).filter(Location.location_code == "CNC-01-POS1").first()
+        cnc01_pos2 = db.query(Location).filter(Location.location_code == "CNC-01-POS2").first()
+        cnc02_pos1 = db.query(Location).filter(Location.location_code == "CNC-02-POS1").first()
+        raw03 = db.query(Location).filter(Location.location_code == "RAW-03").first()
 
-        cart = DispatchService.find_nearest_available_cart(db, cnc01_p1, m1.id, 0)
-        print(f"Nearest Level 0 cart for CNC01_POS1: {cart.cart_code if cart else 'None'}")
-        assert cart is not None, "Expected to find an available Level 0 cart"
+        # ---------------------------------------------------------------------
+        # TEST 1: User Location Constraint (Max 3 locations per operator)
+        # ---------------------------------------------------------------------
+        user = db.query(User).first()
+        if user:
+            all_locs = db.query(Location).limit(4).all()
+            if len(all_locs) >= 4:
+                try:
+                    dispatch_service.assign_locations_to_user(
+                        db, user.id, [loc.id for loc in all_locs[:4]]
+                    )
+                    raise AssertionError("Expected ValueError when assigning 4 locations to a user!")
+                except ValueError as e:
+                    print(f"  ✔ [Test 1a] Chặn gán >3 vị trí thành công: {e}")
 
-        print("\n--- TEST 2: Request Material to Empty CNC Position (CNC01_POS1) ---")
-        result = DispatchService.request_material_for_station(
-            db, destination_location_id=cnc01_p1.id, item_id=m1.id
+                assigned = dispatch_service.assign_locations_to_user(
+                    db, user.id, [loc.id for loc in all_locs[:3]]
+                )
+                assert len(assigned) == 3
+                print("  ✔ [Test 1b] Gán 3 vị trí hợp lệ cho User thành công!")
+
+        # ---------------------------------------------------------------------
+        # TEST 2: FIFO Cart Selection & POS1 / POS2 Buffering at CNC-01
+        # ---------------------------------------------------------------------
+        req1 = dispatch_service.call_material_to_cnc(
+            db, destination_location_id=cnc01_pos1.id, item_id=model_a.id
         )
-        print("Dispatch result:", result)
-        assert result["success"] is True
-        assert result["status"] == "assigned"
-        assert cart.is_locked is True, "Cart should be locked"
+        cart1 = db.query(ItemStock).filter(ItemStock.id == req1.cart_id).first()
+        assert cart1.cart_code == "CART-001", f"Expected FIFO CART-001, got {cart1.cart_code}"
+        assert cart1.is_locked is True
+        assert req1.destination_location_id == cnc01_pos1.id
+        print(f"  ✔ [Test 2a] Chọn xe FIFO chính xác: {cart1.cart_code} -> CNC-01-POS1 (Locked={cart1.is_locked})")
 
-        # Simulate AMR Arrival
-        print("\n--- TEST 3: Simulate AMR Arrival at CNC01_POS1 ---")
-        task = db.query(FleetTask).filter(FleetTask.task_code == result["fleet_task_code"]).first()
-        assert task is not None, "Expected sent FleetTask"
-        arrival_result = DispatchService.simulate_fleet_arrival(db, task.id)
-        print("Arrival result:", arrival_result)
-        assert arrival_result["success"] is True
-        assert cart.location_id == cnc01_p1.id
-
-        print("\n--- TEST 4: Double-Buffering / Pos 2 Calling (Zero CNC Starvation) ---")
-        cnc01_p2 = db.query(Location).filter(Location.location_code == "CNC01_POS2").first()
-        assert cnc01_p2 is not None, "CNC01_POS2 not found"
-        # CNC01_POS2 calls material while POS1 is occupied!
-        res_p2 = DispatchService.request_material_for_station(
-            db, destination_location_id=cnc01_p2.id, item_id=m1.id
+        # Call material again targeting CNC-01-POS1 while POS1 is already reserved -> auto fallback to POS2!
+        req2 = dispatch_service.call_material_to_cnc(
+            db, destination_location_id=cnc01_pos1.id, item_id=model_a.id
         )
-        print("POS2 call result (Double-buffer):", res_p2)
-        assert res_p2["success"] is True
+        cart2 = db.query(ItemStock).filter(ItemStock.id == req2.cart_id).first()
+        assert cart2.cart_code == "CART-002", f"Expected second FIFO CART-002, got {cart2.cart_code}"
+        assert req2.destination_location_id == cnc01_pos2.id, "Expected automatic fallback to CNC-01-POS2!"
+        print(f"  ✔ [Test 2b] Tự động điều hướng sang vị trí đệm dự phòng: {cart2.cart_code} -> CNC-01-POS2")
 
-        print("\n--- TEST 5: Report Stage 1 Completed at CNC01_POS1 ---")
-        stage_comp = DispatchService.report_stage_completed(db, station_location_id=cnc01_p1.id)
-        print("Stage completed result:", stage_comp)
-        assert stage_comp["success"] is True
-        assert stage_comp["action"] == "stage_completed"
-        assert stage_comp["completed_level"] == 1
-        assert cart.current_stage_level == 1
+        # Simulate KUKA Fleet Webhook (/receive-status) for both deliveries (status="8" -> completed)
+        task1 = db.query(FleetTask).filter(FleetTask.request_id == req1.id).first()
+        task2 = db.query(FleetTask).filter(FleetTask.request_id == req2.id).first()
+        dispatch_service.receive_task_status(
+            db,
+            {"orderId": task1.task_code, "status": "6", "deviceCode": "KUKA-AMR-01"},
+        )
+        dispatch_service.receive_task_status(
+            db,
+            {"orderId": task1.task_code, "status": "8", "deviceCode": "KUKA-AMR-01", "shelfNumber": "CART-001"},
+        )
+        dispatch_service.receive_task_status(
+            db,
+            {"orderId": task2.task_code, "status": "8", "deviceCode": "KUKA-AMR-02", "shelfNumber": "CART-002"},
+        )
 
-        rec = (
-            db.query(ProductionRecord)
-            .filter(ProductionRecord.cart_id == cart.id, ProductionRecord.stage_level == 1)
+        db.refresh(cart1)
+        db.refresh(cart2)
+        assert cart1.location_id == cnc01_pos1.id and cart1.is_locked is False
+        assert cart2.location_id == cnc01_pos2.id and cart2.is_locked is False
+        status_logs = db.query(TaskStatus).filter(TaskStatus.order_id == task1.task_code).count()
+        assert status_logs == 2
+        print("  ✔ [Test 2c] Webhook /receive-status lưu TaskStatus và cập nhật vị trí + mở khóa xe thành công!")
+
+        # ---------------------------------------------------------------------
+        # TEST 3: Multi-Stage Progression (Level 1 -> Level 2 -> Level 3 -> Washing -> Empty Return)
+        # ---------------------------------------------------------------------
+        res_lvl1 = dispatch_service.complete_machining_stage(db, cart_code="CART-001")
+        assert res_lvl1["completed_stage_level"] == 1
+        assert res_lvl1["action"] == "DISPATCHED_TO_NEXT_STAGE"
+        task_lvl2 = (
+            db.query(FleetTask)
+            .join(TransportRequest, FleetTask.request_id == TransportRequest.id)
+            .filter(TransportRequest.request_code == res_lvl1["request_code"])
             .first()
         )
-        assert rec is not None, "ProductionRecord must be created"
-        print(f"Production record verified: Cart={rec.cart_code}, Level={rec.stage_level}, Machine={rec.machine_code}")
+        dispatch_service.receive_task_status(db, {"orderId": task_lvl2.task_code, "status": "8"})
+        db.refresh(cart1)
+        loc_lvl2 = db.query(Location).filter(Location.id == cart1.location_id).first()
+        assert loc_lvl2.machine_code == "CNC-03"
+        print(f"  ✔ [Test 3a] Hoàn thành Level 1 -> Tự động chuyển sang {loc_lvl2.location_code} (Level 2)")
 
-        print("\n--- TEST 6: Final Stage Completion (CNC-04) & Wash Transfer ---")
-        cnc04_p1 = db.query(Location).filter(Location.location_code == "CNC04_POS1").first()
-        cart_at_cnc4 = (
-            db.query(ItemStock)
-            .filter(ItemStock.location_id == cnc04_p1.id, ItemStock.is_active.is_(True))
+        res_lvl2 = dispatch_service.complete_machining_stage(db, cart_code="CART-001")
+        assert res_lvl2["completed_stage_level"] == 2
+        assert res_lvl2["action"] == "DISPATCHED_TO_NEXT_STAGE"
+        task_lvl3 = (
+            db.query(FleetTask)
+            .join(TransportRequest, FleetTask.request_id == TransportRequest.id)
+            .filter(TransportRequest.request_code == res_lvl2["request_code"])
             .first()
         )
-        if cart_at_cnc4:
-            wash_comp = DispatchService.report_stage_completed(db, station_location_id=cnc04_p1.id)
-            print("Final CNC step wash transfer result:", wash_comp)
-            assert wash_comp["success"] is True
-            assert wash_comp["action"] in ["sent_to_wash", "queued_for_wash"]
+        dispatch_service.receive_task_status(db, {"orderId": task_lvl3.task_code, "status": "8"})
+        db.refresh(cart1)
+        loc_lvl3 = db.query(Location).filter(Location.id == cart1.location_id).first()
+        assert loc_lvl3.machine_code == "CNC-04"
+        print(f"  ✔ [Test 3b] Hoàn thành Level 2 -> Tự động chuyển sang {loc_lvl3.location_code} (Level 3)")
 
-        print("\n--- TEST 7: Release Wash Slot & Return Empty Cart ---")
-        wash1 = db.query(Location).filter(Location.location_code == "WASH-01").first()
-        rel_wash = DispatchService.release_wash_slot_and_return_empty(db, wash_location_id=wash1.id)
-        print("Wash release result:", rel_wash)
-        assert rel_wash["success"] is True
+        res_lvl3 = dispatch_service.complete_machining_stage(db, cart_code="CART-001")
+        assert res_lvl3["completed_stage_level"] == 3
+        assert res_lvl3["action"] == "DISPATCHED_TO_WASHING"
+        task_wash = (
+            db.query(FleetTask)
+            .join(TransportRequest, FleetTask.request_id == TransportRequest.id)
+            .filter(TransportRequest.request_code == res_lvl3["request_code"])
+            .first()
+        )
+        dispatch_service.receive_task_status(db, {"orderId": task_wash.task_code, "status": "8"})
+        db.refresh(cart1)
+        loc_wash = db.query(Location).filter(Location.id == cart1.location_id).first()
+        assert loc_wash.location_type == "WASHING_SLOT"
+        print(f"  ✔ [Test 3c] Hoàn thành Level 3 (Final CNC) -> Tự động chuyển sang Trạm Rửa ({loc_wash.location_code})")
 
-        print("\n==========================================")
-        print("ALL 7 CORE DISPATCH ENGINE TESTS PASSED!")
-        print("==========================================")
+        req_empty = dispatch_service.complete_washing_and_return_empty_cart(db, cart_code="CART-001")
+        task_empty = db.query(FleetTask).filter(FleetTask.request_id == req_empty.id).first()
+        dispatch_service.receive_task_status(db, {"orderId": task_empty.task_code, "status": "8"})
+        db.refresh(cart1)
+        loc_empty = db.query(Location).filter(Location.id == cart1.location_id).first()
+        assert loc_empty.location_type == "EMPTY_CART_BUFFER"
+        assert cart1.quantity == 0
+        print(f"  ✔ [Test 3d] Hoàn thành Rửa -> Tự động trả xe rỗng về ({loc_empty.location_code}, quantity={cart1.quantity})")
 
-    except Exception as e:
-        db.rollback()
-        print(f"\nTEST FAILED WITH ERROR: {e}")
-        import traceback
+        # ---------------------------------------------------------------------
+        # TEST 4: Queueing (WAITING_CART) & Raw Material Reusable Rack QR Registration
+        # ---------------------------------------------------------------------
+        # Both CART-001 and CART-002 are no longer at RAW_MATERIAL.
+        # Calling MODEL-A to CNC-02-POS1 now must enter WAITING_CART queue!
+        req_queued = dispatch_service.call_material_to_cnc(
+            db, destination_location_id=cnc02_pos1.id, item_id=model_a.id
+        )
+        assert req_queued.status == "queued_for_cart"
+        q_entry = (
+            db.query(TransportQueue)
+            .filter(TransportQueue.request_id == req_queued.id)
+            .first()
+        )
+        assert q_entry is not None and q_entry.status == "PENDING"
+        print(f"  ✔ [Test 4a] Hết phôi MODEL-A -> Tự động đưa yêu cầu {req_queued.request_code} vào TransportQueue (WAITING_CART)")
 
-        traceback.print_exc()
-        raise
+        # Now operator brings empty rack CART-001 back to RAW-01, selects MODEL-A, and scans QR CART-001!
+        raw01 = db.query(Location).filter(Location.location_code == "RAW-01").first()
+        reg_res = dispatch_service.register_rack_at_raw_material(
+            db=db,
+            location_id=raw01.id,
+            item_id=model_a.id,
+            cart_code="CART-001",
+        )
+        assert reg_res["fleet_inserted"] is True
+        assert reg_res["resolved_queue_count"] == 1
+        assert reg_res["is_locked"] is True
+        assert reg_res["dispatched_task_code"] is not None
+
+        db.refresh(q_entry)
+        db.refresh(req_queued)
+        assert q_entry.status == "RESOLVED"
+        assert req_queued.status == "in_progress"
+        print(
+            f"  ✔ [Test 4b] Quét QR tái sử dụng rack CART-001 tại RAW-01 -> Tự động gửi POST insert Fleet & giải phóng Queue ({reg_res['dispatched_task_code']})!"
+        )
+
+        print("\n🎉 TẤT CẢ CÁC KỊCH BẢN KIỂM THỬ ĐỀU VƯỢT QUA 100%!")
     finally:
         db.close()
 
 
 if __name__ == "__main__":
-    run_tests()
+    run_verification()
