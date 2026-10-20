@@ -6,34 +6,43 @@ import type {
   WashingSlot,
   PdaToastNotification,
 } from '@/types/pda';
+import {
+  getPdaModelsApi,
+  getPdaRawMaterialsApi,
+  getPdaCncStationsApi,
+  getPdaWashingSlotsApi,
+  registerRawMaterialApi,
+  callMaterialToCncApi,
+  completeMachiningStageApi,
+  returnEmptyCartFromWashingApi,
+  simulateFastArriveApi,
+} from '@/api/pda';
+import { useAuthStore } from './useAuthStore';
+import { getUserLocationsApi } from '@/api/machine';
 
-// 7 Vị trí cấp phôi
+// 7 Vị trí cấp phôi mặc định (fallback khi chưa kết nối backend)
 const INITIAL_POSITIONS: RawMaterialPosition[] = [
-  { id: 'VT-01', name: 'Vị trí 01', hasRack: true, currentRackId: 'RCK-VT01-1021', currentModel: 'Model 1' },
-  { id: 'VT-02', name: 'Vị trí 02', hasRack: true, currentRackId: 'RCK-VT02-4412', currentModel: 'Model 2' },
-  { id: 'VT-03', name: 'Vị trí 03', hasRack: false },
-  { id: 'VT-04', name: 'Vị trí 04', hasRack: true, currentRackId: 'RCK-VT04-7729', currentModel: 'Model 3' },
-  { id: 'VT-05', name: 'Vị trí 05', hasRack: false },
-  { id: 'VT-06', name: 'Vị trí 06', hasRack: false },
-  { id: 'VT-07', name: 'Vị trí 07', hasRack: false },
+  { id: 'RAW-01', locationId: 182, name: 'Khu Nguyên Liệu 01', hasRack: true, currentRackId: 'CART-001', currentModel: 'MODEL-A' },
+  { id: 'RAW-02', locationId: 183, name: 'Khu Nguyên Liệu 02', hasRack: true, currentRackId: 'CART-002', currentModel: 'MODEL-A' },
+  { id: 'RAW-03', locationId: 184, name: 'Khu Nguyên Liệu 03', hasRack: true, currentRackId: 'CART-003', currentModel: 'MODEL-B' },
+  { id: 'RAW-04', locationId: 185, name: 'Khu Nguyên Liệu 04', hasRack: false },
+  { id: 'RAW-05', locationId: 186, name: 'Khu Nguyên Liệu 05', hasRack: false },
+  { id: 'RAW-06', locationId: 187, name: 'Khu Nguyên Liệu 06', hasRack: false },
+  { id: 'RAW-07', locationId: 188, name: 'Khu Nguyên Liệu 07', hasRack: false },
 ];
 
-// 7 Model sản phẩm
+// 7 Model sản phẩm mặc định
 const INITIAL_MODELS: PartModel[] = [
-  { id: 'model-1', code: 'MDL-01', name: 'Model 1: Trục Rotor', description: 'Trục động cơ chính AMR' },
-  { id: 'model-2', code: 'MDL-02', name: 'Model 2: Hộp Giảm Tốc', description: 'Vỏ hộp số bánh răng hành tinh' },
-  { id: 'model-3', code: 'MDL-03', name: 'Model 3: Mặt Bích Động Cơ', description: 'Bích gá tiêu chuẩn KUKA' },
-  { id: 'model-4', code: 'MDL-04', name: 'Model 4: Giá Đỡ Bánh Xe', description: 'Khung gầm chịu tải 1500kg' },
-  { id: 'model-5', code: 'MDL-05', name: 'Model 5: Khớp Cánh Tay 1', description: 'Khớp xoay trục J1 hợp kim' },
-  { id: 'model-6', code: 'MDL-06', name: 'Model 6: Khớp Cánh Tay 2', description: 'Khớp nâng trục J2 chịu lực' },
-  { id: 'model-7', code: 'MDL-07', name: 'Model 7: Bàn Nâng AMR', description: 'Mặt bàn nâng thủy lực tích hợp' },
+  { id: 42, code: 'MODEL-A', name: 'Model A: Trục Chính CNC', description: 'Trục chính AMR - 3 Công đoạn' },
+  { id: 43, code: 'MODEL-B', name: 'Model B: Mặt Bích CNC', description: 'Mặt bích hợp kim - 2 Công đoạn' },
 ];
 
 // 8 Vị trí CNC (4 máy x 2 vị trí độc lập Vào & Ra - Double Buffering / Zero CNC Starvation)
 const INITIAL_CNC_STATIONS: CncMachineStation[] = [
   // Máy CNC-01 (Level 1: Phay Thô)
   {
-    id: 'CNC01_POS1',
+    id: 'CNC-01-POS1',
+    locationId: 189,
     machineCode: 'CNC-01',
     positionIndex: 1,
     name: 'CNC-01 (Vị trí 1)',
@@ -43,7 +52,8 @@ const INITIAL_CNC_STATIONS: CncMachineStation[] = [
     currentRack: null,
   },
   {
-    id: 'CNC01_POS2',
+    id: 'CNC-01-POS2',
+    locationId: 190,
     machineCode: 'CNC-01',
     positionIndex: 2,
     name: 'CNC-01 (Vị trí 2)',
@@ -52,24 +62,32 @@ const INITIAL_CNC_STATIONS: CncMachineStation[] = [
     status: 'EMPTY',
     currentRack: null,
   },
+  {
+    id: 'CNC-01-POS3',
+    locationId: 1901,
+    machineCode: 'CNC-01',
+    positionIndex: 3,
+    name: 'CNC-01 (Vị trí 3)',
+    assignedStageLevel: 1,
+    stageName: 'Phay Thô (Đệm)',
+    status: 'EMPTY',
+    currentRack: null,
+  },
   // Máy CNC-02 (Level 1: Phay Thô Song Song)
   {
-    id: 'CNC02_POS1',
+    id: 'CNC-02-POS1',
+    locationId: 191,
     machineCode: 'CNC-02',
     positionIndex: 1,
     name: 'CNC-02 (Vị trí 1)',
     assignedStageLevel: 1,
     stageName: 'Phay Thô (Song Song)',
-    status: 'OCCUPIED',
-    currentRack: {
-      rackId: 'RCK-VT01-1021',
-      model: 'Model 1: Trục Rotor',
-      level: 0, // Nhận phôi thô từ Nguyên liệu, chuẩn bị gia công lên Level 1
-      startedAt: '10:05',
-    },
+    status: 'EMPTY',
+    currentRack: null,
   },
   {
-    id: 'CNC02_POS2',
+    id: 'CNC-02-POS2',
+    locationId: 192,
     machineCode: 'CNC-02',
     positionIndex: 2,
     name: 'CNC-02 (Vị trí 2)',
@@ -80,22 +98,19 @@ const INITIAL_CNC_STATIONS: CncMachineStation[] = [
   },
   // Máy CNC-03 (Level 2: Phay Tinh)
   {
-    id: 'CNC03_POS1',
+    id: 'CNC-03-POS1',
+    locationId: 193,
     machineCode: 'CNC-03',
     positionIndex: 1,
     name: 'CNC-03 (Vị trí 1)',
     assignedStageLevel: 2,
     stageName: 'Phay Tinh',
-    status: 'OCCUPIED',
-    currentRack: {
-      rackId: 'RCK-VT02-4412',
-      model: 'Model 2: Hộp Giảm Tốc',
-      level: 1, // Nhận phôi đã xong B1 (Level 1), chuẩn bị gia công lên Level 2
-      startedAt: '09:40',
-    },
+    status: 'EMPTY',
+    currentRack: null,
   },
   {
-    id: 'CNC03_POS2',
+    id: 'CNC-03-POS2',
+    locationId: 194,
     machineCode: 'CNC-03',
     positionIndex: 2,
     name: 'CNC-03 (Vị trí 2)',
@@ -106,22 +121,19 @@ const INITIAL_CNC_STATIONS: CncMachineStation[] = [
   },
   // Máy CNC-04 (Level 3: Khoan Tappi & Hoàn Tất CNC)
   {
-    id: 'CNC04_POS1',
+    id: 'CNC-04-POS1',
+    locationId: 195,
     machineCode: 'CNC-04',
     positionIndex: 1,
     name: 'CNC-04 (Vị trí 1)',
     assignedStageLevel: 3,
     stageName: 'Khoan Tappi & Hoàn Tất',
-    status: 'OCCUPIED',
-    currentRack: {
-      rackId: 'RCK-VT04-7729',
-      model: 'Model 3: Mặt Bích Động Cơ',
-      level: 2, // Nhận phôi đã xong B2 (Level 2), chuẩn bị gia công lên Level 3
-      startedAt: '09:15',
-    },
+    status: 'EMPTY',
+    currentRack: null,
   },
   {
-    id: 'CNC04_POS2',
+    id: 'CNC-04-POS2',
+    locationId: 196,
     machineCode: 'CNC-04',
     positionIndex: 2,
     name: 'CNC-04 (Vị trí 2)',
@@ -134,20 +146,10 @@ const INITIAL_CNC_STATIONS: CncMachineStation[] = [
 
 // 4 Slot Tẩy Rửa
 const INITIAL_WASHING_SLOTS: WashingSlot[] = [
-  {
-    id: 1,
-    name: 'Slot 1',
-    status: 'OCCUPIED',
-    currentRack: {
-      rackId: 'RCK-VT07-3310',
-      model: 'Model 4: Giá Đỡ Động Cơ',
-      fromStation: 'Từ CNC-04',
-      arrivedAt: '10:12',
-    },
-  },
-  { id: 2, name: 'Slot 2', status: 'EMPTY', currentRack: null },
-  { id: 3, name: 'Slot 3', status: 'EMPTY', currentRack: null },
-  { id: 4, name: 'Slot 4', status: 'EMPTY', currentRack: null },
+  { id: 1, locationId: 197, code: 'WASH-01', name: 'Slot 1', status: 'EMPTY', currentRack: null },
+  { id: 2, locationId: 198, code: 'WASH-02', name: 'Slot 2', status: 'EMPTY', currentRack: null },
+  { id: 3, locationId: 199, code: 'WASH-03', name: 'Slot 3', status: 'EMPTY', currentRack: null },
+  { id: 4, locationId: 200, code: 'WASH-04', name: 'Slot 4', status: 'EMPTY', currentRack: null },
 ];
 
 interface PdaState {
@@ -156,20 +158,23 @@ interface PdaState {
   cncStations: CncMachineStation[];
   washingSlots: WashingSlot[];
   toast: PdaToastNotification | null;
+  loading: boolean;
+  initialized: boolean;
 
+  fetchFloorState: () => Promise<void>;
   showToast: (msg: string, type?: 'success' | 'info' | 'warning' | 'kuka') => void;
   hideToast: () => void;
 
   // Luồng Nguyên Liệu
-  supplyRawMaterial: (data: { positionId: string; modelId: string; rackId: string }) => void;
+  supplyRawMaterial: (data: { positionId: string; modelId: string; rackId: string }) => Promise<void>;
 
   // Luồng CNC
-  callMaterialToCnc: (stationId: string, modelId: string) => void;
-  fastArriveCnc: (stationId: string) => void;
-  updateCncStageLevel: (stationId: string) => void;
+  callMaterialToCnc: (stationId: string, modelId: string) => Promise<void>;
+  fastArriveCnc: (stationId: string) => Promise<void>;
+  updateCncStageLevel: (stationId: string) => Promise<void>;
 
   // Luồng Tẩy Rửa
-  releaseWashingSlot: (slotId: number) => void;
+  releaseWashingSlot: (slotId: number) => Promise<void>;
   simulateArriveWashing: (slotId: number) => void;
 }
 
@@ -179,6 +184,58 @@ export const usePdaStore = create<PdaState>((set, get) => ({
   cncStations: INITIAL_CNC_STATIONS,
   washingSlots: INITIAL_WASHING_SLOTS,
   toast: null,
+  loading: false,
+  initialized: false,
+
+  fetchFloorState: async () => {
+    set({ loading: true });
+    try {
+      const [models, rawMaterials, cncStations, washingSlots] = await Promise.all([
+        getPdaModelsApi(),
+        getPdaRawMaterialsApi(),
+        getPdaCncStationsApi(),
+        getPdaWashingSlotsApi(),
+      ]);
+
+      let finalRaw = rawMaterials.length > 0 ? rawMaterials : get().positions;
+      let finalCnc = cncStations.length > 0 ? cncStations : get().cncStations;
+      let finalWash = washingSlots.length > 0 ? washingSlots : get().washingSlots;
+
+      // Lọc danh sách máy/ô hiển thị đúng theo các vị trí được phân quyền của tài khoản đăng nhập
+      const user = useAuthStore.getState().user;
+      const isAdmin = !!user?.access?.is_admin || (user?.roles || []).some((r) => r.name === 'admin');
+
+      if (user && !isAdmin) {
+        try {
+          const assignedIds = await getUserLocationsApi(user.id);
+          if (assignedIds && assignedIds.length > 0) {
+            const assignedSet = new Set(assignedIds);
+            const filteredRaw = finalRaw.filter((p) => p.locationId && assignedSet.has(p.locationId));
+            const filteredCnc = finalCnc.filter((s) => s.locationId && assignedSet.has(s.locationId));
+            const filteredWash = finalWash.filter((w) => w.locationId && assignedSet.has(w.locationId));
+
+            if (filteredRaw.length > 0) finalRaw = filteredRaw;
+            if (filteredCnc.length > 0) finalCnc = filteredCnc;
+            if (filteredWash.length > 0) finalWash = filteredWash;
+          }
+        } catch {
+          // Fallback gracefully if location API is unreachable
+        }
+      }
+
+      set({
+        models: models.length > 0 ? models : get().models,
+        positions: finalRaw,
+        cncStations: finalCnc,
+        washingSlots: finalWash,
+        loading: false,
+        initialized: true,
+      });
+    } catch (error) {
+      console.warn('PDA API connection unavailable, falling back to local store:', error);
+      set({ loading: false, initialized: true });
+    }
+  },
 
   showToast: (message, type = 'kuka') => {
     set({
@@ -194,33 +251,56 @@ export const usePdaStore = create<PdaState>((set, get) => ({
   hideToast: () => set({ toast: null }),
 
   // 1. Cấp phôi từ khu nguyên liệu
-  supplyRawMaterial: ({ positionId, modelId, rackId }) => {
-    const { models, showToast } = get();
-    const model = models.find((m) => m.id === modelId);
+  supplyRawMaterial: async ({ positionId, modelId, rackId }) => {
+    const { positions, models, showToast, fetchFloorState } = get();
+    const pos = positions.find((p) => p.id === positionId);
+    const model = models.find((m) => String(m.id) === String(modelId) || m.code === modelId);
     const modelName = model ? model.name : modelId;
 
+    if (pos && pos.locationId && model && model.id) {
+      try {
+        const res = await registerRawMaterialApi({
+          location_id: pos.locationId,
+          item_id: Number(model.id),
+          cart_code: rackId,
+        });
+        showToast(
+          `Đã nạp rack [${res.cart_code}] tại [${res.location_code}] thành công!`,
+          'kuka'
+        );
+        await fetchFloorState();
+        return;
+      } catch (err: any) {
+        const errorMsg = err?.response?.data?.detail || err?.message || 'Lỗi cấp phôi';
+        showToast(`Lỗi cấp phôi: ${errorMsg}`, 'warning');
+        return;
+      }
+    }
+
+    // Fallback local mock
     set((state) => ({
-      positions: state.positions.map((pos) =>
-        pos.id === positionId
+      positions: state.positions.map((p) =>
+        p.id === positionId
           ? {
-              ...pos,
+              ...p,
               hasRack: true,
               currentRackId: rackId,
               currentModel: modelName,
             }
-          : pos
+          : p
       ),
     }));
-
     showToast(`Đã cấp phôi [${rackId}] cho [${modelName}] tại [${positionId}]!`, 'kuka');
   },
 
   // 2. Gọi phôi đến trạm CNC
-  callMaterialToCnc: (stationId, modelId) => {
-    const { models, showToast } = get();
-    const model = models.find((m) => m.id === modelId);
+  callMaterialToCnc: async (stationId, modelId) => {
+    const { cncStations, models, showToast, fetchFloorState } = get();
+    const station = cncStations.find((s) => s.id === stationId);
+    const model = models.find((m) => String(m.id) === String(modelId) || m.code === modelId);
     const modelName = model ? model.name : modelId;
 
+    // Optimistic UI update
     set((state) => ({
       cncStations: state.cncStations.map((st) =>
         st.id === stationId
@@ -229,9 +309,26 @@ export const usePdaStore = create<PdaState>((set, get) => ({
       ),
     }));
 
+    if (station && station.locationId && model && model.id) {
+      try {
+        await callMaterialToCncApi({
+          destination_location_id: station.locationId,
+          item_id: Number(model.id),
+        });
+        showToast(`Đã điều AMR chở [${modelName}] tới [${stationId}]`, 'kuka');
+        await fetchFloorState();
+        return;
+      } catch (err: any) {
+        const errorMsg = err?.response?.data?.detail || err?.message || 'Lỗi gọi phôi';
+        showToast(`Lỗi gọi phôi: ${errorMsg}`, 'warning');
+        await fetchFloorState();
+        return;
+      }
+    }
+
     showToast(`Đã điều AMR chở [${modelName}] tới [${stationId}]`, 'kuka');
 
-    // Giả lập AMR cập bến sau 3 giây
+    // Fallback simulation if offline
     setTimeout(() => {
       const currentStations = get().cncStations;
       const target = currentStations.find((s) => s.id === stationId);
@@ -259,16 +356,28 @@ export const usePdaStore = create<PdaState>((set, get) => ({
               : st
           ),
         }));
-
         get().showToast(`AMR đã cập bến [${stationId}]: Phôi sẵn sàng gia công!`, 'success');
       }
     }, 3000);
   },
 
-  fastArriveCnc: (stationId) => {
-    const station = get().cncStations.find((s) => s.id === stationId);
+  fastArriveCnc: async (stationId) => {
+    const { cncStations, showToast, fetchFloorState } = get();
+    const station = cncStations.find((s) => s.id === stationId);
+
+    if (station && station.locationId) {
+      try {
+        await simulateFastArriveApi({ station_id: stationId, location_id: station.locationId });
+        showToast(`AMR đã cập bến [${stationId}] thành công!`, 'success');
+        await fetchFloorState();
+        return;
+      } catch (err: any) {
+        console.warn('API fast-arrive error, using mock fallback:', err);
+      }
+    }
+
     if (!station) return;
-    const modelName = station.callingModel || 'Model 1: Trục Rotor';
+    const modelName = station.callingModel || 'Phôi tiêu chuẩn';
     const randomRackId = `RCK-${stationId}-${Math.floor(1000 + Math.random() * 9000)}`;
     const inputLevel = station.assignedStageLevel === 1 ? 0 : station.assignedStageLevel - 1;
 
@@ -292,31 +401,59 @@ export const usePdaStore = create<PdaState>((set, get) => ({
           : st
       ),
     }));
-    get().showToast(`AMR đã cập bến [${stationId}] thành công!`, 'success');
+    showToast(`AMR đã cập bến [${stationId}] thành công!`, 'success');
   },
 
-  // 3. Cập nhật Level CNC (Cố định bằng đúng Level được chỉ định của máy)
-  updateCncStageLevel: (stationId) => {
-    const station = get().cncStations.find((s) => s.id === stationId);
+  // 3. Cập nhật Level CNC
+  updateCncStageLevel: async (stationId) => {
+    const { cncStations, showToast, fetchFloorState } = get();
+    const station = cncStations.find((s) => s.id === stationId);
     if (!station || !station.currentRack) return;
 
-    const targetLevel = station.assignedStageLevel; // CẬP NHẬT BẰNG ĐÚNG LEVEL ĐƯỢC CHỈ ĐỊNH
+    const rackCode = station.currentRack.rackId;
+    const targetLevel = station.assignedStageLevel;
     const isFinalStage = targetLevel >= 3;
 
+    if (station.locationId) {
+      try {
+        await completeMachiningStageApi({
+          cart_code: rackCode,
+          location_id: station.locationId,
+        });
+        if (isFinalStage) {
+          showToast(
+            `Hoàn tất Level ${targetLevel} tại [${stationId}] -> AMR đã nhận lệnh chuyển sang Khu Tẩy Rửa!`,
+            'kuka'
+          );
+        } else {
+          showToast(
+            `Đã hoàn tất Level ${targetLevel} (${station.stageName}) tại [${stationId}]! Xe [${rackCode}] sẵn sàng cho bước sau.`,
+            'success'
+          );
+        }
+        await fetchFloorState();
+        return;
+      } catch (err: any) {
+        const errorMsg = err?.response?.data?.detail || err?.message || 'Lỗi cập nhật công đoạn';
+        showToast(`Lỗi: ${errorMsg}`, 'warning');
+        await fetchFloorState();
+        return;
+      }
+    }
+
+    // Fallback mock
     if (isFinalStage) {
       const finishedRack = {
         ...station.currentRack,
         level: targetLevel,
       };
 
-      // Giải phóng trạm CNC
       set((state) => ({
         cncStations: state.cncStations.map((st) =>
           st.id === stationId ? { ...st, status: 'EMPTY', currentRack: null } : st
         ),
       }));
 
-      // Chuyển sang khu tẩy rửa
       let slotAssigned = '';
       set((state) => {
         const slots = [...state.washingSlots];
@@ -340,38 +477,49 @@ export const usePdaStore = create<PdaState>((set, get) => ({
         return { washingSlots: slots };
       });
 
-      get().showToast(
+      showToast(
         `Hoàn tất Level ${targetLevel} tại [${stationId}] -> AMR đã chở sang [${slotAssigned || 'Khu Tẩy Rửa'}]!`,
         'kuka'
       );
     } else {
-      const finishedRack = {
-        ...station.currentRack,
-        level: targetLevel,
-      };
-
-      // Giải phóng trạm để sẵn sàng nhận phôi tiếp theo, xe sẵn sàng cho máy công đoạn sau gọi
       set((state) => ({
         cncStations: state.cncStations.map((st) =>
           st.id === stationId ? { ...st, status: 'EMPTY', currentRack: null } : st
         ),
       }));
 
-      get().showToast(
-        `Đã hoàn tất Level ${targetLevel} (${station.stageName}) tại [${stationId}]! Xe [${finishedRack.rackId}] sẵn sàng cho Level ${targetLevel + 1}.`,
+      showToast(
+        `Đã hoàn tất Level ${targetLevel} (${station.stageName}) tại [${stationId}]! Xe [${rackCode}] sẵn sàng cho Level ${targetLevel + 1}.`,
         'success'
       );
     }
   },
 
   // 4. Khu Tẩy Rửa: Giải phóng slot
-  releaseWashingSlot: (slotId) => {
+  releaseWashingSlot: async (slotId) => {
+    const { washingSlots, showToast, fetchFloorState } = get();
+    const slot = washingSlots.find((s) => s.id === slotId);
+
+    if (slot && slot.currentRack?.rackId) {
+      try {
+        await returnEmptyCartFromWashingApi({ cart_code: slot.currentRack.rackId });
+        showToast(`Đã giải phóng ${slot.name} (${slot.currentRack.rackId}) -> AMR đang đưa xe rỗng về bãi đệm!`, 'success');
+        await fetchFloorState();
+        return;
+      } catch (err: any) {
+        const errorMsg = err?.response?.data?.detail || err?.message || 'Lỗi giải phóng slot';
+        showToast(`Lỗi: ${errorMsg}`, 'warning');
+        await fetchFloorState();
+        return;
+      }
+    }
+
     set((state) => ({
       washingSlots: state.washingSlots.map((s) =>
         s.id === slotId ? { ...s, status: 'EMPTY', currentRack: null } : s
       ),
     }));
-    get().showToast(`Đã giải phóng Slot ${slotId} về TRỐNG!`, 'success');
+    showToast(`Đã giải phóng Slot ${slotId} về TRỐNG!`, 'success');
   },
 
   simulateArriveWashing: (slotId) => {

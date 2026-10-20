@@ -13,9 +13,10 @@ import {
   Select,
   cn,
 } from "@/components/ui";
-import { Checkbox, Steps } from "antd";
-import { PlusOutlined, EditOutlined, DeleteOutlined } from "@ant-design/icons";
+import { Checkbox, Steps, Tag } from "antd";
+import { PlusOutlined, EditOutlined, DeleteOutlined, ClusterOutlined } from "@ant-design/icons";
 import { getApiErrorMessage } from "@/utils/apiErrorMessage";
+import StationAssignmentModal from "@/pages/components/StationAssignmentModal";
 import {
   useUser,
   useCreateUser,
@@ -72,6 +73,7 @@ export default function UserSettingPage() {
   const [form] = Form.useForm<UserFormValues>();
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingUser, setEditingUser] = useState<User | null>(null);
+  const [stationModalUser, setStationModalUser] = useState<User | null>(null);
   const [step, setStep] = useState(0);
   const [selectedWarehouseIds, setSelectedWarehouseIds] = useState<number[]>(
     [],
@@ -314,24 +316,43 @@ export default function UserSettingPage() {
     {
       title: "Thao tác",
       key: "action",
-      width: 150,
-      render: (_: unknown, record: User) => (
-        <Space size="middle">
-          <Button
-            variant="edit"
-            icon={<EditOutlined className="text-brand-primary" />}
-            onClick={() => handleOpenEdit(record)}
-            title="Sửa"
-          />
-          <Button
-            variant="dangerText"
-            icon={<DeleteOutlined />}
-            onClick={() => handleDelete(record.id)}
-            className="hover:bg-red-50 rounded-lg"
-            title="Xóa"
-          />
-        </Space>
-      ),
+      width: 240,
+      render: (_: unknown, record: User) => {
+        const isAdmin = isAdminUser(record);
+        return (
+          <Space size="small">
+            {!isAdmin ? (
+              <Button
+                variant="outline"
+                size="sm"
+                icon={<ClusterOutlined className="text-brand-primary" />}
+                onClick={() => setStationModalUser(record)}
+                title="Phân quyền trạm máy & vị trí"
+                className="!h-8 !px-2.5 !rounded-lg text-xs font-semibold text-slate-700 hover:text-brand-primary hover:border-brand-primary"
+              >
+                Phân trạm
+              </Button>
+            ) : (
+              <Tag color="blue" className="!mr-1 !px-2 !py-0.5 !font-semibold">
+                Toàn quyền
+              </Tag>
+            )}
+            <Button
+              variant="edit"
+              icon={<EditOutlined className="text-brand-primary" />}
+              onClick={() => handleOpenEdit(record)}
+              title="Sửa thông tin"
+            />
+            <Button
+              variant="dangerText"
+              icon={<DeleteOutlined />}
+              onClick={() => handleDelete(record.id)}
+              className="hover:bg-red-50 rounded-lg"
+              title="Xóa người dùng"
+            />
+          </Space>
+        );
+      },
     },
   ];
 
@@ -612,6 +633,12 @@ export default function UserSettingPage() {
           </Form.Item>
         </Form>
       </Modal>
+
+      <StationAssignmentModal
+        open={!!stationModalUser}
+        onClose={() => setStationModalUser(null)}
+        user={stationModalUser}
+      />
     </div>
   );
 }

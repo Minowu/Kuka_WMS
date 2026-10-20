@@ -4,9 +4,7 @@ export interface Item {
   name: string
   description: string | null
   base_unit: string
-  base_quantity: number
-  max_quantity: number
-  min_quantity: number
+  standard_quantity_per_cart?: number
   warehouse_id: number
   supplier: string
   details: Record<string, unknown>
@@ -41,9 +39,7 @@ export type CreateItemInput = {
   name: string
   description?: string | null
   base_unit: number
-  base_quantity?: number
-  max_quantity: number
-  min_quantity: number
+  standard_quantity_per_cart?: number
   warehouse_id: number
   supplier?: string
   details?: Record<string, unknown>

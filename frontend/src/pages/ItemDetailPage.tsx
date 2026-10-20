@@ -68,13 +68,13 @@ export const ITEM_DETAIL_PRIMARY_FIELD_COUNT = 6;
 export const itemDetailFields: DetailFieldSchema<Item>[] = [
   {
     key: "quantity",
-    label: "Số lượng",
+    label: "Số lượng tồn",
     render: (item) => {
       const amount = parseQuantity(item.quantity);
       return (
         <span
           className={
-            amount < item.min_quantity
+            amount === 0
               ? "font-semibold text-orange-500"
               : "font-semibold"
           }
@@ -85,19 +85,9 @@ export const itemDetailFields: DetailFieldSchema<Item>[] = [
     },
   },
   {
-    key: "min_quantity",
-    label: "Số lượng tối thiểu",
-    accessor: (item) => item.min_quantity,
-  },
-  {
-    key: "max_quantity",
-    label: "Số lượng tối đa",
-    accessor: (item) => item.max_quantity,
-  },
-  {
-    key: "base_quantity",
-    label: "Số lượng cơ sở",
-    accessor: (item) => item.base_quantity,
+    key: "standard_quantity_per_cart",
+    label: "Tiêu chuẩn phôi / xe gá",
+    accessor: (item) => `${item.standard_quantity_per_cart ?? 120} chi tiết/xe`,
   },
   {
     key: "base_unit",
@@ -130,10 +120,8 @@ type ItemFormValues = {
   name: string;
   sku: string;
   base_unit: number;
-  base_quantity: number;
+  standard_quantity_per_cart: number;
   description: string;
-  min_quantity: number;
-  max_quantity: number;
   quantity: number;
   detailEntries?: { key: string; value: string }[];
 };
@@ -214,10 +202,8 @@ export default function ItemDetailPage() {
       name: item.name,
       sku: item.sku,
       base_unit: units.find((u) => u.name === item.base_unit)?.id,
-      base_quantity: item.base_quantity,
+      standard_quantity_per_cart: item.standard_quantity_per_cart ?? 120,
       description: item.description ?? "",
-      min_quantity: item.min_quantity,
-      max_quantity: item.max_quantity,
       quantity: parseQuantity(item.quantity),
       detailEntries: Object.entries(item.details ?? {}).map(([key, value]) => ({
         key,
@@ -246,9 +232,7 @@ export default function ItemDetailPage() {
           name: values.name.trim(),
           description: values.description?.trim() ?? "",
           base_unit: Number(values.base_unit),
-          base_quantity: Number(values.base_quantity),
-          min_quantity: Number(values.min_quantity),
-          max_quantity: Number(values.max_quantity),
+          standard_quantity_per_cart: Number(values.standard_quantity_per_cart ?? 120),
           details,
         },
       },
@@ -426,37 +410,15 @@ export default function ItemDetailPage() {
             <InputNumber disabled min={0} precision={0} />
           </Form.Item>
           <Form.Item
-            name="base_quantity"
-            label="Số lượng cơ sở"
+            name="standard_quantity_per_cart"
+            label="Tiêu chuẩn phôi / xe gá (chi tiết/xe)"
             rules={[
-              { required: true, message: "Vui lòng nhập số lượng cơ sở!" },
+              { required: true, message: "Vui lòng nhập số lượng tiêu chuẩn/xe!" },
               { type: "number", min: 1, message: "Giá trị phải >= 1" },
             ]}
           >
-            <InputNumber min={1} precision={0} />
+            <InputNumber min={1} precision={0} placeholder="Ví dụ: 120" className="w-full" />
           </Form.Item>
-          <div className="grid grid-cols-2 gap-4">
-            <Form.Item
-              name="min_quantity"
-              label="Số lượng tối thiểu"
-              rules={[
-                { required: true, message: "Vui lòng nhập số lượng tối thiểu!" },
-                { type: "number", min: 0, message: "Giá trị phải >= 0" },
-              ]}
-            >
-              <InputNumber min={0} precision={0} />
-            </Form.Item>
-            <Form.Item
-              name="max_quantity"
-              label="Số lượng tối đa"
-              rules={[
-                { required: true, message: "Vui lòng nhập số lượng tối đa!" },
-                { type: "number", min: 0, message: "Giá trị phải >= 0" },
-              ]}
-            >
-              <InputNumber min={0} precision={0} />
-            </Form.Item>
-          </div>
           <Form.Item
             name="base_unit"
             label="Đơn vị"

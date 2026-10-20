@@ -1,7 +1,8 @@
 export type PdaArea = 'raw_material' | 'cnc_line' | 'washing_station';
 
 export interface RawMaterialPosition {
-  id: string; // 'VT-01' -> 'VT-07'
+  id: string; // 'RAW-01' -> 'RAW-07' hoặc 'VT-01'
+  locationId?: number;
   name: string;
   hasRack: boolean;
   currentRackId?: string;
@@ -9,31 +10,37 @@ export interface RawMaterialPosition {
 }
 
 export interface PartModel {
-  id: string; // 'Model 1' -> 'Model 7'
+  id: string | number; // 'MDL-01' hoặc ID 42
+  itemId?: number;
   code: string;
   name: string;
   description: string;
+  standardQuantityPerCart?: number;
 }
 
 export interface CncMachineStation {
-  id: string; // 'CNC01_POS1' -> 'CNC04_POS2'
+  id: string; // 'CNC-01-POS1' -> 'CNC-04-POS2'
+  locationId?: number;
   machineCode?: string; // 'CNC-01' -> 'CNC-04'
   positionIndex?: number; // 1 hoặc 2
   name: string;
-  assignedStageLevel: number; // Cấp độ công đoạn ĐƯỢC CHỈ ĐỊNH cho máy này (VD: CNC-01: 1, CNC-02: 1, CNC-03: 2, CNC-04: 3)
-  stageName: string; // Tên công đoạn: 'Phay thô', 'Phay tinh', 'Hoàn tất CNC'
+  assignedStageLevel: number; // Cấp độ công đoạn ĐƯỢC CHỈ ĐỊNH cho máy này
+  stageName: string; // Tên công đoạn: 'Phay Thô', 'Phay Tinh', 'Khoan Tappi & Hoàn Tất'
   status: 'EMPTY' | 'CALLING' | 'OCCUPIED';
   callingModel?: string;
+  callingTaskCode?: string;
   currentRack?: {
     rackId: string;
     model: string;
-    level: number; // Cấp độ hiện tại của phôi trên xe (0: Phôi thô, 1: Xong B1, 2: Xong B2, 3: Hoàn tất)
+    level: number; // Cấp độ hiện tại của phôi trên xe
     startedAt?: string;
   } | null;
 }
 
 export interface WashingSlot {
   id: number; // 1 -> 4
+  locationId?: number;
+  code?: string; // 'WASH-01' -> 'WASH-04'
   name: string; // 'Slot 1' -> 'Slot 4'
   status: 'EMPTY' | 'OCCUPIED';
   currentRack?: {

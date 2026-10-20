@@ -44,6 +44,36 @@ export const CncLineModal: React.FC<CncLineModalProps> = ({
     }
   };
 
+  const renderPosBadge = (pos?: number) => {
+    if (!pos) return null;
+    switch (pos) {
+      case 1:
+        return (
+          <span className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded bg-blue-900/80 text-blue-300 border border-blue-600/60 shadow-xs">
+            P1
+          </span>
+        );
+      case 2:
+        return (
+          <span className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded bg-purple-900/80 text-purple-300 border border-purple-600/60 shadow-xs">
+            P2
+          </span>
+        );
+      case 3:
+        return (
+          <span className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded bg-amber-900/80 text-amber-300 border border-amber-600/60 shadow-xs">
+            P3
+          </span>
+        );
+      default:
+        return (
+          <span className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-700">
+            P{pos}
+          </span>
+        );
+    }
+  };
+
   return (
     <div className="flex flex-col flex-1 p-3">
       {/* Danh sách trạm CNC */}
@@ -72,11 +102,7 @@ export const CncLineModal: React.FC<CncLineModalProps> = ({
                   <span className="text-base font-bold font-mono text-white">
                     {st.name}
                   </span>
-                  {st.positionIndex && (
-                    <span className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded bg-blue-900/60 text-blue-300 border border-blue-700/50">
-                      P{st.positionIndex}
-                    </span>
-                  )}
+                  {renderPosBadge(st.positionIndex)}
                   <span className="text-[11px] font-mono font-bold px-2 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-700">
                     Level {st.assignedStageLevel}: {st.stageName}
                   </span>
@@ -105,7 +131,7 @@ export const CncLineModal: React.FC<CncLineModalProps> = ({
                   <div className="text-[11px] text-slate-400">
                     Đầu vào yêu cầu:{' '}
                     <span className="text-slate-200 font-bold font-mono">
-                      {st.assignedStageLevel === 1 ? 'Level 0 (Phôi thô)' : `Level ${st.assignedStageLevel - 1}`}
+                      {(st.assignedStageLevel ?? 1) <= 1 ? 'Level 0 (Phôi thô)' : `Level ${(st.assignedStageLevel ?? 1) - 1}`}
                     </span>
                   </div>
                   <button

@@ -91,9 +91,7 @@ export default function ItemSettingPage() {
       name: values.name.trim(),
       description: values.description?.trim() ?? '',
       base_unit: Number(values.base_unit),
-      base_quantity: Number(values.base_quantity ?? 1),
-      max_quantity: Number(values.max_quantity),
-      min_quantity: Number(values.min_quantity),
+      standard_quantity_per_cart: Number(values.standard_quantity_per_cart ?? 120),
       warehouse_id: activeWarehouseId,
       details,
     };
@@ -103,9 +101,7 @@ export default function ItemSettingPage() {
         name: values.name.trim(),
         description: values.description?.trim() ?? '',
         base_unit: Number(values.base_unit),
-        base_quantity: Number(values.base_quantity ?? 1),
-        max_quantity: Number(values.max_quantity),
-        min_quantity: Number(values.min_quantity),
+        standard_quantity_per_cart: Number(values.standard_quantity_per_cart ?? 120),
         details,
       };
       updateMutation.mutate(
@@ -157,11 +153,12 @@ export default function ItemSettingPage() {
       key: 'base_unit',
     },
     {
-      title: 'Min / Max',
-      key: 'quantity_bounds',
-      render: (_: unknown, record: Item) => (
-        <span className="text-slate-600">
-          {record.min_quantity} / {record.max_quantity}
+      title: 'Tiêu chuẩn / xe',
+      dataIndex: 'standard_quantity_per_cart',
+      key: 'standard_quantity_per_cart',
+      render: (val: number) => (
+        <span className="text-slate-600 font-medium">
+          {val ?? 120} chi tiết/xe
         </span>
       ),
     },
@@ -266,7 +263,7 @@ export default function ItemSettingPage() {
           layout="vertical"
           className="mt-4"
           onFinish={handleFinish}
-          initialValues={{ base_quantity: 1, min_quantity: 10, max_quantity: 999999 }}
+          initialValues={{ standard_quantity_per_cart: 120 }}
         >
           <Form.Item name="sku" label="Part_number" rules={[{ required: true, message: 'Vui lòng nhập Part_number!' }]}>
             <Input placeholder="Ví dụ: PN-019" disabled={!!editingItem} />
@@ -294,38 +291,15 @@ export default function ItemSettingPage() {
           </Form.Item>
 
           <Form.Item
-            name="base_quantity"
-            label="Số lượng cơ sở"
+            name="standard_quantity_per_cart"
+            label="Tiêu chuẩn phôi / xe gá (chi tiết/xe)"
             rules={[
-              { required: true, message: 'Vui lòng nhập số lượng cơ sở!' },
+              { required: true, message: 'Vui lòng nhập số lượng tiêu chuẩn/xe!' },
               { type: 'number', min: 1, message: 'Giá trị phải >= 1' },
             ]}
           >
-            <InputNumber min={1} precision={0} placeholder="Ví dụ: 1" />
+            <InputNumber min={1} precision={0} placeholder="Ví dụ: 120" className="w-full" />
           </Form.Item>
-
-          <div className="grid grid-cols-2 gap-4">
-            <Form.Item
-              name="min_quantity"
-              label="Số lượng tối thiểu"
-              rules={[
-                { required: true, message: 'Vui lòng nhập số lượng tối thiểu!' },
-                { type: 'number', min: 0, message: 'Giá trị phải >= 0' },
-              ]}
-            >
-              <InputNumber min={0} precision={0} placeholder="Ví dụ: 10" />
-            </Form.Item>
-            <Form.Item
-              name="max_quantity"
-              label="Số lượng tối đa"
-              rules={[
-                { required: true, message: 'Vui lòng nhập số lượng tối đa!' },
-                { type: 'number', min: 0, message: 'Giá trị phải >= 0' },
-              ]}
-            >
-              <InputNumber min={0} precision={0} placeholder="Ví dụ: 1000" />
-            </Form.Item>
-          </div>
 
           <Form.Item name="description" label="Mô tả" rules={[{ required: true, message: 'Vui lòng nhập mô tả!' }]}>
             <Input placeholder="Ví dụ: Mô tả chi tiết về Item này" />

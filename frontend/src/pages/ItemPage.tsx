@@ -62,33 +62,25 @@ const STOCK_COLOR_BAD = "#ef4444";
 const STOCK_COLOR_MAX = "#6ec8c8";
 const STOCK_COLOR_MIN = brand.primaryDeep;
 
-type StockChartStatus = "ok" | "low" | "over";
+type StockChartStatus = "ok" | "low";
 
 type StockChartPoint = {
   name: string;
   fullName: string;
   quantity: number;
-  min_quantity: number;
-  max_quantity: number;
   status: StockChartStatus;
   quantityOk: number | null;
   quantityBad: number | null;
 };
 
-function getStockStatus(
-  quantity: number,
-  minQuantity: number,
-  maxQuantity: number,
-): StockChartStatus {
-  if (quantity < minQuantity) return "low";
-  if (quantity > maxQuantity) return "over";
+function getStockStatus(quantity: number): StockChartStatus {
+  if (quantity <= 0) return "low";
   return "ok";
 }
 
 function stockStatusLabel(status: StockChartStatus) {
-  if (status === "low") return "Dưới min";
-  if (status === "over") return "Vượt max";
-  return "Trong biên";
+  if (status === "low") return "Hết hàng";
+  return "Sẵn sàng";
 }
 
 function stockStatusColor(status: StockChartStatus) {
@@ -176,17 +168,7 @@ function StockChartTooltip({
       </span>
       <div className="mt-2 space-y-1 font-mono text-xs text-white/85">
         <p>
-          <span style={{ color: STOCK_COLOR_MAX }}>Max</span>
-          {"  "}
-          {formatQuantity(row.max_quantity)}
-        </p>
-        <p>
-          <span style={{ color: STOCK_COLOR_MIN }}>Min</span>
-          {"  "}
-          {formatQuantity(row.min_quantity)}
-        </p>
-        <p>
-          <span style={{ color: qtyColor }}>Tồn</span>
+          <span style={{ color: qtyColor }}>Tồn kho</span>
           {"  "}
           {formatQuantity(row.quantity)}
         </p>
@@ -196,10 +178,8 @@ function StockChartTooltip({
 }
 
 const STOCK_LEGEND_ITEMS = [
-  { label: "Tồn trong biên", color: STOCK_COLOR_OK },
-  { label: "Tồn ngoài biên", color: STOCK_COLOR_BAD },
-  { label: "Max", color: STOCK_COLOR_MAX, dashed: true },
-  { label: "Min", color: STOCK_COLOR_MIN, dashed: true },
+  { label: "Sẵn sàng (có tồn kho)", color: STOCK_COLOR_OK },
+  { label: "Hết tồn kho", color: STOCK_COLOR_BAD },
 ] as const;
 
 function StockChartLegend() {
@@ -305,15 +285,11 @@ export default function ItemPage() {
       .sort((a, b) => a.sku.localeCompare(b.sku, undefined, { numeric: true }))
       .map((item) => {
         const quantity = Number(item.quantity ?? 0);
-        const min_quantity = Number(item.min_quantity ?? 0);
-        const max_quantity = Number(item.max_quantity ?? 0);
         return {
           name: item.sku,
           fullName: item.name,
           quantity,
-          min_quantity,
-          max_quantity,
-          status: getStockStatus(quantity, min_quantity, max_quantity),
+          status: getStockStatus(quantity),
         };
       });
     const rows = attachSplitQuantity(baseRows);
@@ -323,13 +299,9 @@ export default function ItemPage() {
       const data = rows.slice(i, i + STOCK_CHART_CHUNK_SIZE);
       const yMax = Math.max(
         0,
-        ...data.flatMap((row) => [
-          row.quantity,
-          row.min_quantity,
-          row.max_quantity,
-        ]),
+        ...data.map((row) => row.quantity),
       );
-      chunks.push({ data, yMax: yMax > 0 ? yMax : 1 });
+      chunks.push({ data, yMax: yMax > 0 ? yMax : 100 });
     }
     return chunks;
   }, [itemList]);
@@ -383,9 +355,7 @@ export default function ItemPage() {
         name: values.name.trim(),
         description: values.description?.trim() ?? "",
         base_unit: Number(values.base_unit),
-        base_quantity: Number(values.base_quantity ?? 1),
-        max_quantity: Number(values.max_quantity),
-        min_quantity: Number(values.min_quantity),
+        standard_quantity_per_cart: Number(values.standard_quantity_per_cart ?? 120),
         warehouse_id: selectedWarehouseId,
         details,
       },
@@ -872,26 +842,6 @@ export default function ItemPage() {
                               }}
                               activeDot={{ r: 6, fill: STOCK_COLOR_BAD }}
                             />
-                            <Line
-                              type="monotone"
-                              dataKey="max_quantity"
-                              name="Max"
-                              stroke={STOCK_COLOR_MAX}
-                              strokeWidth={1.5}
-                              strokeDasharray="6 4"
-                              dot={false}
-                              activeDot={{ r: 4, fill: STOCK_COLOR_MAX }}
-                            />
-                            <Line
-                              type="monotone"
-                              dataKey="min_quantity"
-                              name="Min"
-                              stroke={STOCK_COLOR_MIN}
-                              strokeWidth={1.5}
-                              strokeDasharray="6 4"
-                              dot={false}
-                              activeDot={{ r: 4, fill: STOCK_COLOR_MIN }}
-                            />
                           </ComposedChart>
                         </ResponsiveContainer>
                       </div>
@@ -921,22 +871,22 @@ export default function ItemPage() {
           layout="vertical"
           onFinish={handleCreate}
           className="mt-2"
-          initialValues={{ base_quantity: 1, min_quantity: 10, max_quantity: 999999 }}
+          initialValues={{ standard_quantity_per_cart: 120 }}
         >
           <Form.Item
             name="sku"
-            label="Part_number"
+            label="Part_number (Mã Model)"
             rules={[{ required: true, message: "Vui lòng nhập Part_number!" }]}
           >
-            <Input placeholder="Ví dụ: PN-019" />
+            <Input placeholder="Ví dụ: MODEL-C" />
           </Form.Item>
 
           <Form.Item
             name="name"
-            label="Tên sản phẩm"
+            label="Tên sản phẩm (Model)"
             rules={[{ required: true, message: "Vui lòng nhập tên!" }]}
           >
-            <Input placeholder="Ví dụ: Thép cuộn" />
+            <Input placeholder="Ví dụ: Phôi Trục Bánh Răng" />
           </Form.Item>
 
           <Form.Item
@@ -957,38 +907,15 @@ export default function ItemPage() {
           </Form.Item>
 
           <Form.Item
-            name="base_quantity"
-            label="Số lượng cơ sở"
+            name="standard_quantity_per_cart"
+            label="Tiêu chuẩn phôi / xe gá (chi tiết/rack)"
             rules={[
-              { required: true, message: "Vui lòng nhập số lượng cơ sở!" },
+              { required: true, message: "Vui lòng nhập số lượng tiêu chuẩn/xe!" },
               { type: "number", min: 1, message: "Giá trị phải >= 1" },
             ]}
           >
-            <InputNumber min={1} precision={0} placeholder="Ví dụ: 1" />
+            <InputNumber min={1} precision={0} placeholder="Ví dụ: 120" className="w-full" />
           </Form.Item>
-
-          <div className="grid grid-cols-2 gap-4">
-            <Form.Item
-              name="min_quantity"
-              label="Số lượng tối thiểu"
-              rules={[
-                { required: true, message: "Vui lòng nhập số lượng tối thiểu!" },
-                { type: "number", min: 0, message: "Giá trị phải >= 0" },
-              ]}
-            >
-              <InputNumber min={0} precision={0} placeholder="Ví dụ: 10" />
-            </Form.Item>
-            <Form.Item
-              name="max_quantity"
-              label="Số lượng tối đa"
-              rules={[
-                { required: true, message: "Vui lòng nhập số lượng tối đa!" },
-                { type: "number", min: 0, message: "Giá trị phải >= 0" },
-              ]}
-            >
-              <InputNumber min={0} precision={0} placeholder="Ví dụ: 1000" />
-            </Form.Item>
-          </div>
 
           <Form.Item
             name="description"

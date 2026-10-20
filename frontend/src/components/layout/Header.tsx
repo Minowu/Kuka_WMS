@@ -23,12 +23,6 @@ export default function Header() {
   const isSettingPage = location.pathname.startsWith('/setting');
   const { lang, setLang } = useAppStore();
   
-  const [now, setNow] = useState(() => new Date());
-
-  useEffect(() => {
-    const timer = window.setInterval(() => setNow(new Date()), 1000);
-    return () => window.clearInterval(timer);
-  }, []);
 
   // Removed isConnecting and isError because useZone was removed in origin/main's Header
   const statusTone = "online";
@@ -53,14 +47,6 @@ export default function Header() {
       </div>
 
       <div className="flex items-center gap-4 min-w-0">
-        {/* Ngày giờ */}
-        <time
-          dateTime={now.toISOString()}
-          className="hidden sm:block text-base font-semibold text-stripe-ink-mute tabular-nums whitespace-nowrap"
-        >
-          {formatHeaderDateTime(now, lang)}
-        </time>
-
         {/* 1. Bộ chọn Kho hiện tại hoặc Nhãn Cài đặt */}
         {isSettingPage ? (
           <div className="relative flex h-14 w-72 min-w-[288px] max-w-[288px] items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-4">

@@ -317,7 +317,7 @@ export default function ProductionRoutePage() {
             </div>
             <div>
               <Title level={3} className="!mb-0 text-slate-800">
-                Quy trình Công nghệ Gia công CNC (Routing 3NF)
+                Quy trình Gia công CNC
               </Title>
               <Text type="secondary" className="text-sm">
                 Thiết lập chuỗi công đoạn Stage Level và danh sách máy CNC thực hiện để điều phối AMR tự động

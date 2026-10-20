@@ -272,7 +272,7 @@ export default function Sidebar() {
                   icon: <BranchesOutlined />,
                   label: "Quy trình Route",
                 },
-                { to: "/zones", icon: <ClusterOutlined />, label: "Bản đồ & Trạm" },
+                { to: "/production/stations", icon: <ClusterOutlined />, label: "Cấu hình Trạm" },
               ]}
               collapsed={collapsed}
             />

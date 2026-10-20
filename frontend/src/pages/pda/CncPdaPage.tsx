@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { PdaLayoutWrapper } from '@/components/pda/PdaLayoutWrapper';
 import { CncLineModal } from '@/components/pda/CncLineModal';
 import { usePdaStore } from '@/store/usePdaStore';
@@ -10,6 +10,15 @@ export const CncPdaPage: React.FC = () => {
   const updateCncStageLevel = usePdaStore((s) => s.updateCncStageLevel);
   const fastArriveCnc = usePdaStore((s) => s.fastArriveCnc);
   const showToast = usePdaStore((s) => s.showToast);
+  const fetchFloorState = usePdaStore((s) => s.fetchFloorState);
+
+  useEffect(() => {
+    fetchFloorState();
+    const interval = setInterval(() => {
+      fetchFloorState();
+    }, 4000);
+    return () => clearInterval(interval);
+  }, [fetchFloorState]);
 
   return (
     <PdaLayoutWrapper
