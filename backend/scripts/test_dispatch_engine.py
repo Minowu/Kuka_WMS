@@ -2,11 +2,11 @@
 End-to-End Verification Script for CNC Production & KUKA AMR Dispatch Engine (3NF).
 
 Verifies:
-1. User Location Assignment Constraint (Max 3 locations per user).
+1. Unrestricted User Location Assignment (`assign_locations_to_user` supports assigning 7 Raw Material or 6 CNC slots).
 2. Scenario 1 & 2 (FIFO Cart Selection + POS1/POS2 Buffering at CNC-01).
-3. Scenario 3 (Multi-Stage Progression Level 1 -> Level 2 -> Level 3 -> Washing -> Empty Cart Return).
-4. Queueing (`TransportQueue` WAITING_CART) & Raw Material Rack QR Registration (`register_rack_at_raw_material` reusing rack QR + auto-dispatching to waiting CNC).
-5. KUKA Fleet Webhook Callback (`receive_task_status` -> `TaskStatus` + `FleetTask` + `ItemStock` settlement).
+3. Scenario 3 (Pull + Always Scan Multi-Stage Progression: Intermediate stage completion + Downstream CNC Call auto-inferring stage_level -> Final CNC step auto-pushing to Washing).
+4. Scenario 4 (Empty Cart Buffer Round-Robin 1..4 & Automatic Rack Removal `location_id=None, is_active=False` upon AMR dropoff).
+5. Queueing (`TransportQueue` WAITING_CART) & Raw Material Rack QR Registration (`register_rack_at_raw_material` reusing rack QR + auto-dispatching to waiting CNC).
 """
 
 from pathlib import Path
@@ -47,7 +47,7 @@ def reset_runtime_tables(db) -> None:
 
 
 def run_verification() -> None:
-    print("🚀 Bắt đầu kiểm thử End-to-End Dispatch Engine (3NF + Fleet Webhook + Rack QR)...")
+    print("🚀 Bắt đầu kiểm thử End-to-End Dispatch Engine (3NF + Pull/Always-Scan + Empty Buffer 1..4)...")
     db = SessionLocal()
     try:
         reset_runtime_tables(db)
@@ -67,32 +67,28 @@ def run_verification() -> None:
 
         # Lookup seeded entities
         model_a = db.query(Item).filter(Item.sku == "MODEL-A").first()
-        model_b = db.query(Item).filter(Item.sku == "MODEL-B").first()
         cnc01_pos1 = db.query(Location).filter(Location.location_code == "CNC-01-POS1").first()
         cnc01_pos2 = db.query(Location).filter(Location.location_code == "CNC-01-POS2").first()
         cnc02_pos1 = db.query(Location).filter(Location.location_code == "CNC-02-POS1").first()
-        raw03 = db.query(Location).filter(Location.location_code == "RAW-03").first()
+        cnc03_pos1 = db.query(Location).filter(Location.location_code == "CNC-03-POS1").first()
+        cnc04_pos1 = db.query(Location).filter(Location.location_code == "CNC-04-POS1").first()
 
         # ---------------------------------------------------------------------
-        # TEST 1: User Location Constraint (Max 3 locations per operator)
+        # TEST 1: Unrestricted User Location Assignment (e.g. 7 Raw Material slots)
         # ---------------------------------------------------------------------
         user = db.query(User).first()
         if user:
-            all_locs = db.query(Location).limit(4).all()
-            if len(all_locs) >= 4:
-                try:
-                    dispatch_service.assign_locations_to_user(
-                        db, user.id, [loc.id for loc in all_locs[:4]]
-                    )
-                    raise AssertionError("Expected ValueError when assigning 4 locations to a user!")
-                except ValueError as e:
-                    print(f"  ✔ [Test 1a] Chặn gán >3 vị trí thành công: {e}")
-
-                assigned = dispatch_service.assign_locations_to_user(
-                    db, user.id, [loc.id for loc in all_locs[:3]]
-                )
-                assert len(assigned) == 3
-                print("  ✔ [Test 1b] Gán 3 vị trí hợp lệ cho User thành công!")
+            raw_locs = (
+                db.query(Location)
+                .filter(Location.location_type == "RAW_MATERIAL", Location.is_active.is_(True))
+                .all()
+            )
+            assert len(raw_locs) >= 7, f"Expected >= 7 RAW_MATERIAL locations, got {len(raw_locs)}"
+            assigned = dispatch_service.assign_locations_to_user(
+                db, user.id, [loc.id for loc in raw_locs]
+            )
+            assert len(assigned) == len(raw_locs)
+            print(f"  ✔ [Test 1] Gán không giới hạn ({len(assigned)} vị trí) cho User thành công!")
 
         # ---------------------------------------------------------------------
         # TEST 2: FIFO Cart Selection & POS1 / POS2 Buffering at CNC-01
@@ -104,16 +100,26 @@ def run_verification() -> None:
         assert cart1.cart_code == "CART-001", f"Expected FIFO CART-001, got {cart1.cart_code}"
         assert cart1.is_locked is True
         assert req1.destination_location_id == cnc01_pos1.id
+        assert req1.required_stage_level == 0
         print(f"  ✔ [Test 2a] Chọn xe FIFO chính xác: {cart1.cart_code} -> CNC-01-POS1 (Locked={cart1.is_locked})")
 
-        # Call material again targeting CNC-01-POS1 while POS1 is already reserved -> auto fallback to POS2!
+        # Call material targeting CNC-01-POS1 while POS1 is already reserved -> raises error!
+        try:
+            dispatch_service.call_material_to_cnc(
+                db, destination_location_id=cnc01_pos1.id, item_id=model_a.id
+            )
+            assert False, "Calling occupied POS1 should raise error!"
+        except ValueError as err:
+            assert "đang có xe hoặc đã có AMR đặt chỗ" in str(err)
+
+        # Operator explicitly selects free sibling slot CNC-01-POS2 -> calls successfully!
         req2 = dispatch_service.call_material_to_cnc(
-            db, destination_location_id=cnc01_pos1.id, item_id=model_a.id
+            db, destination_location_id=cnc01_pos2.id, item_id=model_a.id
         )
         cart2 = db.query(ItemStock).filter(ItemStock.id == req2.cart_id).first()
         assert cart2.cart_code == "CART-002", f"Expected second FIFO CART-002, got {cart2.cart_code}"
-        assert req2.destination_location_id == cnc01_pos2.id, "Expected automatic fallback to CNC-01-POS2!"
-        print(f"  ✔ [Test 2b] Tự động điều hướng sang vị trí đệm dự phòng: {cart2.cart_code} -> CNC-01-POS2")
+        assert req2.destination_location_id == cnc01_pos2.id, "Expected destination to be CNC-01-POS2!"
+        print(f"  ✔ [Test 2b] Khóa chặt vị trí công nhân chọn: Chặn gọi vào POS1 bận, điều xe chính xác vào CNC-01-POS2 ({cart2.cart_code})!")
 
         # Simulate KUKA Fleet Webhook (/receive-status) for both deliveries (status="8" -> completed)
         task1 = db.query(FleetTask).filter(FleetTask.request_id == req1.id).first()
@@ -140,40 +146,52 @@ def run_verification() -> None:
         print("  ✔ [Test 2c] Webhook /receive-status lưu TaskStatus và cập nhật vị trí + mở khóa xe thành công!")
 
         # ---------------------------------------------------------------------
-        # TEST 3: Multi-Stage Progression (Level 1 -> Level 2 -> Level 3 -> Washing -> Empty Return)
+        # TEST 3: Pull + Always Scan Multi-Stage Progression (Level 1 -> Level 2 -> Level 3 -> Washing)
         # ---------------------------------------------------------------------
+        # 3a. Complete Level 1 at CNC-01-POS1 while CNC-03 has NOT called yet -> cart stays at CNC-01-POS1 (Level 1)
         res_lvl1 = dispatch_service.complete_machining_stage(db, cart_code="CART-001")
         assert res_lvl1["completed_stage_level"] == 1
-        assert res_lvl1["action"] == "DISPATCHED_TO_NEXT_STAGE"
-        task_lvl2 = (
-            db.query(FleetTask)
-            .join(TransportRequest, FleetTask.request_id == TransportRequest.id)
-            .filter(TransportRequest.request_code == res_lvl1["request_code"])
-            .first()
+        assert res_lvl1["action"] == "STAGE_COMPLETED_WAITING_CALL"
+        db.refresh(cart1)
+        assert cart1.current_stage_level == 1 and cart1.location_id == cnc01_pos1.id and cart1.is_locked is False
+        print("  ✔ [Test 3a] Hoàn thành Level 1 (bước trung gian): chỉ nâng Level 1 và đứng chờ gọi tại CNC-01-POS1")
+
+        # Now CNC-03-POS1 (Stage 2 machine) calls MODEL-A without passing required_stage_level -> auto-infers Level 1!
+        req_lvl2 = dispatch_service.call_material_to_cnc(
+            db, destination_location_id=cnc03_pos1.id, item_id=model_a.id
         )
+        assert req_lvl2.required_stage_level == 1, f"Expected auto-inferred required_stage_level=1, got {req_lvl2.required_stage_level}"
+        assert req_lvl2.cart_id == cart1.id and req_lvl2.status == "in_progress"
+        task_lvl2 = db.query(FleetTask).filter(FleetTask.request_id == req_lvl2.id).first()
         dispatch_service.receive_task_status(db, {"orderId": task_lvl2.task_code, "status": "8"})
         db.refresh(cart1)
-        loc_lvl2 = db.query(Location).filter(Location.id == cart1.location_id).first()
-        assert loc_lvl2.machine_code == "CNC-03"
-        print(f"  ✔ [Test 3a] Hoàn thành Level 1 -> Tự động chuyển sang {loc_lvl2.location_code} (Level 2)")
+        assert cart1.location_id == cnc03_pos1.id and cart1.is_locked is False
+        print("  ✔ [Test 3b] Máy CNC-03 bấm Gọi hàng -> Tự suy ra Level 1 và kéo xe CART-001 sang CNC-03-POS1!")
 
+        # 3c. Now test the reverse order: CNC-04-POS1 (Stage 3 machine) calls MODEL-A BEFORE CNC-03 finishes Level 2!
+        req_lvl3 = dispatch_service.call_material_to_cnc(
+            db, destination_location_id=cnc04_pos1.id, item_id=model_a.id
+        )
+        assert req_lvl3.required_stage_level == 2
+        assert req_lvl3.status == "queued_for_cart"
+        print("  ✔ [Test 3c] Máy CNC-04 bấm Gọi hàng khi chưa có xe Level 2 -> Đưa vào hàng đợi WAITING_CART (Level 2)")
+
+        # Now CNC-03 finishes Level 2 -> Immediately scans WAITING_CART and dispatches CART-001 to CNC-04-POS1!
         res_lvl2 = dispatch_service.complete_machining_stage(db, cart_code="CART-001")
         assert res_lvl2["completed_stage_level"] == 2
-        assert res_lvl2["action"] == "DISPATCHED_TO_NEXT_STAGE"
-        task_lvl3 = (
-            db.query(FleetTask)
-            .join(TransportRequest, FleetTask.request_id == TransportRequest.id)
-            .filter(TransportRequest.request_code == res_lvl2["request_code"])
-            .first()
-        )
+        assert res_lvl2["action"] == "DISPATCHED_TO_WAITING_CNC"
+        assert res_lvl2["resolved_queue_count"] == 1
+        task_lvl3 = db.query(FleetTask).filter(FleetTask.request_id == req_lvl3.id).first()
+        assert task_lvl3 is not None
         dispatch_service.receive_task_status(db, {"orderId": task_lvl3.task_code, "status": "8"})
         db.refresh(cart1)
-        loc_lvl3 = db.query(Location).filter(Location.id == cart1.location_id).first()
-        assert loc_lvl3.machine_code == "CNC-04"
-        print(f"  ✔ [Test 3b] Hoàn thành Level 2 -> Tự động chuyển sang {loc_lvl3.location_code} (Level 3)")
+        assert cart1.location_id == cnc04_pos1.id and cart1.is_locked is False
+        print("  ✔ [Test 3d] CNC-03 bấm Hoàn thành Level 2 -> Always-Scan khớp ngay với đơn chờ của CNC-04-POS1!")
 
+        # 3e. Complete Level 3 (Final CNC step) at CNC-04 -> Automatically pushes to WASHING_SLOT!
         res_lvl3 = dispatch_service.complete_machining_stage(db, cart_code="CART-001")
         assert res_lvl3["completed_stage_level"] == 3
+        assert res_lvl3["is_final_cnc_step"] is True
         assert res_lvl3["action"] == "DISPATCHED_TO_WASHING"
         task_wash = (
             db.query(FleetTask)
@@ -185,22 +203,34 @@ def run_verification() -> None:
         db.refresh(cart1)
         loc_wash = db.query(Location).filter(Location.id == cart1.location_id).first()
         assert loc_wash.location_type == "WASHING_SLOT"
-        print(f"  ✔ [Test 3c] Hoàn thành Level 3 (Final CNC) -> Tự động chuyển sang Trạm Rửa ({loc_wash.location_code})")
+        print(f"  ✔ [Test 3e] Hoàn thành Level 3 (Final CNC) -> Tự động đẩy sang Trạm Rửa ({loc_wash.location_code})")
 
-        req_empty = dispatch_service.complete_washing_and_return_empty_cart(db, cart_code="CART-001")
-        task_empty = db.query(FleetTask).filter(FleetTask.request_id == req_empty.id).first()
-        dispatch_service.receive_task_status(db, {"orderId": task_empty.task_code, "status": "8"})
+        # ---------------------------------------------------------------------
+        # TEST 4: Empty Cart Buffer Round-Robin (1 -> 2 -> 3 -> 4) & Auto-Delete on Dropoff
+        # ---------------------------------------------------------------------
+        # Return CART-001 from Washing -> should pick EMPTY-01, and upon arrival delete/unbind cart!
+        req_empty1 = dispatch_service.complete_washing_and_return_empty_cart(db, cart_code="CART-001")
+        loc_buf1 = db.query(Location).filter(Location.id == req_empty1.destination_location_id).first()
+        assert loc_buf1.location_code == "EMPTY-01", f"Expected EMPTY-01, got {loc_buf1.location_code}"
+        task_empty1 = db.query(FleetTask).filter(FleetTask.request_id == req_empty1.id).first()
+        dispatch_service.receive_task_status(db, {"orderId": task_empty1.task_code, "status": "8"})
         db.refresh(cart1)
-        loc_empty = db.query(Location).filter(Location.id == cart1.location_id).first()
-        assert loc_empty.location_type == "EMPTY_CART_BUFFER"
-        assert cart1.quantity == 0
-        print(f"  ✔ [Test 3d] Hoàn thành Rửa -> Tự động trả xe rỗng về ({loc_empty.location_code}, quantity={cart1.quantity})")
+        assert cart1.location_id is None and cart1.is_active is False and cart1.quantity == 0 and cart1.status == "empty"
+        print("  ✔ [Test 4a] Xe rỗng 1 về EMPTY-01 -> Khi hạ xe tự động gọi fleet_remove_rack & xóa khỏi vị trí (location_id=None, is_active=False)!")
+
+        # Return CART-002 from Washing -> Round-Robin must pick EMPTY-02 (even though EMPTY-01 is now free)!
+        req_empty2 = dispatch_service.complete_washing_and_return_empty_cart(db, cart_code="CART-002")
+        loc_buf2 = db.query(Location).filter(Location.id == req_empty2.destination_location_id).first()
+        assert loc_buf2.location_code == "EMPTY-02", f"Expected Round-Robin EMPTY-02, got {loc_buf2.location_code}"
+        task_empty2 = db.query(FleetTask).filter(FleetTask.request_id == req_empty2.id).first()
+        dispatch_service.receive_task_status(db, {"orderId": task_empty2.task_code, "status": "8"})
+        db.refresh(cart2)
+        assert cart2.location_id is None and cart2.is_active is False
+        print("  ✔ [Test 4b] Xe rỗng 2 tự động xoay vòng sang EMPTY-02 (Round-Robin 1->4) & tự xóa khi hạ xe!")
 
         # ---------------------------------------------------------------------
-        # TEST 4: Queueing (WAITING_CART) & Raw Material Reusable Rack QR Registration
+        # TEST 5: Queueing (WAITING_CART) & Raw Material Reusable Rack QR Registration
         # ---------------------------------------------------------------------
-        # Both CART-001 and CART-002 are no longer at RAW_MATERIAL.
-        # Calling MODEL-A to CNC-02-POS1 now must enter WAITING_CART queue!
         req_queued = dispatch_service.call_material_to_cnc(
             db, destination_location_id=cnc02_pos1.id, item_id=model_a.id
         )
@@ -211,10 +241,11 @@ def run_verification() -> None:
             .first()
         )
         assert q_entry is not None and q_entry.status == "PENDING"
-        print(f"  ✔ [Test 4a] Hết phôi MODEL-A -> Tự động đưa yêu cầu {req_queued.request_code} vào TransportQueue (WAITING_CART)")
+        print(f"  ✔ [Test 5a] Hết phôi MODEL-A -> Tự động đưa yêu cầu {req_queued.request_code} vào TransportQueue (WAITING_CART)")
 
-        # Now operator brings empty rack CART-001 back to RAW-01, selects MODEL-A, and scans QR CART-001!
-        raw01 = db.query(Location).filter(Location.location_code == "RAW-01").first()
+        # Operator brings empty rack CART-001 back to VT-01, selects MODEL-A, and scans QR CART-001!
+        raw01 = db.query(Location).filter(Location.location_code.in_(["VT-01", "RAW-01"])).first()
+        assert raw01 is not None, "Vị trí VT-01 / RAW-01 không tìm thấy"
         reg_res = dispatch_service.register_rack_at_raw_material(
             db=db,
             location_id=raw01.id,
@@ -231,7 +262,7 @@ def run_verification() -> None:
         assert q_entry.status == "RESOLVED"
         assert req_queued.status == "in_progress"
         print(
-            f"  ✔ [Test 4b] Quét QR tái sử dụng rack CART-001 tại RAW-01 -> Tự động gửi POST insert Fleet & giải phóng Queue ({reg_res['dispatched_task_code']})!"
+            f"  ✔ [Test 5b] Quét QR tái sử dụng rack CART-001 tại RAW-01 -> Tự động gửi POST insert Fleet & giải phóng Queue ({reg_res['dispatched_task_code']})!"
         )
 
         print("\n🎉 TẤT CẢ CÁC KỊCH BẢN KIỂM THỬ ĐỀU VƯỢT QUA 100%!")

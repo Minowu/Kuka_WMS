@@ -48,7 +48,6 @@ from app.modules.production.production_models import (
 from app.modules.warehouse.item.item_model import Item
 from app.modules.warehouse.item_stock.item_stock_model import ItemStock
 from app.modules.warehouse.location_map.location_model import Location
-from app.modules.warehouse.notificcation.notification_model import Notification  # noqa: F401
 from app.modules.warehouse.warehouse_zone.warehouse_model import Warehouse
 
 
@@ -68,21 +67,20 @@ def seed_production_core() -> None:
                 db.add(warehouse)
                 db.flush()
 
-        # 2. Physical CNC Machines (3NF)
+        # 2. Physical CNC Machines (3NF) - No default_stage_level
         machine_defs = [
-            ("CNC-01", "Máy CNC 01 (Level 1)", 1),
-            ("CNC-02", "Máy CNC 02 (Level 1)", 1),
-            ("CNC-03", "Máy CNC 03 (Level 2)", 2),
-            ("CNC-04", "Máy CNC 04 (Level 3)", 3),
+            ("CNC-01", "Máy CNC 01"),
+            ("CNC-02", "Máy CNC 02"),
+            ("CNC-03", "Máy CNC 03"),
+            ("CNC-04", "Máy CNC 04"),
         ]
         machines_by_code: dict[str, Machine] = {}
-        for m_code, m_name, m_stage in machine_defs:
+        for m_code, m_name in machine_defs:
             m = db.query(Machine).filter(Machine.machine_code == m_code).first()
             if not m:
                 m = Machine(
                     machine_code=m_code,
                     machine_name=m_name,
-                    default_stage_level=m_stage,
                     warehouse_id=warehouse.id,
                     is_active=True,
                 )
@@ -90,42 +88,48 @@ def seed_production_core() -> None:
                 db.flush()
             else:
                 m.machine_name = m_name
-                m.default_stage_level = m_stage
                 m.warehouse_id = warehouse.id
                 m.is_active = True
             machines_by_code[m_code] = m
 
-        # 3. Locations
+        # 3. Locations mapped strictly to the 16 real Rack nodes (functionType == 2) from map_CNC001_CNC001_28s.json
+        # Format: (code, name, bin_code, loc_type, machine_code, pos_idx, node_label, map_x, map_y)
         location_defs = [
-            # Raw Material Staging
-            ("RAW-01", "Khu Nguyên Liệu 01", "RAW-01", "RAW_MATERIAL", None, None, None),
-            ("RAW-02", "Khu Nguyên Liệu 02", "RAW-02", "RAW_MATERIAL", None, None, None),
-            ("RAW-03", "Khu Nguyên Liệu 03", "RAW-03", "RAW_MATERIAL", None, None, None),
-            # CNC Stage 1 (CNC-01 & CNC-02)
-            ("CNC-01-POS1", "Máy CNC 01 - Vị trí 1 (Gia công)", "CNC-01-POS1", "CNC_SLOT", "CNC-01", 1, 1),
-            ("CNC-01-POS2", "Máy CNC 01 - Vị trí 2 (Chờ)", "CNC-01-POS2", "CNC_SLOT", "CNC-01", 2, 1),
-            ("CNC-02-POS1", "Máy CNC 02 - Vị trí 1 (Gia công)", "CNC-02-POS1", "CNC_SLOT", "CNC-02", 1, 1),
-            ("CNC-02-POS2", "Máy CNC 02 - Vị trí 2 (Chờ)", "CNC-02-POS2", "CNC_SLOT", "CNC-02", 2, 1),
-            # CNC Stage 2 (CNC-03)
-            ("CNC-03-POS1", "Máy CNC 03 - Vị trí 1 (Gia công)", "CNC-03-POS1", "CNC_SLOT", "CNC-03", 1, 2),
-            ("CNC-03-POS2", "Máy CNC 03 - Vị trí 2 (Chờ)", "CNC-03-POS2", "CNC_SLOT", "CNC-03", 2, 2),
-            # CNC Stage 3 (CNC-04)
-            ("CNC-04-POS1", "Máy CNC 04 - Vị trí 1 (Gia công)", "CNC-04-POS1", "CNC_SLOT", "CNC-04", 1, 3),
-            ("CNC-04-POS2", "Máy CNC 04 - Vị trí 2 (Chờ)", "CNC-04-POS2", "CNC_SLOT", "CNC-04", 2, 3),
-            # Washing Station
-            ("WASH-01", "Trạm Tẩy Rửa 01", "WASH-01", "WASHING_SLOT", None, 1, None),
-            # Empty Cart Buffer
-            ("EMPTY-01", "Bãi Xe Rỗng 01", "EMPTY-01", "EMPTY_CART_BUFFER", None, 1, None),
-            ("EMPTY-02", "Bãi Xe Rỗng 02", "EMPTY-02", "EMPTY_CART_BUFFER", None, 2, None),
+            # Raw Material Staging (7 slots) - VT-01..07 mapped to rack nodes
+            ("VT-01", "Ô Cấp Phôi 1", "VT-01", "RAW_MATERIAL", None, 1, "51", 180913, 77500),
+            ("VT-02", "Ô Cấp Phôi 2", "VT-02", "RAW_MATERIAL", None, 2, "50", 179713, 77500),
+            ("VT-03", "Ô Cấp Phôi 3", "VT-03", "RAW_MATERIAL", None, 3, "4", 178513, 77500),
+            ("VT-04", "Ô Cấp Phôi 4", "VT-04", "RAW_MATERIAL", None, 4, "17", 179713, 83800),
+            ("VT-05", "Ô Cấp Phôi 5", "VT-05", "RAW_MATERIAL", None, 5, "18", 178513, 83800),
+            ("VT-06", "Ô Cấp Phôi 6", "VT-06", "RAW_MATERIAL", None, 6, "20", 180913, 83800),
+            ("VT-07", "Ô Cấp Phôi 7", "VT-07", "RAW_MATERIAL", None, 7, "23", 182113, 83800),
+
+            # CNC Machines (CNC-01 with 2 slots POS1 & POS2; CNC-02..04 with POS1)
+            ("CNC-01-POS1", "Máy CNC 01 - Vị trí 1", "CNC-01-POS1", "CNC_SLOT", "CNC-01", 1, "216", 164249, 52600),
+            ("CNC-01-POS2", "Máy CNC 01 - Vị trí 2", "CNC-01-POS2", "CNC_SLOT", "CNC-01", 2, "249", 156049, 52600),
+            ("CNC-02-POS1", "Máy CNC 02 - Vị trí 1", "CNC-02-POS1", "CNC_SLOT", "CNC-02", 1, "127", 171000, 41700),
+            ("CNC-03-POS1", "Máy CNC 03 - Vị trí 1", "CNC-03-POS1", "CNC_SLOT", "CNC-03", 1, "128", 172500, 41700),
+            ("CNC-04-POS1", "Máy CNC 04 - Vị trí 1", "CNC-04-POS1", "CNC_SLOT", "CNC-04", 1, "129", 174000, 41700),
+
+            # Washing Station (2 slots)
+            ("WASH-01", "Slot Rửa 1", "WASH-01", "WASHING_SLOT", None, 1, "130", 175500, 41700),
+            ("WASH-02", "Slot Rửa 2", "WASH-02", "WASHING_SLOT", None, 2, "24", 183313, 83800),
+
+            # Empty Cart Buffers (2 slots)
+            ("EMPTY-01", "Bãi đệm 1", "EMPTY-01", "EMPTY_CART_BUFFER", None, 1, "25", 184513, 83800),
+            ("EMPTY-02", "Bãi đệm 2", "EMPTY-02", "EMPTY_CART_BUFFER", None, 2, "26", 185713, 83800),
         ]
 
         locations_by_code: dict[str, Location] = {}
-        for code, name, bin_code, loc_type, machine_code, pos_idx, def_stage in location_defs:
+        for code, name, bin_code, loc_type, machine_code, pos_idx, node_lbl, mx, my in location_defs:
+            lookup_codes = [code]
+            if code.startswith("VT-"):
+                lookup_codes.append(f"RAW-0{pos_idx}")
             loc = (
                 db.query(Location)
                 .filter(
                     Location.warehouse_id == warehouse.id,
-                    Location.location_code == code,
+                    Location.location_code.in_(lookup_codes),
                 )
                 .first()
             )
@@ -139,20 +143,29 @@ def seed_production_core() -> None:
                     machine_id=machine_obj.id if machine_obj else None,
                     machine_code=machine_code,
                     position_index=pos_idx,
-                    default_stage_level=def_stage,
+                    node_label=node_lbl,
+                    map_x=mx,
+                    map_y=my,
                     warehouse_id=warehouse.id,
                     is_active=True,
                 )
                 db.add(loc)
                 db.flush()
             else:
+                loc.location_code = code
+                loc.location_name = name
+                loc.bin_code = bin_code
                 loc.location_type = loc_type
                 loc.machine_id = machine_obj.id if machine_obj else None
                 loc.machine_code = machine_code
                 loc.position_index = pos_idx
-                loc.default_stage_level = def_stage
+                loc.node_label = node_lbl
+                loc.map_x = mx
+                loc.map_y = my
                 loc.is_active = True
             locations_by_code[code] = loc
+            if code.startswith("VT-"):
+                locations_by_code[f"RAW-0{pos_idx}"] = loc
 
         # 4. Product Models (Items)
         item_defs = [
@@ -167,10 +180,8 @@ def seed_production_core() -> None:
                     sku=sku,
                     name=name,
                     description=f"Sản phẩm cơ khí {name}",
-                    base_quantity=1,
+                    supplier="KUKA_CNC",
                     standard_quantity_per_cart=std_qty,
-                    max_quantity=10000,
-                    min_quantity=100,
                     is_active=True,
                     warehouse_id=warehouse.id,
                     details={"type": "CNC_PART"},
@@ -287,8 +298,97 @@ def seed_production_core() -> None:
                 cart.is_active = True
                 cart.created_at = created_ts
 
+        # 7. Production Users & Functional Station Permissions (Real Data)
+        from app.core.security import get_password_hash
+
+        role_admin = db.query(Role).filter(Role.name == "admin").first()
+        if not role_admin:
+            role_admin = Role(name="admin", description="Quản trị viên xưởng")
+            db.add(role_admin)
+            db.flush()
+
+        role_operator = db.query(Role).filter(Role.name == "operator").first()
+        if not role_operator:
+            role_operator = Role(name="operator", description="Công nhân vận hành trạm")
+            db.add(role_operator)
+            db.flush()
+
+        user_configs = [
+            (
+                "admin",
+                "admin@kuka.com",
+                "admin123",
+                role_admin,
+                [],  # admin has universal access to all stations
+            ),
+            (
+                "op_raw",
+                "op_raw@kuka.com",
+                "123456",
+                role_operator,
+                ["VT-01", "VT-02", "VT-03", "VT-04", "VT-05", "VT-06", "VT-07"],
+            ),
+            (
+                "op_cnc_stage1",
+                "op_cnc_stage1@kuka.com",
+                "123456",
+                role_operator,
+                ["CNC-01-POS1", "CNC-01-POS2", "CNC-02-POS1"],
+            ),
+            (
+                "op_cnc_stage2",
+                "op_cnc_stage2@kuka.com",
+                "123456",
+                role_operator,
+                ["CNC-03-POS1", "CNC-04-POS1"],
+            ),
+            (
+                "op_washing",
+                "op_washing@kuka.com",
+                "123456",
+                role_operator,
+                ["WASH-01", "WASH-02"],
+            ),
+        ]
+
+        for uname, uemail, upwd, urole, loc_codes in user_configs:
+            u = db.query(User).filter(User.username == uname).first()
+            if not u:
+                u = User(
+                    username=uname,
+                    email=uemail,
+                    hashed_password=get_password_hash(upwd),
+                    is_active=True,
+                )
+                db.add(u)
+                db.flush()
+            else:
+                u.email = uemail
+                u.hashed_password = get_password_hash(upwd)
+                u.is_active = True
+                db.flush()
+
+            # Ensure warehouse link
+            uw = db.query(UserWarehouse).filter(
+                UserWarehouse.user_id == u.id,
+                UserWarehouse.warehouse_id == warehouse.id,
+            ).first()
+            if not uw:
+                db.add(UserWarehouse(user_id=u.id, warehouse_id=warehouse.id))
+
+            # Ensure role link
+            db.query(UserRole).filter(UserRole.user_id == u.id).delete(synchronize_session=False)
+            db.add(UserRole(user_id=u.id, role_id=urole.id))
+
+            # Assign physical station locations
+            db.query(UserLocation).filter(UserLocation.user_id == u.id).delete(synchronize_session=False)
+            for lc in loc_codes:
+                loc_obj = locations_by_code.get(lc)
+                if loc_obj:
+                    db.add(UserLocation(user_id=u.id, location_id=loc_obj.id))
+
         db.commit()
-        print("✅ Seed dữ liệu CNC Production & AMR Dispatch (3NF Machine) thành công!")
+        print("✅ Seed dữ liệu CNC Production & AMR Dispatch (3NF Machine + 5 Users) thành công!")
     except Exception:
         db.rollback()
         raise
@@ -298,3 +398,4 @@ def seed_production_core() -> None:
 
 if __name__ == "__main__":
     seed_production_core()
+

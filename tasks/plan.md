@@ -1,107 +1,102 @@
-# Implementation Plan: KUKA AMR Core Database & Production Engine
+# Implementation Plan: Cấu Hình Trạm Phân Khu, Phân Quyền 1 Khu Vực & Gắn Node Map Thật
 
-## Overview
-Xây dựng khối cơ sở dữ liệu cốt lõi (Core Database Architecture) và hạ tầng điều phối cho hệ thống KUKA AMR chuyển đổi từ WMS cũ sang hệ thống cấp phôi và trung chuyển WIP cho xưởng gia công cơ khí CNC.
-Hệ thống kết nối trực tiếp với giao diện PDA 4.2" của công nhân tại 3 khu vực: Khu Nguyên Liệu, Khu Máy CNC (mỗi máy có 2 vị trí Vào/Ra độc lập), và Khu Tẩy Rửa (kèm Bãi đệm xe rỗng).
-
-## Locked Architectural Constraints & Business Rules (QUY TẮC BẮT BUỘC)
-> [!IMPORTANT]
-> **QUY TẮC SỐ 1 VỀ MÁY CNC: 1 MÁY CNC CÓ 2 VỊ TRÍ ĐỖ XE VẬT LÝ ĐỘC LẬP**
-> - Mỗi máy CNC (ví dụ `CNC-01`) trên sàn xưởng luôn có **2 vị trí đỗ xe vật lý** (`CNC01_POS1` và `CNC01_POS2`).
-> - **Cả 2 vị trí đều có chức năng Vào (Infeed) và Ra (Outfeed) độc lập**:
->   + Khi vị trí TRỐNG: Công nhân bấm [GỌI PHÔI] $\rightarrow$ AMR chở xe phôi tới hạ vào vị trí này.
->   + Khi gia công xong 120 chi tiết trên xe: Công nhân bấm [BÁO XONG / UPDATE LEVEL] $\rightarrow$ AMR tới cõng xe tại vị trí này đi công đoạn tiếp hoặc sang Tẩy Rửa.
->   + Cơ chế này giúp công nhân **gia công gối đầu liên tục (Double-buffering / Zero CNC Starvation)**: đang chạy xe ở Vị trí 1 thì gọi trước xe vào Vị trí 2.
-> - **Quy tắc hiển thị PDA**:
->   + Công nhân quản lý 1 máy CNC $\rightarrow$ thấy **2 thẻ vị trí**.
->   + Công nhân quản lý 2 máy CNC $\rightarrow$ thấy **4 thẻ vị trí**.
-
-> [!IMPORTANT]
-> **CÁC QUY TẮC CỐT LÕI KHÁC**
-> 1. **Số lượng chi tiết trên xe gá phôi**: Cố định **120 chi tiết** (hoặc 180 theo cấu hình Model). Công nhân trên PDA quét mã QR 1 chạm, tuyệt đối không gõ số lượng.
-> 2. **Hủy yêu cầu gọi xe**: Không có nút Hủy trên PDA. Chỉ Admin PC mới có quyền hủy. Nếu AMR đang di chuyển cõng xe trên đường thì không được hủy giữa đường, robot bắt buộc phải cập bến an toàn rồi mới xử lý.
-> 3. **Sau Tẩy Rửa**: Công nhân bấm "Đã lấy đi rửa" (giải phóng slot) $\rightarrow$ Hệ thống tự động gửi lệnh `RETURN_EMPTY_CART` để AMR cõng xe rỗng hồi vị về **Bãi đệm xe rỗng (Empty Cart Buffer)**.
-> 4. **Hai đầu cố định & Chuỗi CNC biến thiên**:
->   + Đầu vào cố định: Khu Nguyên Liệu `VT-01`..`VT-07` $\rightarrow$ sinh ra xe phôi `Level = 0`.
->   + Dây chuyền CNC ở giữa: `Level 1` đến `Level N` (quản lý bởi `production_route` & `route_step`).
->   + Đầu ra cố định: Khu Tẩy Rửa (4 Slot). Khi bước CNC cuối cùng (`is_final_cnc_step = True`) hoàn thành $\rightarrow$ AMR tự động chuyển vào slot tẩy rửa trống.
+## 1. Overview & Locked Decisions
+Kế hoạch triển khai toàn diện dựa trên 100% sự thống nhất từ buổi thảo luận chi tiết:
+1. **Loại bỏ hoàn toàn khái niệm "Công đoạn mặc định" (`default_stage_level`)**:
+   - Công đoạn gia công (Level) thuộc về **Quy trình (Route)** của từng Model sản phẩm (`production_route` -> `route_step` -> `route_step_machine`), không gắn chết cứng vào Máy CNC hay Location.
+2. **Xây dựng trang hợp nhất "Cấu hình Trạm & Phân Khu Xưởng" (`/production/stations`) gồm 3 Tab**:
+   - **Tab 1: Khu Nguyên Liệu**: Quản lý các ô cấp phôi (`VT-01..07`). Mỗi ô chọn gắn với Node trên Map KUKA đã import.
+   - **Tab 2: Khu Máy CNC**: Quản lý các Máy CNC (`CNC-01..`). Mỗi máy hỗ trợ linh hoạt từ 1 đến 3 vị trí đỗ vật lý (`POS1`, `POS2`, `POS3`), mỗi vị trí chọn gắn với Node trên Map KUKA. Không còn `default_stage_level`.
+   - **Tab 3: Khu Tẩy Rửa & Bãi Đệm Xe Rỗng**: Quản lý các slot tẩy rửa (`WASH-01..04`) và bãi đệm xe rỗng (`EMPTY-01..04`), mỗi slot gắn với Node trên Map KUKA.
+   - Bản đồ 2D (`WarehouseMapCanvas`) được giữ riêng làm màn hình giám sát thời gian thực / vận hành AMR, không bị lẫn các công cụ vẽ/đính trạm.
+3. **Phân quyền Người dùng theo 1 Khu vực duy nhất (1 User = 1 Area)**:
+   - Trong trang Quản lý Người dùng, modal "Phân trạm" cho phép chọn 1 trong 3 khu vực:
+     + Khu Cấp Phôi: Tick chọn cả 7 ô hoặc một vài ô cụ thể.
+     + Khu Tẩy Rửa: Tick chọn cả 4 slot hoặc một vài slot cụ thể.
+     + Khu CNC: Tick chọn theo Máy CNC (chọn máy nào thì quản lý toàn bộ các slot POS1/POS2/POS3 của máy đó).
+   - Khi lưu: Tự động thu hồi các quyền ở khu vực cũ, đảm bảo nghiêm ngặt 1 tài khoản chỉ thuộc 1 khu vực.
+4. **Đồng bộ Giao diện PDA Cầm tay 4.2"**:
+   - Công nhân đăng nhập tự động vào đúng màn hình khu vực của mình.
+   - Màn hình PDA chỉ render đúng các ô hoặc máy CNC (POS1/POS2/POS3) mà công nhân đó được phân công.
 
 ---
 
-## Architecture Decisions & Table Schemas
+## 2. Architecture & Database Design
 
-### 1. Bảng vị trí `location` (Giữ nguyên cốt lõi, bổ sung trường CNC):
-- `id`: PK Integer
-- `location_code`: String(50) (e.g. `VT-01`..`07`, `CNC01_POS1`, `CNC01_POS2`, `CNC02_POS1`, `CNC02_POS2`... `WASH-01`..`04`, `BUF-01`..`04`)
-- `location_name`: String(100) (e.g. "CNC-01 (Vị trí 1)", "CNC-01 (Vị trí 2)")
-- `location_type`: String(30) (`RAW_MATERIAL`, `CNC_SLOT`, `WASHING_SLOT`, `EMPTY_CART_BUFFER`)
-- `machine_code`: String(50), nullable (Gom 2 vị trí về 1 máy, ví dụ `CNC-01`)
-- `position_index`: Integer, nullable (1 hoặc 2)
-- `map_x`, `map_y`: Integer (Tọa độ bản đồ 2D cho AMR chạy và vẽ canvas)
-- `warehouse_id`, `zone_id`, `is_active`
+### A. Database Migrations
+- Migration `drop_default_stage_level`:
+  - `ALTER TABLE machine DROP COLUMN IF EXISTS default_stage_level;`
+  - `ALTER TABLE location DROP COLUMN IF EXISTS default_stage_level;`
+- Migration cleanup mock locations:
+  - Xóa các bản ghi vị trí mock tọa độ ảo cũ (`RAW-01..07`, `CNC-01-POS1..POS2`, `WASH-01..04`, `EMPTY-01..04` với tọa độ giả 500, 2500, 8800).
+  - Tái lập và liên kết các vị trí dựa trên 23 functional nodes thật của file map `map_CNC001_CNC001_28s.json`.
 
-### 2. Bảng phân quyền vị trí `user_locations`:
-- `id`: PK Integer
-- `user_id`: FK `users.id`
-- `location_id`: FK `location.id`
-- Hỗ trợ công nhân 1 máy (gán 2 `location_id`), 2 máy (gán 4 `location_id`), nguyên liệu (gán 7 `location_id`), tẩy rửa (gán 4 `location_id`).
-
-### 3. Bảng quy trình `production_route` & `route_step`:
-- `production_route`: `id`, `name`, `item_id` (FK `item`), `version`, `is_active`
-- `route_step`:
-  - `id`: PK Integer
-  - `route_id`: FK `production_route.id`
-  - `step_number`: Integer (1, 2, 3...)
-  - `stage_level`: Integer (1, 2, 3...)
-  - `step_name`: String (e.g. "Phay Thô", "Phay Tinh", "Khoan Tappi")
-  - `allowed_machines`: JSONB (Danh sách mã máy hợp lệ song song, ví dụ: `["CNC-01", "CNC-02"]`)
-  - `is_final_cnc_step`: Boolean (Nếu True, hoàn thành sẽ tự động điều AMR sang Tẩy Rửa)
-
-### 4. Bảng xe gá phôi `item_stock` (WIP Cart / Rack):
-- Nâng cấp `item_stock`:
-  - `cart_code`: String(50), unique (Mã QR xe, e.g. `RCK-1021`)
-  - `item_id`: FK `item.id` (Model sản phẩm)
-  - `location_id`: FK `location.id` (Vị trí vật lý hiện tại của xe)
-  - `quantity`: Integer, default 120
-  - `current_stage_level`: Integer, default 0 (0: Nguyên liệu thô, 1: Xong B1, 2: Xong B2...)
-  - `is_locked`: Boolean, default False (Chống tranh chấp xe khi AMR đang nhận lệnh)
-  - `locked_by_task_id`: String, nullable
-  - `destination_location_id`: FK `location.id`, nullable
-
-### 5. Bảng điều phối `transport_request`, `transport_queue`, `fleet_task`, `production_record`:
-- `transport_request`: Yêu cầu gọi phôi / chuyển xe từ PDA hoặc tự động.
-- `transport_queue`: Hàng đợi tự động khi máy gọi nhưng chưa có xe sẵn sàng, hoặc khi máy CNC cuối xong nhưng cả 4 slot Tẩy Rửa đang đầy.
-- `fleet_task`: Giao tiếp với Fleet Manager (KUKA RCS).
-- `production_record`: Truy xuất nguồn gốc 100% (ai bấm Báo Xong, lúc nào, máy nào, vị trí nào, mẻ nào).
+### B. Quan hệ Thực thể & Mô hình Dữ liệu
+```mermaid
+erDiagram
+    MACHINE ||--o{ LOCATION : "có 1..3 vị trí đỗ (POS1, POS2, POS3)"
+    LOCATION ||--o{ USER_LOCATION : "phân quyền cho"
+    USER ||--o{ USER_LOCATION : "được gán các vị trí"
+    PRODUCTION_ROUTE ||--o{ ROUTE_STEP : "gồm các công đoạn"
+    ROUTE_STEP ||--o{ ROUTE_STEP_MACHINE : "cho phép chạy trên máy"
+    MACHINE ||--o{ ROUTE_STEP_MACHINE : "được chỉ định gia công"
+```
 
 ---
 
-## Task List
+## 3. Task Breakdown by Phases
 
-### Phase 1: Context Lock & Database Models
-- [x] Task 1: Cập nhật tài liệu thiết kế và đặc tả locked rules (`DOCS/core_database_architecture_specification.md`) ghi nhận rõ ràng quy tắc 1 máy CNC = 2 vị trí Vào/Ra độc lập.
-- [x] Task 2: Tạo SQLAlchemy Models trong `backend/app/modules/production/` và cập nhật `location_model.py`, `item_stock_model.py`, `item_model.py`.
-- [x] Task 3: Tạo Alembic Migration script tạo mới các bảng và các cột bổ sung.
+### Phase 1: Gỡ bỏ `default_stage_level` & Chuẩn hóa CSDL
+- [x] **Task 1.1**: Tạo migration Alembic gỡ bỏ cột `default_stage_level` khỏi bảng `location` và `machine`.
+- [x] **Task 1.2**: Cập nhật backend models (`location_model.py`, `production_models.py`), schemas (`machine_schema.py`) và router.
+- [x] **Task 1.3**: Làm sạch dữ liệu: Xóa các vị trí mock ảo tự sinh, liên kết lại các vị trí thực tế với các Node từ file map KUKA.
 
-### Checkpoint 1: Database Foundation
-- [x] Migration script chạy thành công hoặc kiểm tra syntax/ORM models hợp lệ không có xung đột.
-
-### Phase 2: Seed Data & Dispatch Service Foundation
-- [x] Task 4: Tạo Seed Data script nạp đầy đủ: 7 Models, 8 vị trí CNC (4 máy x 2 vị trí Vào/Ra), 7 vị trí Nguyên Liệu, 4 Slot Tẩy Rửa, 4 Slot Buffer, 4 Users mẫu gán quyền `user_locations`.
-- [x] Task 5: Viết Service Core Dispatching: Thuật toán tìm xe gần nhất theo Euclidean 2D và logic chuyển bước/xếp hàng đợi.
-
-### Checkpoint 2: Core Engine Ready
-- [x] Seed script chạy chuẩn xác, dữ liệu nạp đầy đủ vào database.
-
-### Phase 3: Frontend PDA Alignment
-- [x] Task 6: Đồng bộ mock state trong `usePdaStore.ts` và component `CncLineModal.tsx` để phản ánh đúng 4 máy x 2 vị trí (hoặc hiển thị 2 vị trí/máy).
-- [x] Task 7: Chạy kiểm thử build frontend (`npm run build`) đảm bảo 0 lỗi.
+### Checkpoint 1: Database Clean & Migration Head
+- [x] `alembic upgrade head` chạy thành công.
+- [x] Không còn `default_stage_level` trong CSDL.
 
 ---
 
-## Risks and Mitigations
-| Risk | Impact | Mitigation |
-|------|--------|------------|
-| Xung đột khóa ngoại với bảng Inbound/Outbound cũ trong WMS | High | Gỡ bỏ ràng buộc FK cũ trên `item_stock` và thiết kế các bảng production độc lập |
-| Công nhân tại 2 máy bấm gọi cùng 1 xe phôi | High | Dùng cờ `is_locked = True` với transaction atomic trong SQLAlchemy |
-| Cả 4 slot Tẩy Rửa bị đầy khi CNC cuối xong | Medium | Tự động đưa vào `transport_queue`, khi slot giải phóng thì background task kích hoạt AMR đón xe ngay |
+### Phase 2: Xây dựng Trang Hợp nhất "Cấu Hình Trạm & Phân Khu Xưởng" (`/production/stations`)
+- [x] **Task 2.1**: Backend API quản lý vị trí theo phân khu:
+  - CRUD ô nguyên liệu (`location_type = 'RAW_MATERIAL'`).
+  - CRUD máy CNC và các vị trí đỗ linh hoạt 1..3 slots (`POS1`, `POS2`, `POS3`) liên kết với Node map.
+  - CRUD slot tẩy rửa (`location_type = 'WASHING_SLOT'`) và slot đệm xe rỗng (`EMPTY_CART_BUFFER`).
+  - API lấy danh sách các Node điểm đỗ có sẵn từ Map (`/api/v1/production/map/available-nodes`).
+- [x] **Task 2.2**: Xây dựng giao diện trang `/production/stations` (StationSettingPage) với 3 Tab:
+  - Tab 1: **Khu Cấp Phôi** (Danh sách ô, nút Thêm ô, chọn Node map kèm tọa độ x, y).
+  - Tab 2: **Khu Máy CNC** (Danh sách máy, nút Thêm máy, cấu hình 1..3 slot POS1/POS2/POS3 chọn Node map).
+  - Tab 3: **Khu Tẩy Rửa & Bãi Đệm** (Danh sách slot rửa và bãi đệm, chọn Node map).
+- [x] **Task 2.3**: Cập nhật menu Sidebar và Router chuyển từ `/machines` sang `/production/stations` (kèm alias redirect mượt mà).
+
+### Checkpoint 2: Quản trị Vị trí Hoàn chỉnh
+- [x] Quản đốc có thể thêm/sửa/xóa ô nguyên liệu, máy CNC (1..3 slot) và ô tẩy rửa, tất cả đều gắn với Node thật của Map KUKA.
+
+---
+
+### Phase 3: Tái cấu trúc Phân Quyền Người Dùng 1 Khu Vực (User Area Assignment)
+- [x] **Task 3.1**: Cập nhật Backend API phân quyền `/api/v1/production/users/{user_id}/locations`:
+  - Hỗ trợ lưu danh sách vị trí phân quyền cho user.
+  - Tự động xóa các vị trí thuộc khu vực khác khi user được gán khu vực mới.
+- [x] **Task 3.2**: Thiết kế lại toàn bộ `StationAssignmentModal.tsx`:
+  - Radio/Segmented chọn 1 trong 3 khu vực: `[Khu Cấp Phôi]` | `[Khu Gia Công CNC]` | `[Khu Tẩy Rửa]`.
+  - Nếu chọn Khu Cấp Phôi: Hiện các ô phôi (`VT-01..07`) để tick chọn.
+  - Nếu chọn Khu Tẩy Rửa: Hiện các slot rửa (`WASH-01..04`) để tick chọn.
+  - Nếu chọn Khu CNC: Hiện các Máy CNC trong xưởng (`CNC-01`, `CNC-02`...) để tick chọn máy (chọn máy nào tự động gán toàn bộ slot của máy đó).
+- [x] **Task 3.3**: Cập nhật Client PDA (`RoleHomeRedirect.tsx`, `usePdaStore.ts`, các trang PDA):
+  - Khi công nhân đăng nhập: Tự động điều hướng vào đúng trang của khu vực.
+  - Lọc realtime: PDA chỉ hiển thị đúng các ô / trạm máy mà tài khoản có quyền.
+
+### Checkpoint 3: Phân Quyền 1 Khu Vực Hoạt Động Mượt Mà
+- [x] Thao tác phân quyền trên web lưu chính xác.
+- [x] Đăng nhập PDA kiểm tra lọc đúng các trạm.
+
+---
+
+### Phase 4: Kiểm thử Toàn diện & Tự động hóa Trình duyệt
+- [x] **Task 4.1**: Cập nhật bộ test backend `test_dispatch_engine.py` và `test_pda_live_cycle.py` tương thích với các vị trí Node thật.
+- [ ] **Task 4.2**: Chạy kiểm thử tự động Playwright trên Chrome thực tế:
+  - Test luồng phân quyền và mở modal cho từng tài khoản.
+  - Test giao diện PDA CNC, Raw Material, Washing.
+- [x] **Task 4.3**: Chạy `npm run build` frontend đảm bảo 0 lỗi TypeScript.
+
