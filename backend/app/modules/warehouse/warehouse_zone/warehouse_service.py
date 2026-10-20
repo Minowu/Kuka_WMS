@@ -113,13 +113,11 @@ def delete_warehouse(db: Session, warehouse_id: int) -> bool:
 
     from app.modules.warehouse.item.item_model import Item
     from app.modules.warehouse.location_map.location_model import WarehouseMap
-    from app.modules.warehouse.notificcation.notification_model import Notification
 
     has_Dependencies = (
         db.query(Location).filter(Location.warehouse_id == warehouse_id).first()
         or db.query(Item).filter(Item.warehouse_id == warehouse_id).first()
         or db.query(WarehouseMap).filter(WarehouseMap.warehouse_id == warehouse_id).first()
-        or db.query(Notification).filter(Notification.warehouse_id == warehouse_id).first()
     )
     if has_Dependencies:
         raise ValueError("Cannot delete warehouse: related records still exist")

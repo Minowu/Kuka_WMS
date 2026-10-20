@@ -60,11 +60,6 @@ def _ensure_unit_exists(db: Session, unit_id: Optional[int]) -> None:
     return None
 
 
-def _validate_quantity_bounds(min_qty: Optional[int], max_qty: Optional[int]) -> None:
-    if min_qty is not None and max_qty is not None and max_qty > 0 and min_qty > max_qty:
-        raise ValueError("min_quantity must be less than or equal to max_quantity")
-
-
 def list_items(
     db: Session,
     page: int = 1,
@@ -178,7 +173,7 @@ def analyze_items(db: Session, warehouse_id: int) -> ItemAnalyzeResponse:
         .subquery()
     )
 
-    threshold_expr = func.coalesce(Item.min_quantity, DEFAULT_LOW_STOCK_THRESHOLD)
+    threshold_expr = DEFAULT_LOW_STOCK_THRESHOLD
     current_qty_expr = func.coalesce(stock_per_item.c.qty, 0)
 
     total_low_stock = (
@@ -284,10 +279,7 @@ def create_item(db: Session, body: ItemCreate) -> Item:
         name=body.name.strip(),
         description=body.description,
         base_unit_id=body.base_unit,
-        base_quantity=body.base_quantity,
         standard_quantity_per_cart=body.standard_quantity_per_cart or 120,
-        max_quantity=body.max_quantity,
-        min_quantity=body.min_quantity,
         warehouse_id=body.warehouse_id,
         supplier=(body.supplier or "").strip(),
         details=details,
@@ -321,21 +313,13 @@ def update_item(db: Session, item_id: int, body: ItemUpdate) -> Optional[Item]:
             raise ValueError("SKU already exists")
         item.sku = data["sku"].strip()
 
-    next_min = data.get("min_quantity", item.min_quantity)
-    next_max = data.get("max_quantity", item.max_quantity)
-    if "min_quantity" in data or "max_quantity" in data:
-        _validate_quantity_bounds(next_min, next_max)
-
     if "base_unit" in data:
         item.base_unit_id = data["base_unit"]
 
     for field in (
         "name",
         "description",
-        "base_quantity",
         "standard_quantity_per_cart",
-        "max_quantity",
-        "min_quantity",
         "supplier",
         "details",
         "is_active",

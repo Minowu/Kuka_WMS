@@ -34,11 +34,8 @@ class Item(Base):
     sku = Column(String(50), unique=True, nullable=False, index=True)
     name = Column(String(255), nullable=False)
     description = Column(Text)
-    base_quantity = Column(BigInteger, nullable=False, default=1, server_default="1")
     standard_quantity_per_cart = Column(Integer, nullable=False, default=120, server_default="120")
     base_unit_id = Column("base_unit", Integer, nullable=True)
-    max_quantity = Column(Integer, nullable=True, default=999999)
-    min_quantity = Column(Integer, nullable=True, default=0)
     is_active = Column(Boolean, default=True, nullable=False)
     warehouse_id = Column(Integer, ForeignKey("warehouse.id"), nullable=False, index=True)
     details = Column(

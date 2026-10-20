@@ -43,10 +43,7 @@ def _serialize_item_for_response(data: Any) -> Any:
             "category": details.get("category"),
             "description": data.description if getattr(data, "description", None) is not None else details.get("description"),
             "base_unit": str(details.get("base_unit") or "Cái"),
-            "base_quantity": data.base_quantity or 1,
             "standard_quantity_per_cart": getattr(data, "standard_quantity_per_cart", None) or 120,
-            "max_quantity": data.max_quantity or 0,
-            "min_quantity": data.min_quantity or 0,
             "warehouse_id": data.warehouse_id,
             "supplier": str(getattr(data, "supplier", None) or details.get("supplier") or ""),
             "details": details,
@@ -65,19 +62,10 @@ class ItemCreate(BaseModel):
     category: Optional[str] = None
     description: Optional[str] = None
     base_unit: Optional[int] = Field(default=1)
-    base_quantity: int = Field(default=1, gt=0)
     standard_quantity_per_cart: int = Field(default=120, gt=0)
-    max_quantity: int = Field(default=0, ge=0)
-    min_quantity: int = Field(default=0, ge=0)
     warehouse_id: int
     supplier: str = Field(default="", max_length=100)
     details: Optional[dict[str, Any]] = None
-
-    @model_validator(mode="after")
-    def validate_quantity_bounds(self) -> "ItemCreate":
-        if self.max_quantity > 0 and self.min_quantity > self.max_quantity:
-            raise ValueError("min_quantity must be less than or equal to max_quantity")
-        return self
 
 
 class ItemUpdate(BaseModel):
@@ -86,25 +74,11 @@ class ItemUpdate(BaseModel):
     category: Optional[str] = None
     description: Optional[str] = None
     base_unit: Optional[int] = None
-    base_quantity: Optional[int] = Field(None, gt=0)
     standard_quantity_per_cart: Optional[int] = Field(None, gt=0)
-    max_quantity: Optional[int] = Field(None, ge=0)
-    min_quantity: Optional[int] = Field(None, ge=0)
     warehouse_id: Optional[int] = None
     supplier: Optional[str] = Field(None, max_length=100)
     details: Optional[dict[str, Any]] = None
     is_active: Optional[bool] = None
-
-    @model_validator(mode="after")
-    def validate_quantity_bounds(self) -> "ItemUpdate":
-        if (
-            self.max_quantity is not None
-            and self.min_quantity is not None
-            and self.max_quantity > 0
-            and self.min_quantity > self.max_quantity
-        ):
-            raise ValueError("min_quantity must be less than or equal to max_quantity")
-        return self
 
 
 class ItemResponse(BaseModel):
@@ -114,10 +88,7 @@ class ItemResponse(BaseModel):
     category: Optional[str] = None
     description: Optional[str] = None
     base_unit: str = "Cái"
-    base_quantity: int = 1
     standard_quantity_per_cart: Optional[int] = 120
-    max_quantity: int = 0
-    min_quantity: int = 0
     warehouse_id: int
     supplier: str = ""
     details: dict[str, Any] = Field(default_factory=dict)

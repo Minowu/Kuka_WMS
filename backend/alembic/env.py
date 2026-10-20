@@ -25,7 +25,6 @@ from app.modules.warehouse.warehouse_zone.warehouse_model import Warehouse  # no
 from app.modules.warehouse.location_map.location_model import Location, WarehouseMap  # noqa: F401
 from app.modules.warehouse.item.item_model import Item  # noqa: F401
 from app.modules.warehouse.item_stock.item_stock_model import ItemStock  # noqa: F401
-from app.modules.warehouse.notificcation.notification_model import Notification  # noqa: F401
 from app.modules.production.production_models import (  # noqa: F401
     FleetTask,
     Machine,

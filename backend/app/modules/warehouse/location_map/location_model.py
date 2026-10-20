@@ -62,45 +62,27 @@ class Location(Base):
             "location_code",
             name="uq_location_warehouse_code",
         ),
-        Index(
-            "uq_location_warehouse_bin",
-            "warehouse_id",
-            "bin_code",
-            unique=True,
-            postgresql_where=text("bin_code IS NOT NULL"),
-        ),
     )
 
     id = Column(Integer, primary_key=True, index=True)
-    # Map node number. Rewritten on every import because map editors renumber nodes.
-    location_code = Column(String(50), nullable=False, index=True)
+    # Map nodeUuid from KUKA floor map.
+    location_code = Column(String(100), nullable=False, index=True)
+    # Map nodeLabel / display name (e.g. '51', '216').
     location_name = Column(String(100), nullable=False, index=True)
-    # Physical bin label (e.g. KH1.13). Stable identity used to match across imports.
-    bin_code = Column(String(50), nullable=True, index=True)
-    row = Column(String(10))  # Mapped from DB 'row' column
-    column = Column("column", String(10))  # 'column' is SQL keyword, use mapped name
-    level = Column(String(10))
-    node_name = Column(String(50))  # Additional node identifier
+    function_type = Column(Integer, nullable=True, default=2)  # 2: Rack node
     location_type = Column(
         String(30),
         nullable=False,
-        default="CNC_SLOT",
-        server_default="CNC_SLOT",
-    )  # RAW_MATERIAL, CNC_SLOT, WASHING_SLOT, EMPTY_CART_BUFFER
+        default="UNASSIGNED",
+        server_default="UNASSIGNED",
+    )  # UNASSIGNED, RAW_MATERIAL, CNC_SLOT, WASHING_SLOT, EMPTY_CART_BUFFER
     machine_id = Column(
         Integer,
         ForeignKey("machine.id", ondelete="SET NULL"),
         nullable=True,
         index=True,
     )
-    machine_code = Column(String(50), nullable=True, index=True)  # E.g. 'CNC-01'
-    position_index = Column(Integer, nullable=True)  # 1 or 2 for CNC stations
-    default_stage_level = Column(
-        Integer,
-        nullable=True,
-        index=True,
-        doc="Quy định vị trí thuộc công đoạn CNC Level mấy (1, 2, 3...); NULL nếu là trạm chung hoặc vùng khác",
-    )
+    position_index = Column(Integer, nullable=True)  # 1, 2, or 3 for CNC stations
     map_x = Column(Integer, nullable=True)
     map_y = Column(Integer, nullable=True)
     warehouse_id = Column(

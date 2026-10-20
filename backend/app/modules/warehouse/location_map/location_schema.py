@@ -6,14 +6,15 @@ from app.modules.warehouse.lot_number_utils import apply_lot_display_fields
 
 
 class LocationCreate(BaseModel):
-    location_code: str = Field(..., min_length=1, max_length=50)
+    location_code: str = Field(..., min_length=1, max_length=100)
+    function_type: Optional[int] = 2
     location_name: str = Field(..., min_length=1, max_length=100)
     bin_code: Optional[str] = Field(None, max_length=50)
     row: Optional[str] = Field(None, max_length=10)
     column: Optional[str] = Field(None, max_length=10)
     level: Optional[str] = Field(None, max_length=10)
     node_name: Optional[str] = Field(None, max_length=50)
-    location_type: Optional[str] = "CNC_SLOT"
+    location_type: Optional[str] = "UNASSIGNED"
     machine_id: Optional[int] = None
     machine_code: Optional[str] = None
     position_index: Optional[int] = None
@@ -25,7 +26,8 @@ class LocationCreate(BaseModel):
 
 
 class LocationUpdate(BaseModel):
-    location_code: Optional[str] = Field(None, min_length=1, max_length=50)
+    location_code: Optional[str] = Field(None, min_length=1, max_length=100)
+    function_type: Optional[int] = None
     location_name: Optional[str] = Field(None, min_length=1, max_length=100)
     bin_code: Optional[str] = Field(None, max_length=50)
     row: Optional[str] = Field(None, max_length=10)
@@ -48,6 +50,7 @@ class LocationResponse(BaseModel):
     id: int
     location_code: str
     location_name: str
+    function_type: Optional[int] = 2
     bin_code: Optional[str] = None
     row: Optional[str] = None
     column: Optional[str] = None

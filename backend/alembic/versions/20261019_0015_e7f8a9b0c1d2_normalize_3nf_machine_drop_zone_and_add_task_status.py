@@ -200,6 +200,57 @@ def upgrade() -> None:
     if "zone" in tables:
         op.execute(sa.text("DROP TABLE IF EXISTS zone CASCADE"))
 
+    # 7. Prune legacy FMCG tables if still present
+    legacy_tables = (
+        "inbound_order_allocation",
+        "inbound_order_detail",
+        "inbound_order",
+        "outbound_order_allocation",
+        "outbound_order_detail",
+        "outbound_order",
+        "stocktake_item",
+        "stocktake",
+        "item_stock_relation",
+        "item_unit",
+        "unit",
+        "qr_code",
+        "robot_task",
+        "transaction",
+        "history",
+        "inventory_daily_snapshot",
+        "item_import_staging",
+    )
+    for tbl in legacy_tables:
+        if tbl in tables:
+            op.execute(sa.text(f'DROP TABLE IF EXISTS "{tbl}" CASCADE'))
+
+    # 8. Clean up legacy FMCG columns on item_stock if still present
+    if "item_stock" in tables:
+        stock_cols = {col["name"] for col in insp.get_columns("item_stock")}
+        legacy_stock_cols = (
+            "expiry_date",
+            "inbound_order_detail_id",
+            "unit_id",
+            "lot_number_from",
+            "lot_number_to",
+            "qc_user",
+            "manufacturing_user",
+            "packing_user",
+            "cavity_number",
+            "stock_level",
+            "manufacturing_machine",
+        )
+        for col_name in legacy_stock_cols:
+            if col_name in stock_cols:
+                op.execute(sa.text(f'ALTER TABLE item_stock DROP COLUMN IF EXISTS "{col_name}" CASCADE'))
+
+    # 9. Relax legacy NOT NULL constraints on item table
+    if "item" in tables:
+        item_cols = {col["name"] for col in insp.get_columns("item")}
+        for nullable_col in ("supplier", "max_quantity", "min_quantity", "base_unit"):
+            if nullable_col in item_cols:
+                op.execute(sa.text(f'ALTER TABLE item ALTER COLUMN "{nullable_col}" DROP NOT NULL'))
+
 
 def downgrade() -> None:
     pass
