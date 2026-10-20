@@ -112,7 +112,6 @@ def _resolve_or_create_machine(
     db: Session,
     machine_code: Optional[str],
     warehouse_id: int,
-    default_stage_level: Optional[int] = None,
 ) -> Optional[Machine]:
     if not machine_code or not str(machine_code).strip():
         return None
@@ -123,14 +122,11 @@ def _resolve_or_create_machine(
             machine_code=code,
             machine_name=f"Máy {code}",
             warehouse_id=warehouse_id,
-            default_stage_level=default_stage_level,
             is_active=True,
         )
         db.add(machine)
         db.flush()
     else:
-        if default_stage_level is not None and machine.default_stage_level != default_stage_level:
-            machine.default_stage_level = default_stage_level
         if warehouse_id and machine.warehouse_id is None:
             machine.warehouse_id = warehouse_id
     return machine
@@ -455,7 +451,7 @@ def update_location(
         "location_type",
         "machine_code",
         "position_index",
-        "default_stage_level",
+        "node_label",
     ):
         if field in data:
             setattr(location, field, data[field])
@@ -465,7 +461,6 @@ def update_location(
             db,
             location.machine_code,
             warehouse_id,
-            location.default_stage_level,
         )
         location.machine_id = machine.id if machine else None
     elif "machine_code" in data and not data.get("machine_code"):
@@ -641,42 +636,15 @@ async def preview_warehouse_map_import(
         db.rollback()
 
 def _dedupe_shelves(shelves: list[dict]) -> list[dict]:
-    """Keep one shelf per node number (last wins).
-
-    Duplicate bin codes are a map authoring error, not something to silently drop:
-    two nodes claiming the same bin would make the identity ambiguous forever.
-    """
+    """Keep one shelf per location_code (nodeUuid)."""
     by_code: dict[str, dict] = {}
     for shelf in shelves:
         code = str(shelf["location_code"]).strip()
-        raw_bin = shelf.get("bin_code")
-        bin_code = str(raw_bin).strip() if raw_bin else ""
         by_code[code] = {
             **shelf,
             "location_code": code,
-            "bin_code": bin_code or None,
             "location_name": str(shelf["location_name"]).strip(),
         }
-
-    first_node_for_bin: dict[str, str] = {}
-    duplicates: list[str] = []
-    for shelf in by_code.values():
-        bin_code = shelf["bin_code"]
-        if not bin_code:
-            continue
-        if bin_code in first_node_for_bin:
-            duplicates.append(
-                f"{bin_code} (node {first_node_for_bin[bin_code]} và {shelf['location_code']})"
-            )
-        else:
-            first_node_for_bin[bin_code] = shelf["location_code"]
-
-    if duplicates:
-        raise ValueError(
-            "Map có mã bin bị trùng, mỗi bin phải là duy nhất: "
-            + "; ".join(sorted(duplicates))
-        )
-
     return list(by_code.values())
 
 
@@ -728,34 +696,12 @@ def _shelf_may_take_location(shelf: dict, location: Location) -> bool:
 
 def _match_shelf_to_location(
     shelf: dict,
-    by_bin: dict[str, Location],
-    by_rcl: dict[tuple, Location],
     by_code: dict[str, Location],
     taken: set[int],
 ) -> tuple[Optional[Location], Optional[str]]:
-    shelf_bin = shelf.get("bin_code")
-    if shelf_bin:
-        location = by_bin.get(shelf_bin)
-        if location is not None and location.id not in taken:
-            return location, "bin_code"
-
-    if shelf.get("row") and shelf.get("column"):
-        location = by_rcl.get((shelf["row"], shelf["column"], shelf["level"]))
-        if (
-            location is not None
-            and location.id not in taken
-            and _shelf_may_take_location(shelf, location)
-        ):
-            return location, "row_column_level"
-
     location = by_code.get(shelf["location_code"])
-    if (
-        location is not None
-        and location.id not in taken
-        and _shelf_may_take_location(shelf, location)
-    ):
+    if location is not None and location.id not in taken:
         return location, "location_code"
-
     return None, None
 
 
@@ -765,37 +711,14 @@ def _apply_shelf_to_location(
     shelf: dict,
     warehouse_id: int,
 ) -> None:
-    """Update a matched location in place. location_code is written separately."""
+    """Update a matched location in place."""
     location.location_name = shelf["location_name"]
-    if shelf.get("bin_code"):
-        location.bin_code = shelf["bin_code"]
-    for field in ("row", "column", "level"):
-        if shelf.get(field) is not None:
-            setattr(location, field, shelf[field])
-    node_name = shelf.get("node_name")
-    if node_name:
-        location.node_name = node_name[:NODE_NAME_MAX_LENGTH]
-
     if shelf.get("map_x") is not None:
         location.map_x = shelf["map_x"]
     if shelf.get("map_y") is not None:
         location.map_y = shelf["map_y"]
-
-    for field in ("location_type", "machine_code", "position_index", "default_stage_level"):
-        if shelf.get(field) is not None:
-            setattr(location, field, shelf[field])
-
-    if location.machine_code:
-        machine = _resolve_or_create_machine(
-            db,
-            location.machine_code,
-            warehouse_id,
-            location.default_stage_level,
-        )
-        location.machine_id = machine.id if machine else None
-    else:
-        location.machine_id = None
-
+    if shelf.get("function_type") is not None:
+        location.function_type = shelf["function_type"]
     location.is_active = True
 
 
@@ -898,13 +821,12 @@ def _orphan_lookup(orphans: list[Location]) -> dict[str, Location]:
 
 def _blocked_message(blocked: list[dict]) -> str:
     details = ", ".join(
-        f"{item['bin_code'] or item['location_name']} (SL {item['quantity']})"
+        f"Node {item['location_name'] or item['location_code']} (SL {item['quantity']})"
         for item in blocked
     )
     return (
         "Không thể import map: các vị trí sau không còn trong map mới nhưng vẫn còn "
-        f"tồn kho: {details}. Hãy chuyển tồn sang bin khác, hoặc gửi kèm remap "
-        "[{from_bin, to_bin}] để dời tham chiếu sang bin mới."
+        f"tồn kho: {details}. Hãy dời xe hàng sang vị trí khác hoặc gửi remap để dời sang node mới."
     )
 
 
@@ -929,13 +851,7 @@ def sync_locations_from_map(
     unique_shelves = _dedupe_shelves(shelves)
 
     existing = db.query(Location).filter(Location.warehouse_id == warehouse_id).all()
-    by_bin = {loc.bin_code: loc for loc in existing if loc.bin_code}
-    by_rcl: dict[tuple, Location] = {}
-    by_code: dict[str, Location] = {}
-    for loc in existing:
-        if loc.row and loc.column:
-            by_rcl.setdefault((loc.row, loc.column, loc.level), loc)
-        by_code.setdefault(loc.location_code, loc)
+    by_code: dict[str, Location] = {loc.location_code: loc for loc in existing}
 
     taken: set[int] = set()
     matched: list[dict] = []
@@ -944,30 +860,18 @@ def sync_locations_from_map(
 
     for index, shelf in enumerate(unique_shelves):
         location, matched_by = _match_shelf_to_location(
-            shelf, by_bin, by_rcl, by_code, taken
+            shelf, by_code, taken
         )
         if location is None:
-            machine = _resolve_or_create_machine(
-                db,
-                shelf.get("machine_code"),
-                warehouse_id,
-                shelf.get("default_stage_level"),
-            )
             location = Location(
-                location_code=f"__new__{index}",
+                location_code=shelf["location_code"],
                 location_name=shelf["location_name"],
-                bin_code=shelf.get("bin_code"),
-                row=shelf.get("row"),
-                column=shelf.get("column"),
-                level=shelf.get("level"),
-                node_name=(shelf.get("node_name") or "")[:NODE_NAME_MAX_LENGTH] or None,
+                function_type=shelf.get("function_type", 2),
                 map_x=shelf.get("map_x"),
                 map_y=shelf.get("map_y"),
-                location_type=shelf.get("location_type", "CNC_SLOT"),
-                machine_id=machine.id if machine else None,
-                machine_code=shelf.get("machine_code"),
-                position_index=shelf.get("position_index"),
-                default_stage_level=shelf.get("default_stage_level"),
+                location_type=shelf.get("location_type", "UNASSIGNED"),
+                machine_id=None,
+                position_index=None,
                 warehouse_id=warehouse_id,
                 is_active=True,
             )
@@ -980,7 +884,6 @@ def sync_locations_from_map(
             matched.append(
                 {
                     "location_id": location.id,
-                    "bin_code": location.bin_code,
                     "location_name": location.location_name,
                     "matched_by": matched_by,
                     "previous_location_code": previous_code,
@@ -998,7 +901,6 @@ def sync_locations_from_map(
     created = [
         {
             "location_id": location.id,
-            "bin_code": location.bin_code,
             "location_name": location.location_name,
             "location_code": location.location_code,
         }
@@ -1009,25 +911,25 @@ def sync_locations_from_map(
     references = _reference_counts_by_location(db, orphan_ids)
     stock_totals = _active_stock_totals(db, orphan_ids)
 
-    bins_in_new_map = {loc.bin_code: loc for loc, _ in assignments if loc.bin_code}
+    nodes_in_new_map = {loc.location_code: loc for loc, _ in assignments if loc.location_code}
 
     remapped: list[dict] = []
     remapped_ids: set[int] = set()
     pending_cache_moves: list[tuple[int, dict]] = []
     for entry in remap or []:
-        source_key = str(entry.get("from_bin") or "").strip()
-        target_key = str(entry.get("to_bin") or "").strip()
+        source_key = str(entry.get("from_node") or entry.get("from_bin") or "").strip()
+        target_key = str(entry.get("to_node") or entry.get("to_bin") or "").strip()
         if not source_key or not target_key:
-            raise ValueError("Mỗi phần tử remap phải có cả from_bin và to_bin")
+            raise ValueError("Mỗi phần tử remap phải có cả from_node và to_node")
 
         source = orphan_lookup.get(source_key)
         if source is None:
             raise ValueError(
-                f"remap.from_bin không phải vị trí bị loại khỏi map mới: {source_key}"
+                f"remap.from_node không phải vị trí bị loại khỏi map mới: {source_key}"
             )
-        target = bins_in_new_map.get(target_key)
+        target = nodes_in_new_map.get(target_key)
         if target is None:
-            raise ValueError(f"remap.to_bin không có trong map mới: {target_key}")
+            raise ValueError(f"remap.to_node không có trong map mới: {target_key}")
         if target.id == source.id:
             raise ValueError(f"remap không thể trỏ về chính nó: {source_key}")
 
@@ -1035,35 +937,24 @@ def sync_locations_from_map(
         remapped.append(
             {
                 "from_location_id": source.id,
-                "from_bin": source.bin_code or source.location_name,
+                "from_node": source.location_name or source.location_code,
                 "to_location_id": target.id,
-                "to_bin": target.bin_code or target.location_name,
+                "to_node": target.location_name or target.location_code,
                 "moved": moved,
             }
         )
         remapped_ids.add(source.id)
-        pending_cache_moves.append(
-            (
-                source.id,
-                {
-                    "id": target.id,
-                    "location_name": target.location_name,
-                    "warehouse_id": target.warehouse_id,
-                },
-            )
-        )
 
     blocked: list[dict] = []
     retired: list[dict] = []
     for location in orphans:
         payload = {
             "location_id": location.id,
-            "bin_code": location.bin_code,
             "location_name": location.location_name,
+            "location_code": location.location_code,
             "references": references.get(location.id, {}),
         }
         if location.id in remapped_ids:
-            # References were just moved away, so nothing is left pointing here.
             payload["references"] = {}
             retired.append(payload)
             location.is_active = False
@@ -1091,14 +982,7 @@ def sync_locations_from_map(
         "retired": retired,
         "blocked": blocked,
         "freed_codes": freed_codes,
-        "nodes_without_bin_code": [
-            {
-                "location_code": shelf["location_code"],
-                "node_name": shelf.get("node_name"),
-            }
-            for shelf in unique_shelves
-            if not shelf.get("bin_code")
-        ],
+        "unnamed_nodes": [],
         "counts": {
             "matched": len(matched),
             "created": len(created),
@@ -1186,69 +1070,39 @@ def _read_map_raw_content(raw: bytes) -> dict:
 
 
 def _extract_shelves_from_kuka_floor_map(data: dict) -> list[dict]:
-    """Extract location nodes from new KUKA floor format for synchronizing database locations."""
+    """Extract location nodes from new KUKA floor format for synchronizing database locations.
+    
+    Per user specification:
+    - Only nodes with functionType == 2 (Rack nodes) are extracted.
+    - location_code stores nodeUuid (unique KUKA identity).
+    - location_name stores nodeLabel (e.g. '51', '216') for human-readable display.
+    - function_type stores 2.
+    - location_type defaults strictly to 'UNASSIGNED'. No automatic business assignment.
+    """
     shelves = []
     floor = data["floorList"][0]
-    floor_name = floor.get("floorName", "CNC001")
     for node in floor.get("nodeList", []):
         func_list = node.get("functionList", [])
         if not func_list:
             continue
-        lbl = str(node.get("nodeLabel") or node.get("nodeNumber"))
+        rack_func = next((f for f in func_list if f.get("functionType") == 2), None)
+        if not rack_func:
+            continue
+
+        node_uuid = str(node.get("nodeUuid"))
+        node_label = str(node.get("nodeLabel") or node.get("nodeNumber"))
         x_mm = round(float(node.get("xCoordinate", 0)) * 1000)
         y_mm = round(float(node.get("yCoordinate", 0)) * 1000)
-        node_uuid = str(node.get("nodeUuid") or lbl)
-
-        loc_type = "CNC_SLOT"
-        machine_code = None
-        pos_index = None
-        default_stage_lvl = None
-        loc_name = f"Station_{lbl}"
-        bin_code = f"LOC_{lbl}"
-
-        for f in func_list:
-            ftype = f.get("functionType")
-            dev_id = f.get("deviceId")
-            c_model = f.get("containerModel")
-
-            if ftype == 4:  # Machine station
-                loc_type = "CNC_SLOT"
-                loc_name = dev_id or f"CNC_Station_{lbl}"
-                bin_code = f"CNC_{lbl}"
-                m_num = dev_id.split("-")[-1] if dev_id and "-" in dev_id else lbl
-                machine_code = f"CNC-{m_num.zfill(2)}"
-                pos_index = 1
-            elif ftype == 2:  # Storage rack / buffer slot
-                loc_type = "RAW_MATERIAL"
-                loc_name = f"Rack_{lbl}" if not c_model else f"Rack_{c_model}_{lbl}"
-                bin_code = f"RACK_{lbl}"
-            elif ftype == 3:  # Charging slot
-                loc_type = "CHARGING_SLOT"
-                loc_name = f"Charging_{lbl}"
-                bin_code = f"CHG_{lbl}"
-            elif ftype == 10:  # Docking / approach node
-                loc_type = "CNC_SLOT"
-                rel = f.get("relativeNodeLabel")
-                loc_name = f"Docking_{lbl}_to_{rel}" if rel else f"Docking_{lbl}"
-                bin_code = f"DOCK_{lbl}"
-                m_num = str(rel).zfill(2) if rel else lbl.zfill(2)
-                machine_code = f"CNC-{m_num}"
-                pos_index = 2
 
         shelves.append({
-            "location_code": lbl,
-            "bin_code": bin_code,
-            "location_name": loc_name,
-            "node_name": node_uuid,
-            "row": None,
-            "column": None,
-            "level": None,
+            "location_code": node_uuid,
+            "location_name": node_label,
+            "function_type": 2,
             "map_x": x_mm,
             "map_y": y_mm,
-            "location_type": loc_type,
-            "machine_code": machine_code,
-            "position_index": pos_index,
-            "default_stage_level": default_stage_lvl,
+            "location_type": "UNASSIGNED",
+            "machine_id": None,
+            "position_index": None,
         })
     return shelves
 
@@ -1344,7 +1198,7 @@ def extract_shelf_nodes_from_zip(raw: bytes) -> list[dict]:
             "location_type": "CNC_SLOT",
             "machine_code": None,
             "position_index": None,
-            "default_stage_level": None,
+            "node_label": parsed.location_code,
         })
     return shelves
 
