@@ -22,7 +22,6 @@ celery_app = Celery(
     broker=settings.celery_broker_url,
     backend=settings.celery_broker_result_url,
     include=[
-        "app.modules.warehouse.notificcation.notification_celery_task",
         "app.modules.production.production_celery_task",
     ],
 )
@@ -52,10 +51,15 @@ celery_app.conf.update(
         QUEUE_STATUS: {},
     },
     task_routes={
-        "notification.*": {"queue": QUEUE_LOGIC},
+        "production.*": {"queue": QUEUE_LOGIC},
         "robot.*": {"queue": QUEUE_STATUS},
     },
-    beat_schedule={},
+    beat_schedule={
+        "always-scan-transport-queue": {
+            "task": "production.scan_transport_queue",
+            "schedule": 5.0,
+        },
+    },
 )
 
 

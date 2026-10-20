@@ -1,4 +1,4 @@
-"""Celery background task for persisting KUKA Fleet Manager (/receive-status) callbacks."""
+"""Celery background tasks for KUKA Fleet Manager (/receive-status) callbacks and Always-Scan TransportQueue."""
 
 from typing import Any, Optional
 
@@ -35,3 +35,19 @@ def persist_task_status(self, payload: dict[str, Any]) -> Optional[dict[str, Any
     except Exception as exc:
         logger.exception("Failed to persist fleet task status (order_id=%s)", order_id)
         raise self.retry(exc=exc, countdown=5 * (2 ** self.request.retries))
+
+
+@celery_app.task(
+    name="production.scan_transport_queue",
+    acks_late=True,
+)
+def scan_transport_queue() -> dict[str, int]:
+    """
+    Periodic 'Always Scan' worker that checks `TransportQueue` (`WAITING_CART` & `WAITING_SLOT`)
+    and automatically dispatches AMRs whenever matching carts or slots become available.
+    """
+    with db_session() as db:
+        result = dispatch_service.scan_all_transport_queues(db)
+        if result["resolved_waiting_cart"] or result["resolved_waiting_slot"]:
+            logger.info("Always-Scan resolved transport queues: %s", result)
+        return result

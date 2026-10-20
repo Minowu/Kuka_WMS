@@ -11,6 +11,7 @@ from app.modules.auth.auth_schema import (
     LoginResponse,
     RefreshTokenRequest,
     RefreshTokenResponse,
+    RoleBrief,
     TokenResponse,
     UserCreate,
     UserSignupResponse,
@@ -71,6 +72,13 @@ def get_me(current_user: CurrentUser, db: DbSession):
 def list_staff_usernames(_current_user: CurrentUser, db: DbSession):
     """Username list for tablet assign-by picker (any logged-in user)."""
     return auth_service.list_staff_usernames(db)
+
+
+@router.get("/roles", response_model=list[RoleBrief])
+def list_roles(db: DbSession, _user: CurrentUser):
+    """Lấy danh sách các vai trò (roles) trong hệ thống."""
+    return db.query(Role).order_by(Role.id.asc()).all()
+
 
 
 @router.get(

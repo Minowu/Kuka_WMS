@@ -2,16 +2,18 @@
 Production & AMR Dispatch Engine Service.
 
 Implements:
-1. User Location Assignment Constraint (Max 3 CNC stations per user).
+1. User Location Assignment (`assign_locations_to_user` — unrestricted assignment across zones/machines).
 2. Raw Material Rack QR Registration (reusable physical rack `cart_code` -> Fleet POST insert + ItemStock upsert + auto-resolve WAITING_CART queue).
-3. FIFO Cart Selection (`created_at ASC` with `FOR UPDATE SKIP LOCKED` anti-race-condition).
+3. Cart Selection (FIFO for Level 0 raw material; 2D Euclidean distance + FIFO with `FOR UPDATE SKIP LOCKED` for Level > 0).
 4. POS1 / POS2 CNC Slot Allocation (normalized 3NF via `Machine` & `RouteStepMachine`) & Waiting Queue Management (`TransportQueue`).
-5. Stage Progression (`complete_machining_stage`: Level 0 -> Level 1 -> Level 2 -> Level 3 -> Washing -> Empty Cart Return).
-6. KUKA Fleet Manager (RCS/ICS) HTTP Adapter (`add_task`, `create_fleet_task`, and 6 Fleet command hooks) & Webhook Callback (`receive_task_status` -> `TaskStatus` + `FleetTask` + `ItemStock` settlement).
+5. Stage Progression (`complete_machining_stage`: Intermediate steps update stage_level & trigger WAITING_CART scan; Final CNC step pushes to Washing -> Empty Cart Return).
+6. Empty Cart Buffer (`EMPTY_CART_BUFFER`): Round-Robin distribution across slots 1..4 & automatic `fleet_remove_rack` + ItemStock deactivation upon AMR dropoff.
+7. KUKA Fleet Manager (RCS/ICS) HTTP Adapter (`add_task`, `create_fleet_task`, and 6 Fleet command hooks) & Webhook Callback (`receive_task_status` -> `TaskStatus` + `FleetTask` + `ItemStock` settlement).
 """
 
 from datetime import datetime, timezone
 import json
+import math
 from typing import Any, Optional
 import uuid
 
@@ -39,8 +41,6 @@ from app.modules.warehouse.item_stock.item_stock_model import ItemStock
 from app.modules.warehouse.location_map.location_model import Location
 
 logger = get_logger("main")
-
-MAX_LOCATIONS_PER_USER = 3
 
 
 def _ics_configured() -> bool:
@@ -190,7 +190,7 @@ class DispatchService:
     def fleet_remove_rack(self, location_code: str, cart_code: str) -> dict[str, Any]:
         """
         [FLEET COMMAND 5 - POST REMOVE/UNBIND RACK]
-        Clear rack binding on Fleet Manager when a rack is manually removed from a location.
+        Clear rack binding on Fleet Manager when a rack is manually removed or dropped at Empty Cart Buffer.
         """
         payload = {
             "action": "REMOVE_RACK",
@@ -198,6 +198,7 @@ class DispatchService:
             "shelfNumber": cart_code,
             "fromSystem": "MES",
         }
+        logger.info("Fleet remove rack: cart_code=%s from location_code=%s", cart_code, location_code)
         return self.add_task(payload, endpoint_path="/ics/shelf/remove")
 
     def fleet_cancel_task(self, task_code: str) -> dict[str, Any]:
@@ -224,7 +225,7 @@ class DispatchService:
         dropoff_code = dropoff_loc.location_code if dropoff_loc else str(task.dropoff_location_id)
         cart_code = cart.cart_code if cart else None
 
-        if request_type == "MOVE_TO_WASH":
+        if request_type in ("MOVE_TO_WASH", "SEND_TO_WASH"):
             self.fleet_move_to_wash(task, pickup_code, dropoff_code, cart_code)
         elif request_type == "RETURN_EMPTY_CART":
             self.fleet_move_empty_rack(task, pickup_code, dropoff_code, cart_code)
@@ -238,7 +239,7 @@ class DispatchService:
         return task
 
     # =========================================================================
-    # 1. USER LOCATION ASSIGNMENT (MAX 3 LOCATIONS PER USER)
+    # 1. USER LOCATION ASSIGNMENT (UNRESTRICTED)
     # =========================================================================
 
     def assign_locations_to_user(
@@ -248,24 +249,29 @@ class DispatchService:
         location_ids: list[int],
     ) -> list[UserLocation]:
         """
-        Assign up to 3 CNC stations/locations to an operator.
-        Raises ValueError if more than 3 locations are provided.
+        Assign stations/locations to an operator.
+        Strictly enforces 1 user = 1 area:
+        - Automatically revokes all existing assigned locations for this user.
+        - Validates that all newly selected locations belong to the same functional area
+          (e.g., RAW_MATERIAL, CNC_SLOT, or WASHING_SLOT).
         """
         unique_loc_ids = list(dict.fromkeys(location_ids))
-        if len(unique_loc_ids) > MAX_LOCATIONS_PER_USER:
-            raise ValueError(
-                f"Mỗi tài khoản vận hành chỉ được phép gắn tối đa {MAX_LOCATIONS_PER_USER} vị trí làm việc."
-            )
 
         if unique_loc_ids:
-            valid_count = (
+            loc_objs = (
                 db.query(Location)
                 .filter(Location.id.in_(unique_loc_ids), Location.is_active.is_(True))
-                .count()
+                .all()
             )
-            if valid_count != len(unique_loc_ids):
+            if len(loc_objs) != len(unique_loc_ids):
                 raise ValueError("Một hoặc nhiều vị trí (Location) không tồn tại hoặc đã bị khóa.")
 
+            # Enforce 1 user = 1 area
+            area_types = {loc.location_type for loc in loc_objs}
+            if len(area_types) > 1:
+                raise ValueError("Một tài khoản công nhân chỉ có thể được phân quyền trong 1 khu vực duy nhất.")
+
+        # Revoke all existing locations for this user across any previous area
         db.query(UserLocation).filter(UserLocation.user_id == user_id).delete(synchronize_session=False)
 
         records = [
@@ -399,23 +405,95 @@ class DispatchService:
         }
 
     # =========================================================================
-    # 3. FIFO CART SELECTION & SLOT ALLOCATION HELPERS
+    # 3. STAGE LEVEL RESOLUTION, CART SELECTION & SLOT ALLOCATION HELPERS
     # =========================================================================
+
+    @staticmethod
+    def calculate_distance(loc1: Optional[Location], loc2: Optional[Location]) -> float:
+        """Calculate 2D Euclidean distance between two locations on the factory map."""
+        if not loc1 or not loc2:
+            return float("inf")
+        if loc1.map_x is None or loc1.map_y is None or loc2.map_x is None or loc2.map_y is None:
+            return float("inf")
+        dx = float(loc1.map_x) - float(loc2.map_x)
+        dy = float(loc1.map_y) - float(loc2.map_y)
+        return math.sqrt(dx * dx + dy * dy)
+
+    def get_stage_info_for_machine(
+        self,
+        db: Session,
+        location: Location,
+        item_id: int,
+    ) -> tuple[int, int, bool]:
+        """
+        Resolve `(input_required_level, target_stage_level, is_final_cnc_step)` for a CNC `location`
+        machining `item_id` using the normalized 3NF `ProductionRoute` -> `RouteStep` -> `RouteStepMachine`.
+        """
+        route = (
+            db.query(ProductionRoute)
+            .filter(
+                ProductionRoute.item_id == item_id,
+                ProductionRoute.is_active.is_(True),
+            )
+            .first()
+        )
+        steps: list[RouteStep] = []
+        if route:
+            steps = (
+                db.query(RouteStep)
+                .options(joinedload(RouteStep.allowed_machine_links).joinedload(RouteStepMachine.machine))
+                .filter(RouteStep.route_id == route.id)
+                .order_by(RouteStep.stage_level.asc(), RouteStep.step_number.asc())
+                .all()
+            )
+
+        machine_id = location.machine_id
+        machine_code = location.machine_code
+
+        # 1. Match via normalized 3NF RouteStepMachine links
+        if steps and (machine_id or machine_code):
+            for idx, step in enumerate(steps):
+                matched = False
+                for link in step.allowed_machine_links or []:
+                    if machine_id and link.machine_id == machine_id:
+                        matched = True
+                        break
+                    if machine_code and link.machine and link.machine.machine_code == machine_code:
+                        matched = True
+                        break
+                if matched:
+                    input_lvl = max(step.stage_level - 1, 0)
+                    is_final = bool(step.is_final_cnc_step) or (idx == len(steps) - 1)
+                    return (input_lvl, step.stage_level, is_final)
+
+        # 2. Fallback by machine_code naming or first step
+        if machine_code == "CNC-03":
+            return (1, 2, False)
+        if machine_code == "CNC-04":
+            return (2, 3, True)
+        if steps:
+            first_step = steps[0]
+            is_final = bool(first_step.is_final_cnc_step) or len(steps) == 1
+            return (max(first_step.stage_level - 1, 0), first_step.stage_level, is_final)
+        return (0, 1, False)
 
     def find_fifo_available_cart(
         self,
         db: Session,
         item_id: int,
         stage_level: int = 0,
+        target_location: Optional[Location] = None,
     ) -> Optional[ItemStock]:
         """
-        Select the oldest available cart (FIFO: `created_at ASC, id ASC`) matching
-        `item_id` and `current_stage_level`.
-        Uses `with_for_update(skip_locked=True)` so concurrent requests never pick the same cart.
+        Select an available cart matching `item_id` and `current_stage_level`:
+        - For `stage_level == 0` (Raw Material): FIFO order (`created_at ASC, id ASC`).
+        - For `stage_level > 0` (CNC WIP transfer): Nearest 2D Euclidean distance to `target_location`
+          (if map coordinates exist), tie-broken by FIFO (`created_at ASC, id ASC`).
+        Uses `with_for_update(of=ItemStock, skip_locked=True)` so concurrent requests never pick the same cart.
         """
         location_types = ["RAW_MATERIAL"] if stage_level == 0 else ["CNC_SLOT", "RAW_MATERIAL"]
 
-        cart = (
+        candidates = (
             db.query(ItemStock)
             .join(Location, ItemStock.location_id == Location.id)
             .filter(
@@ -429,9 +507,30 @@ class DispatchService:
             )
             .order_by(ItemStock.created_at.asc(), ItemStock.id.asc())
             .with_for_update(of=ItemStock, skip_locked=True)
-            .first()
+            .all()
         )
-        return cart
+        if not candidates:
+            return None
+
+        if (
+            stage_level > 0
+            and target_location is not None
+            and target_location.map_x is not None
+            and target_location.map_y is not None
+        ):
+            candidates_with_coords = [
+                c for c in candidates if c.location and c.location.map_x is not None and c.location.map_y is not None
+            ]
+            if candidates_with_coords:
+                candidates.sort(
+                    key=lambda c: (
+                        self.calculate_distance(c.location, target_location),
+                        c.created_at or datetime.min.replace(tzinfo=timezone.utc),
+                        c.id,
+                    )
+                )
+
+        return candidates[0]
 
     def _is_location_free(self, db: Session, location_id: int) -> bool:
         """
@@ -476,52 +575,18 @@ class DispatchService:
 
         return True
 
-    def find_available_slot_for_machines(
+    def find_available_slot_to_wash(
         self,
         db: Session,
-        allowed_machines: list[str],
-        allowed_machine_ids: Optional[list[int]] = None,
     ) -> Optional[Location]:
         """
-        Find a free CNC slot among `allowed_machines` (normalized 3NF via `machine_id` or `machine_code`).
-        Prioritizes `position_index == 1` (POS1 working slot) before `position_index == 2` (POS2 buffer slot).
+        Tìm ô đỗ còn trống tại Khu Tẩy Rửa (`location_type == 'WASHING_SLOT'`: WASH-01..04).
+        Dùng khi máy CNC công đoạn cuối hoàn thành gia công để chuyển xe phôi sang rửa.
         """
-        if not allowed_machines and not allowed_machine_ids:
-            return None
-
-        machine_filters = []
-        if allowed_machine_ids:
-            machine_filters.append(Location.machine_id.in_(allowed_machine_ids))
-        if allowed_machines:
-            machine_filters.append(Location.machine_code.in_(allowed_machines))
-
         candidate_slots = (
             db.query(Location)
             .filter(
-                Location.location_type == "CNC_SLOT",
-                or_(*machine_filters),
-                Location.is_active.is_(True),
-            )
-            .order_by(Location.position_index.asc(), Location.id.asc())
-            .all()
-        )
-
-        for slot in candidate_slots:
-            if self._is_location_free(db, slot.id):
-                return slot
-
-        return None
-
-    def find_available_slot_by_type(
-        self,
-        db: Session,
-        location_type: str,
-    ) -> Optional[Location]:
-        """Find any free location of a given `location_type` (e.g. WASHING_SLOT, EMPTY_CART_BUFFER)."""
-        candidate_slots = (
-            db.query(Location)
-            .filter(
-                Location.location_type == location_type,
+                Location.location_type == "WASHING_SLOT",
                 Location.is_active.is_(True),
             )
             .order_by(Location.position_index.asc().nullsfirst(), Location.id.asc())
@@ -532,8 +597,44 @@ class DispatchService:
                 return slot
         return None
 
+    def find_next_empty_buffer_slot(self, db: Session) -> Optional[Location]:
+        """
+        Distribute empty carts sequentially (Round-Robin: 1 -> 2 -> 3 -> 4 -> 1) across
+        `EMPTY_CART_BUFFER` locations so AMRs do not pile all empty carts onto slot 1.
+        """
+        buffer_slots = (
+            db.query(Location)
+            .filter(
+                Location.location_type == "EMPTY_CART_BUFFER",
+                Location.is_active.is_(True),
+            )
+            .order_by(Location.position_index.asc().nullsfirst(), Location.id.asc())
+            .all()
+        )
+        if not buffer_slots:
+            return None
+
+        buffer_ids = [slot.id for slot in buffer_slots]
+        last_task = (
+            db.query(FleetTask)
+            .filter(FleetTask.dropoff_location_id.in_(buffer_ids))
+            .order_by(FleetTask.id.desc())
+            .first()
+        )
+
+        if last_task and last_task.dropoff_location_id in buffer_ids:
+            last_idx = buffer_ids.index(last_task.dropoff_location_id)
+            ordered_slots = buffer_slots[last_idx + 1 :] + buffer_slots[: last_idx + 1]
+        else:
+            ordered_slots = buffer_slots
+
+        for slot in ordered_slots:
+            if self._is_location_free(db, slot.id):
+                return slot
+        return None
+
     # =========================================================================
-    # 4. CALL MATERIAL TO CNC STATION (SCENARIO 1 & 2: BUFFERING / QUEUEING)
+    # 4. CALL MATERIAL TO CNC STATION (PULL + POS1/POS2 BUFFERING + QUEUEING)
     # =========================================================================
 
     def call_material_to_cnc(
@@ -541,15 +642,18 @@ class DispatchService:
         db: Session,
         destination_location_id: int,
         item_id: int,
-        required_stage_level: int = 0,
+        required_stage_level: Optional[int] = None,
         created_by: Optional[int] = None,
         priority: int = 10,
     ) -> TransportRequest:
         """
-        Operator at a CNC station requests a cart of `item_id` (default `stage_level = 0` raw material).
+        Operator at a CNC station requests a cart of `item_id`:
+        - Automatically infers `required_stage_level` from the CNC machine's step in `ProductionRoute`
+          when `required_stage_level` is not explicitly provided (e.g. Stage 1 machine -> Level 0,
+          Stage 2 machine -> Level 1, Stage 3 machine -> Level 2).
         - If the requested `destination_location_id` (e.g. POS1) is occupied, automatically checks if the
           sibling slot (POS2) of the same CNC machine is free and routes there.
-        - If a matching cart is available in FIFO order, locks the cart and creates a `FleetTask`.
+        - If a matching cart is available, locks the cart and creates a `FleetTask`.
         - If no cart is available yet, places the request into `TransportQueue` (`WAITING_CART`).
         """
         dest_loc = (
@@ -560,29 +664,15 @@ class DispatchService:
         if not dest_loc:
             raise ValueError("Vị trí đích (Location) không tồn tại hoặc đã bị khóa.")
 
-        # Check if target slot is free; if occupied and part of a dual-slot CNC machine, fallback to POS2
+        # Check if target slot chosen by operator is free
         if not self._is_location_free(db, dest_loc.id):
-            if dest_loc.machine_id or dest_loc.machine_code:
-                sibling_query = db.query(Location).filter(
-                    Location.id != dest_loc.id,
-                    Location.location_type == "CNC_SLOT",
-                    Location.is_active.is_(True),
-                )
-                if dest_loc.machine_id:
-                    sibling_query = sibling_query.filter(Location.machine_id == dest_loc.machine_id)
-                else:
-                    sibling_query = sibling_query.filter(Location.machine_code == dest_loc.machine_code)
+            raise ValueError(
+                f"Vị trí '{dest_loc.location_code}' hiện đang có xe hoặc đã có AMR đặt chỗ. Vui lòng chọn vị trí trống."
+            )
 
-                sibling_slots = sibling_query.order_by(Location.position_index.asc()).all()
-                free_sibling = next((s for s in sibling_slots if self._is_location_free(db, s.id)), None)
-                if free_sibling:
-                    dest_loc = free_sibling
-                else:
-                    raise ValueError(
-                        f"Cả 2 vị trí của máy {dest_loc.machine_code} đều đang đầy hoặc đang có xe tiến vào."
-                    )
-            else:
-                raise ValueError(f"Vị trí {dest_loc.location_code} hiện đang có xe hoặc đã được đặt chỗ.")
+        if required_stage_level is None:
+            input_lvl, _, _ = self.get_stage_info_for_machine(db, dest_loc, item_id)
+            required_stage_level = input_lvl
 
         req_code = f"REQ-{uuid.uuid4().hex[:8].upper()}"
         transport_req = TransportRequest(
@@ -598,8 +688,13 @@ class DispatchService:
         db.add(transport_req)
         db.flush()
 
-        # Find FIFO cart
-        cart = self.find_fifo_available_cart(db, item_id=item_id, stage_level=required_stage_level)
+        # Find available cart (FIFO for Level 0, Euclidean distance + FIFO for Level > 0)
+        cart = self.find_fifo_available_cart(
+            db,
+            item_id=item_id,
+            stage_level=required_stage_level,
+            target_location=dest_loc,
+        )
         if cart:
             self._lock_cart_and_dispatch_fleet_task(
                 db=db,
@@ -624,49 +719,56 @@ class DispatchService:
         return transport_req
 
     # =========================================================================
-    # 5. COMPLETE MACHINING STAGE & AUTO-ROUTE NEXT STEP / WASHING
+    # 5. COMPLETE MACHINING STAGE (INTERMEDIATE PULL/SCAN vs FINAL AUTO-WASH)
     # =========================================================================
 
     def complete_machining_stage(
         self,
         db: Session,
-        cart_code: str,
+        cart_code: Optional[str] = None,
+        location_id: Optional[int] = None,
         operator_id: Optional[int] = None,
         notes: Optional[str] = None,
-    ) -> dict:
+    ) -> dict[str, Any]:
         """
         Called when an operator finishes machining a cart at a CNC station:
         1. Increments `cart.current_stage_level` (e.g., 0 -> 1, 1 -> 2, 2 -> 3).
         2. Records a `ProductionRecord` audit entry.
-        3. Looks up the active `ProductionRoute` for `cart.item_id`:
-           - If a next `RouteStep` exists (`stage_level == cart.current_stage_level + 1`):
-             Finds an available slot (POS1/POS2) among normalized `RouteStepMachine` machines.
-             If a slot is free -> immediately dispatches AMR (`MOVE_NEXT_STAGE`).
-             If all slots are full -> enqueues into `TransportQueue` (`WAITING_SLOT`).
-           - If the current step was the final CNC step (`is_final_cnc_step=True` or no next step):
-             Routes the cart to an available `WASHING_SLOT` (`MOVE_TO_WASH`), or enqueues if full.
+        3. Evaluates the active `ProductionRoute` for `cart.item_id`:
+           - Intermediate CNC Step (`is_final_cnc_step=False` and next `RouteStep` exists):
+             * Keeps the cart unlocked at its current station (`status='available'`, `current_stage_level=completed_stage`).
+             * Immediately scans `TransportQueue` (`WAITING_CART`) for `stage_level == completed_stage`:
+               if a downstream CNC station has already called for this Model, dispatches AMR right away!
+               Otherwise, the cart waits at its current station until a downstream CNC station calls it.
+           - Final CNC Step (`is_final_cnc_step=True` or no next `RouteStep`):
+             * Automatically routes the cart to an available `WASHING_SLOT` (`MOVE_TO_WASH`),
+               or enqueues into `TransportQueue` (`WAITING_SLOT`) if all 4 washing slots are full.
         """
-        cart = (
-            db.query(ItemStock)
-            .filter(
-                ItemStock.cart_code == cart_code.strip(),
-                ItemStock.is_active.is_(True),
-            )
-            .with_for_update()
-            .first()
-        )
+        query = db.query(ItemStock).filter(ItemStock.is_active.is_(True))
+        if cart_code and cart_code.strip():
+            query = query.filter(ItemStock.cart_code == cart_code.strip())
+        elif location_id:
+            query = query.filter(ItemStock.location_id == location_id)
+        else:
+            raise ValueError("Phải cung cấp mã xe (cart_code) hoặc vị trí trạm máy (location_id).")
+
+        cart = query.with_for_update(of=ItemStock).first()
         if not cart:
-            raise ValueError(f"Không tìm thấy xe hàng (cart_code='{cart_code}').")
+            raise ValueError(f"Không tìm thấy xe hàng hợp lệ (cart_code='{cart_code}', location_id={location_id}).")
         if cart.is_locked:
-            raise ValueError(f"Xe hàng '{cart_code}' đang bị khóa bởi tác vụ vận chuyển khác.")
+            raise ValueError(f"Xe hàng '{cart.cart_code}' đang bị khóa bởi tác vụ vận chuyển khác.")
         if not cart.location_id:
-            raise ValueError(f"Xe hàng '{cart_code}' chưa có vị trí hiện tại.")
+            raise ValueError(f"Xe hàng '{cart.cart_code}' chưa có vị trí hiện tại.")
 
         current_loc = db.query(Location).filter(Location.id == cart.location_id).first()
 
         # Advance stage level: if cart arrived as raw material (0), finishing the first CNC machine brings it to 1
         completed_stage = (cart.current_stage_level or 0) + 1
         cart.current_stage_level = completed_stage
+        cart.status = "available"
+        cart.is_locked = False
+        cart.locked_by_task_id = None
+        cart.destination_location_id = None
 
         prod_record = ProductionRecord(
             cart_code=cart.cart_code,
@@ -717,149 +819,118 @@ class DispatchService:
                     .first()
                 )
 
-        req_code = f"REQ-{uuid.uuid4().hex[:8].upper()}"
+        is_final_cnc_step = bool((current_step and current_step.is_final_cnc_step) or (next_step is None))
 
-        if next_step:
-            allowed_machines = next_step.allowed_machines
-            allowed_machine_ids = [
-                link.machine_id for link in (next_step.allowed_machine_links or []) if link.machine_id
-            ]
-            target_slot = self.find_available_slot_for_machines(
-                db,
-                allowed_machines,
-                allowed_machine_ids=allowed_machine_ids,
+        if not is_final_cnc_step:
+            # INTERMEDIATE STEP (PULL + ALWAYS SCAN):
+            # Persist the updated stage level and immediately scan WAITING_CART queue
+            # in case a downstream CNC station has already requested this cart level!
+            db.commit()
+            resolved_count = self.try_resolve_waiting_cart_queue(db, stage_level=completed_stage)
+            db.refresh(cart)
+
+            matched_req_code: Optional[str] = None
+            if cart.is_locked and cart.locked_by_task_id:
+                ft = db.query(FleetTask).filter(FleetTask.task_code == cart.locked_by_task_id).first()
+                if ft and ft.request:
+                    matched_req_code = ft.request.request_code
+
+            action_result = (
+                "DISPATCHED_TO_WAITING_CNC" if (resolved_count > 0 and cart.is_locked) else "STAGE_COMPLETED_WAITING_CALL"
             )
+            return {
+                "cart_code": cart.cart_code,
+                "completed_stage_level": completed_stage,
+                "is_final_cnc_step": False,
+                "action": action_result,
+                "resolved_queue_count": resolved_count,
+                "dispatched_task_code": cart.locked_by_task_id,
+                "request_code": matched_req_code,
+            }
 
-            if target_slot:
-                transport_req = TransportRequest(
-                    request_code=req_code,
-                    request_type="MOVE_NEXT_STAGE",
-                    item_id=cart.item_id,
-                    source_location_id=cart.location_id,
-                    destination_location_id=target_slot.id,
-                    cart_id=cart.id,
-                    required_stage_level=completed_stage,
-                    status="pending",
-                    priority=5,
-                    created_by=operator_id,
-                )
-                db.add(transport_req)
-                db.flush()
+        # FINAL CNC STEP -> Automatically push to WASHING_SLOT
+        req_code = f"REQ-{uuid.uuid4().hex[:8].upper()}"
+        wash_slot = self.find_available_slot_to_wash(db)
+        if wash_slot:
+            transport_req = TransportRequest(
+                request_code=req_code,
+                request_type="MOVE_TO_WASH",
+                item_id=cart.item_id,
+                source_location_id=cart.location_id,
+                destination_location_id=wash_slot.id,
+                cart_id=cart.id,
+                required_stage_level=completed_stage,
+                status="pending",
+                priority=5,
+                created_by=operator_id,
+            )
+            db.add(transport_req)
+            db.flush()
 
-                self._lock_cart_and_dispatch_fleet_task(
-                    db=db,
-                    transport_req=transport_req,
-                    cart=cart,
-                    pickup_location_id=cart.location_id,
-                    dropoff_location_id=target_slot.id,
-                )
-                action_result = "DISPATCHED_TO_NEXT_STAGE"
-            else:
-                # All slots for next stage are currently occupied -> enqueue in WAITING_SLOT
-                transport_req = TransportRequest(
-                    request_code=req_code,
-                    request_type="MOVE_NEXT_STAGE",
-                    item_id=cart.item_id,
-                    source_location_id=cart.location_id,
-                    destination_location_id=cart.location_id,  # Temporary placeholder until slot frees up
-                    cart_id=cart.id,
-                    required_stage_level=completed_stage,
-                    status="queued_for_slot",
-                    priority=5,
-                    created_by=operator_id,
-                )
-                db.add(transport_req)
-                db.flush()
-
-                queue_entry = TransportQueue(
-                    request_id=transport_req.id,
-                    queue_type="WAITING_SLOT",
-                    target_stage_level=next_stage_level,
-                    status="PENDING",
-                    priority=5,
-                )
-                db.add(queue_entry)
-                action_result = "QUEUED_FOR_NEXT_STAGE_SLOT"
+            self._lock_cart_and_dispatch_fleet_task(
+                db=db,
+                transport_req=transport_req,
+                cart=cart,
+                pickup_location_id=cart.location_id,
+                dropoff_location_id=wash_slot.id,
+            )
+            action_result = "DISPATCHED_TO_WASHING"
         else:
-            # Final CNC stage completed -> Route to WASHING_SLOT
-            wash_slot = self.find_available_slot_by_type(db, "WASHING_SLOT")
-            if wash_slot:
-                transport_req = TransportRequest(
-                    request_code=req_code,
-                    request_type="MOVE_TO_WASH",
-                    item_id=cart.item_id,
-                    source_location_id=cart.location_id,
-                    destination_location_id=wash_slot.id,
-                    cart_id=cart.id,
-                    required_stage_level=completed_stage,
-                    status="pending",
-                    priority=5,
-                    created_by=operator_id,
-                )
-                db.add(transport_req)
-                db.flush()
+            transport_req = TransportRequest(
+                request_code=req_code,
+                request_type="MOVE_TO_WASH",
+                item_id=cart.item_id,
+                source_location_id=cart.location_id,
+                destination_location_id=cart.location_id,
+                cart_id=cart.id,
+                required_stage_level=completed_stage,
+                status="queued_for_slot",
+                priority=5,
+                created_by=operator_id,
+            )
+            db.add(transport_req)
+            db.flush()
 
-                self._lock_cart_and_dispatch_fleet_task(
-                    db=db,
-                    transport_req=transport_req,
-                    cart=cart,
-                    pickup_location_id=cart.location_id,
-                    dropoff_location_id=wash_slot.id,
-                )
-                action_result = "DISPATCHED_TO_WASHING"
-            else:
-                transport_req = TransportRequest(
-                    request_code=req_code,
-                    request_type="MOVE_TO_WASH",
-                    item_id=cart.item_id,
-                    source_location_id=cart.location_id,
-                    destination_location_id=cart.location_id,
-                    cart_id=cart.id,
-                    required_stage_level=completed_stage,
-                    status="queued_for_slot",
-                    priority=5,
-                    created_by=operator_id,
-                )
-                db.add(transport_req)
-                db.flush()
-
-                queue_entry = TransportQueue(
-                    request_id=transport_req.id,
-                    queue_type="WAITING_SLOT",
-                    target_stage_level=99,  # 99 denotes WASHING_SLOT
-                    status="PENDING",
-                    priority=5,
-                )
-                db.add(queue_entry)
-                action_result = "QUEUED_FOR_WASHING_SLOT"
+            queue_entry = TransportQueue(
+                request_id=transport_req.id,
+                queue_type="WAITING_SLOT",
+                target_stage_level=99,  # 99 denotes WASHING_SLOT
+                status="PENDING",
+                priority=5,
+            )
+            db.add(queue_entry)
+            action_result = "QUEUED_FOR_WASHING_SLOT"
 
         db.commit()
         return {
             "cart_code": cart.cart_code,
             "completed_stage_level": completed_stage,
+            "is_final_cnc_step": True,
             "action": action_result,
             "request_code": transport_req.request_code,
         }
 
     # =========================================================================
-    # 6. EMPTY CART RETURN & WASHING COMPLETION (SCENARIO 3 & 4)
+    # 6. RETURN EMPTY CART FROM WASHING (SCENARIO 4)
     # =========================================================================
 
-    def release_empty_cart_from_cnc(
+    def complete_washing_and_return_empty_cart(
         self,
         db: Session,
         cart_code: str,
         operator_id: Optional[int] = None,
     ) -> TransportRequest:
         """
-        Scenario 3 (Trả xe rỗng tại CNC):
-        When workpieces are transferred onto another cart at a CNC station and the source cart becomes empty,
-        reset its quantity to 0 and dispatch an AMR to return it to `EMPTY_CART_BUFFER`.
+        Scenario 4 (Hoàn thành Tẩy rửa -> Trả xe rỗng về Bãi đệm EMPTY_CART_BUFFER):
+        Khi công nhân tại Khu Tẩy Rửa nhấc chi tiết đưa vào bể rửa, xe phôi trở thành xe rỗng.
+        Hệ thống đặt quantity = 0, status = 'empty', current_stage_level = 0.
+        Tìm ô bãi đệm xe rỗng theo cơ chế xoay vòng Round-Robin (EMPTY-01..04) và điều AMR chở xe về.
+        (Lưu ý: Máy CNC không bao giờ trả xe rỗng; chỉ có sau công đoạn Tẩy Rửa mới phát sinh xe rỗng).
         """
         cart = (
             db.query(ItemStock)
             .filter(ItemStock.cart_code == cart_code.strip(), ItemStock.is_active.is_(True))
-            .with_for_update()
+            .with_for_update(of=ItemStock)
             .first()
         )
         if not cart or not cart.location_id:
@@ -871,7 +942,7 @@ class DispatchService:
         cart.current_stage_level = 0
         cart.status = "empty"
 
-        empty_buffer = self.find_available_slot_by_type(db, "EMPTY_CART_BUFFER")
+        empty_buffer = self.find_next_empty_buffer_slot(db)
         req_code = f"REQ-{uuid.uuid4().hex[:8].upper()}"
 
         if empty_buffer:
@@ -927,21 +998,8 @@ class DispatchService:
         db.refresh(transport_req)
         return transport_req
 
-    def complete_washing_and_return_empty_cart(
-        self,
-        db: Session,
-        cart_code: str,
-        operator_id: Optional[int] = None,
-    ) -> TransportRequest:
-        """
-        Scenario 4 (Hoàn thành Tẩy rửa -> Trả xe rỗng):
-        Operator at the washing station confirms washing is complete; finished goods are unloaded,
-        cart is marked empty (`quantity = 0`), and AMR returns the empty cart to `EMPTY_CART_BUFFER`.
-        """
-        return self.release_empty_cart_from_cnc(db=db, cart_code=cart_code, operator_id=operator_id)
-
     # =========================================================================
-    # 7. FLEET TASK EXECUTION, WEBHOOK CALLBACKS & QUEUE RESOLUTION
+    # 7. FLEET TASK EXECUTION, WEBHOOK CALLBACKS & ALWAYS-SCAN QUEUE ENGINE
     # =========================================================================
 
     def _lock_cart_and_dispatch_fleet_task(
@@ -1052,16 +1110,19 @@ class DispatchService:
     def complete_fleet_task(self, db: Session, task_code: str) -> FleetTask:
         """
         Callback handler when KUKA RCS reports that an AMR has completed its dropoff:
-        1. Moves `cart.location_id = fleet_task.dropoff_location_id`.
-        2. Unlocks the cart (`is_locked = False`, `locked_by_task_id = None`, `destination_location_id = None`).
+        1. If the dropoff is at `EMPTY_CART_BUFFER` (or `RETURN_EMPTY_CART`):
+           - Opposite of Raw Material QR registration: immediately calls `fleet_remove_rack`
+             and clears the cart (`location_id = None`, `is_active = False`, `quantity = 0`, `status = 'empty'`)
+             so the buffer slot is immediately free for future cycles!
+        2. Otherwise (normal CNC or Washing delivery):
+           - Moves `cart.location_id = fleet_task.dropoff_location_id` and unlocks the cart.
         3. Marks `FleetTask` and `TransportRequest` as `completed`.
-        4. Triggers queue resolution (`try_resolve_waiting_slot_queue` & `try_resolve_waiting_cart_queue`)
-           since the pickup location just became free and a cart just arrived!
+        4. Triggers queue resolution (`scan_all_transport_queues`) since the pickup location just became free!
         """
         fleet_task = (
             db.query(FleetTask)
             .filter(FleetTask.task_code == task_code)
-            .with_for_update()
+            .with_for_update(of=FleetTask)
             .first()
         )
         if not fleet_task:
@@ -1071,38 +1132,66 @@ class DispatchService:
         fleet_task.status = "completed"
         fleet_task.completed_at = now
 
+        req_type = None
         if fleet_task.request:
+            req_type = fleet_task.request.request_type
             fleet_task.request.status = "completed"
             fleet_task.request.completed_at = now
+
+        dropoff_loc = (
+            db.query(Location).filter(Location.id == fleet_task.dropoff_location_id).first()
+            if fleet_task.dropoff_location_id
+            else None
+        )
+        is_empty_buffer_dropoff = bool(
+            req_type == "RETURN_EMPTY_CART"
+            or (dropoff_loc and dropoff_loc.location_type == "EMPTY_CART_BUFFER")
+        )
 
         if fleet_task.cart_id:
             cart = db.query(ItemStock).filter(ItemStock.id == fleet_task.cart_id).first()
             if cart:
-                cart.location_id = fleet_task.dropoff_location_id
-                cart.destination_location_id = None
-                cart.is_locked = False
-                cart.locked_by_task_id = None
+                if is_empty_buffer_dropoff:
+                    # Opposite of Raw Material insert: automatically remove/unbind rack at Empty Cart Buffer upon dropoff!
+                    if dropoff_loc and cart.cart_code:
+                        self.fleet_remove_rack(dropoff_loc.location_code, cart.cart_code)
+                    cart.location_id = None
+                    cart.destination_location_id = None
+                    cart.quantity = 0
+                    cart.current_stage_level = 0
+                    cart.status = "empty"
+                    cart.is_active = False
+                    cart.is_locked = False
+                    cart.locked_by_task_id = None
+                else:
+                    cart.location_id = fleet_task.dropoff_location_id
+                    cart.destination_location_id = None
+                    cart.is_locked = False
+                    cart.locked_by_task_id = None
+                    cart.status = "available"
 
         db.commit()
 
-        # Since pickup_location_id is now free, check if any queued request was waiting for a slot
-        self.try_resolve_waiting_slot_queue(db)
+        # Since pickup_location_id is now free and a cart settled, scan all queues
+        self.scan_all_transport_queues(db)
         return fleet_task
 
-    def try_resolve_waiting_cart_queue(self, db: Session, stage_level: int = 0) -> int:
+    def try_resolve_waiting_cart_queue(self, db: Session, stage_level: Optional[int] = None) -> int:
         """
         Scan `TransportQueue` (`WAITING_CART`) in FIFO order (`priority ASC, created_at ASC`).
+        If `stage_level` is None, scans all pending `WAITING_CART` entries across all stage levels (Always Scan).
         If a cart is now available, lock it and dispatch a `FleetTask`.
         """
+        query = db.query(TransportQueue).filter(
+            TransportQueue.queue_type == "WAITING_CART",
+            TransportQueue.status == "PENDING",
+        )
+        if stage_level is not None:
+            query = query.filter(TransportQueue.target_stage_level == stage_level)
+
         pending_entries = (
-            db.query(TransportQueue)
-            .filter(
-                TransportQueue.queue_type == "WAITING_CART",
-                TransportQueue.status == "PENDING",
-                TransportQueue.target_stage_level == stage_level,
-            )
-            .order_by(TransportQueue.priority.asc(), TransportQueue.created_at.asc())
-            .with_for_update(skip_locked=True)
+            query.order_by(TransportQueue.priority.asc(), TransportQueue.created_at.asc())
+            .with_for_update(of=TransportQueue, skip_locked=True)
             .all()
         )
 
@@ -1114,10 +1203,12 @@ class DispatchService:
             if not self._is_location_free(db, req.destination_location_id):
                 continue
 
+            dest_loc = db.query(Location).filter(Location.id == req.destination_location_id).first()
             cart = self.find_fifo_available_cart(
                 db,
                 item_id=req.item_id,
                 stage_level=req.required_stage_level,
+                target_location=dest_loc,
             )
             if cart:
                 self._lock_cart_and_dispatch_fleet_task(
@@ -1137,17 +1228,17 @@ class DispatchService:
 
     def try_resolve_waiting_slot_queue(self, db: Session) -> int:
         """
-        Scan `TransportQueue` (`WAITING_SLOT`) in FIFO order (`priority ASC, created_at ASC`).
-        When a CNC slot, Washing slot, or Empty Cart Buffer becomes free, dispatch the waiting cart.
+        Scan `TransportQueue` (`WAITING_SLOT` / `WAITING_WASH_SLOT`) in FIFO order (`priority ASC, created_at ASC`).
+        When a Washing slot or Empty Cart Buffer becomes free, dispatch the waiting cart.
         """
         pending_entries = (
             db.query(TransportQueue)
             .filter(
-                TransportQueue.queue_type == "WAITING_SLOT",
+                TransportQueue.queue_type.in_(["WAITING_SLOT", "WAITING_WASH_SLOT"]),
                 TransportQueue.status == "PENDING",
             )
             .order_by(TransportQueue.priority.asc(), TransportQueue.created_at.asc())
-            .with_for_update(skip_locked=True)
+            .with_for_update(of=TransportQueue, skip_locked=True)
             .all()
         )
 
@@ -1162,40 +1253,10 @@ class DispatchService:
                 continue
 
             target_slot: Optional[Location] = None
-            if req.request_type == "MOVE_TO_WASH":
-                target_slot = self.find_available_slot_by_type(db, "WASHING_SLOT")
+            if req.request_type in ("MOVE_TO_WASH", "SEND_TO_WASH"):
+                target_slot = self.find_available_slot_to_wash(db)
             elif req.request_type == "RETURN_EMPTY_CART":
-                target_slot = self.find_available_slot_by_type(db, "EMPTY_CART_BUFFER")
-            elif req.request_type == "MOVE_NEXT_STAGE":
-                route = (
-                    db.query(ProductionRoute)
-                    .filter(
-                        ProductionRoute.item_id == cart.item_id,
-                        ProductionRoute.is_active.is_(True),
-                    )
-                    .first()
-                )
-                if route:
-                    step = (
-                        db.query(RouteStep)
-                        .options(
-                            joinedload(RouteStep.allowed_machine_links).joinedload(RouteStepMachine.machine)
-                        )
-                        .filter(
-                            RouteStep.route_id == route.id,
-                            RouteStep.stage_level == entry.target_stage_level,
-                        )
-                        .first()
-                    )
-                    if step:
-                        allowed_machine_ids = [
-                            link.machine_id for link in (step.allowed_machine_links or []) if link.machine_id
-                        ]
-                        target_slot = self.find_available_slot_for_machines(
-                            db,
-                            step.allowed_machines,
-                            allowed_machine_ids=allowed_machine_ids,
-                        )
+                target_slot = self.find_next_empty_buffer_slot(db)
 
             if target_slot:
                 self._lock_cart_and_dispatch_fleet_task(
@@ -1212,6 +1273,20 @@ class DispatchService:
         if resolved_count:
             db.commit()
         return resolved_count
+
+    def scan_all_transport_queues(self, db: Session) -> dict[str, int]:
+        """
+        [ALWAYS SCAN ENGINE]
+        Sweeps all pending `WAITING_CART` entries (across all stage levels) and all pending
+        `WAITING_SLOT` entries to automatically match available carts and freed slots.
+        Called both reactively on events and periodically via Celery Beat.
+        """
+        resolved_carts = self.try_resolve_waiting_cart_queue(db, stage_level=None)
+        resolved_slots = self.try_resolve_waiting_slot_queue(db)
+        return {
+            "resolved_waiting_cart": resolved_carts,
+            "resolved_waiting_slot": resolved_slots,
+        }
 
 
 dispatch_service = DispatchService()
