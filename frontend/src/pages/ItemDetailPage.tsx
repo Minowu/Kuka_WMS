@@ -89,11 +89,7 @@ export const itemDetailFields: DetailFieldSchema<Item>[] = [
     label: "Tiêu chuẩn phôi / xe gá",
     accessor: (item) => `${item.standard_quantity_per_cart ?? 120} chi tiết/xe`,
   },
-  {
-    key: "base_unit",
-    label: "Đơn vị",
-    accessor: (item) => item.base_unit,
-  },
+
   {
     key: "description",
     label: "Mô tả",
@@ -119,9 +115,8 @@ export const itemDetailFields: DetailFieldSchema<Item>[] = [
 type ItemFormValues = {
   name: string;
   sku: string;
-  base_unit: number;
   standard_quantity_per_cart: number;
-  description: string;
+  description?: string;
   quantity: number;
   detailEntries?: { key: string; value: string }[];
 };
@@ -201,7 +196,6 @@ export default function ItemDetailPage() {
     form.setFieldsValue({
       name: item.name,
       sku: item.sku,
-      base_unit: units.find((u) => u.name === item.base_unit)?.id,
       standard_quantity_per_cart: item.standard_quantity_per_cart ?? 120,
       description: item.description ?? "",
       quantity: parseQuantity(item.quantity),
@@ -230,8 +224,7 @@ export default function ItemDetailPage() {
         id: item.id,
         data: {
           name: values.name.trim(),
-          description: values.description?.trim() ?? "",
-          base_unit: Number(values.base_unit),
+          description: values.description?.trim() || null,
           standard_quantity_per_cart: Number(values.standard_quantity_per_cart ?? 120),
           details,
         },
@@ -419,28 +412,12 @@ export default function ItemDetailPage() {
           >
             <InputNumber min={1} precision={0} placeholder="Ví dụ: 120" className="w-full" />
           </Form.Item>
-          <Form.Item
-            name="base_unit"
-            label="Đơn vị"
-            rules={[{ required: true, message: "Vui lòng chọn đơn vị!" }]}
-          >
-            <Select
-              showSearch
-              placeholder="Chọn đơn vị"
-              optionFilterProp="label"
-              loading={isUnitsLoading}
-              options={units.map((unit) => ({
-                value: unit.id,
-                label: unit.name,
-              }))}
-            />
-          </Form.Item>
+
           <Form.Item
             name="description"
-            label="Mô tả"
-            rules={[{ required: true, message: "Vui lòng nhập mô tả!" }]}
+            label="Mô tả kỹ thuật"
           >
-            <Input />
+            <Input placeholder="Mô tả kỹ thuật (tùy chọn)" />
           </Form.Item>
           <Form.Item label="Thông tin bổ sung (tùy chọn)">
             <Form.List name="detailEntries">
@@ -454,7 +431,6 @@ export default function ItemDetailPage() {
                       <Form.Item
                         {...restField}
                         name={[name, "key"]}
-                        rules={[{ required: true, message: "Nhập tên trường" }]}
                         className="!mb-0 flex-1"
                       >
                         <Input placeholder="Tên (vd: cavity_number)" />
@@ -462,7 +438,6 @@ export default function ItemDetailPage() {
                       <Form.Item
                         {...restField}
                         name={[name, "value"]}
-                        rules={[{ required: true, message: "Nhập giá trị" }]}
                         className="!mb-0 flex-1"
                       >
                         <Input placeholder="Giá trị (vd: 1, 2, 3)" />

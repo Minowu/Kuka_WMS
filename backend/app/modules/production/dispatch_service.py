@@ -323,7 +323,7 @@ class DispatchService:
 
         item = (
             db.query(Item)
-            .filter(Item.id == item_id, Item.is_active.is_(True))
+            .filter(Item.id == item_id)
             .first()
         )
         if not item:

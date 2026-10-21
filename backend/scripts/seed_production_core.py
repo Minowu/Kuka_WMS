@@ -82,14 +82,12 @@ def seed_production_core() -> None:
                     machine_code=m_code,
                     machine_name=m_name,
                     warehouse_id=warehouse.id,
-                    is_active=True,
                 )
                 db.add(m)
                 db.flush()
             else:
                 m.machine_name = m_name
                 m.warehouse_id = warehouse.id
-                m.is_active = True
             machines_by_code[m_code] = m
 
         # 3. Locations mapped strictly to the 16 real Rack nodes (functionType == 2) from map_CNC001_CNC001_28s.json
@@ -120,51 +118,16 @@ def seed_production_core() -> None:
             ("EMPTY-02", "Bãi đệm 2", "EMPTY-02", "EMPTY_CART_BUFFER", None, 2, "26", 185713, 83800),
         ]
 
+        # Locations are managed solely by user/map import. No auto-inserting of mock locations.
         locations_by_code: dict[str, Location] = {}
-        for code, name, bin_code, loc_type, machine_code, pos_idx, node_lbl, mx, my in location_defs:
-            lookup_codes = [code]
-            if code.startswith("VT-"):
-                lookup_codes.append(f"RAW-0{pos_idx}")
-            loc = (
-                db.query(Location)
-                .filter(
-                    Location.warehouse_id == warehouse.id,
-                    Location.location_code.in_(lookup_codes),
-                )
-                .first()
-            )
-            machine_obj = machines_by_code.get(machine_code) if machine_code else None
-            if not loc:
-                loc = Location(
-                    location_code=code,
-                    location_name=name,
-                    bin_code=bin_code,
-                    location_type=loc_type,
-                    machine_id=machine_obj.id if machine_obj else None,
-                    machine_code=machine_code,
-                    position_index=pos_idx,
-                    node_label=node_lbl,
-                    map_x=mx,
-                    map_y=my,
-                    warehouse_id=warehouse.id,
-                    is_active=True,
-                )
-                db.add(loc)
-                db.flush()
-            else:
-                loc.location_code = code
-                loc.location_name = name
-                loc.bin_code = bin_code
-                loc.location_type = loc_type
-                loc.machine_id = machine_obj.id if machine_obj else None
-                loc.machine_code = machine_code
-                loc.position_index = pos_idx
-                loc.node_label = node_lbl
-                loc.map_x = mx
-                loc.map_y = my
-                loc.is_active = True
-            locations_by_code[code] = loc
-            if code.startswith("VT-"):
+        for loc in db.query(Location).filter(Location.warehouse_id == warehouse.id).all():
+            if loc.location_code:
+                locations_by_code[loc.location_code] = loc
+            if loc.location_label:
+                locations_by_code[loc.location_label] = loc
+            loc_code = loc.location_code or ""
+            if loc_code.startswith("VT-"):
+                pos_idx = loc.position_index or 1
                 locations_by_code[f"RAW-0{pos_idx}"] = loc
 
         # 4. Product Models (Items)
@@ -182,7 +145,6 @@ def seed_production_core() -> None:
                     description=f"Sản phẩm cơ khí {name}",
                     supplier="KUKA_CNC",
                     standard_quantity_per_cart=std_qty,
-                    is_active=True,
                     warehouse_id=warehouse.id,
                     details={"type": "CNC_PART"},
                 )
@@ -193,7 +155,7 @@ def seed_production_core() -> None:
             items_by_sku[sku] = item
 
         # 5. Production Routes & Normalized 3NF RouteStepMachine
-        route_a = db.query(ProductionRoute).filter(ProductionRoute.route_code == "RT-MODEL-A-V1").first()
+        route_a = db.query(ProductionRoute).filter(ProductionRoute.item_id == items_by_sku["MODEL-A"].id, ProductionRoute.is_active.is_(True)).first()
         if not route_a:
             route_a = ProductionRoute(
                 route_code="RT-MODEL-A-V1",
@@ -269,26 +231,43 @@ def seed_production_core() -> None:
             ("CART-002", "MODEL-A", "RAW-02", 120, base_time + timedelta(minutes=10)),
             ("CART-003", "MODEL-B", "RAW-03", 80, base_time + timedelta(minutes=20)),
         ]
-        for cart_code, sku, loc_code, qty, created_ts in cart_defs:
+        occupied_loc_ids = {
+            s.location_id for s in db.query(ItemStock.location_id).filter(ItemStock.is_active.is_(True)).all()
+        }
+        raw_candidates = db.query(Location).filter(
+            Location.warehouse_id == warehouse.id,
+            Location.location_type == "RAW_MATERIAL",
+            Location.is_active.is_(True)
+        ).all()
+
+        for idx, (cart_code, sku, loc_code, qty, created_ts) in enumerate(cart_defs):
+            target_loc = locations_by_code.get(loc_code)
+            if not target_loc or target_loc.id in occupied_loc_ids:
+                avail = [l for l in raw_candidates if l.id not in occupied_loc_ids]
+                if not avail:
+                    continue
+                target_loc = avail[0]
+
+            occupied_loc_ids.add(target_loc.id)
+
             cart = db.query(ItemStock).filter(ItemStock.cart_code == cart_code).first()
             if not cart:
                 cart = ItemStock(
                     cart_code=cart_code,
                     item_id=items_by_sku[sku].id,
-                    location_id=locations_by_code[loc_code].id,
+                    location_id=target_loc.id,
                     quantity=qty,
                     current_stage_level=0,
                     is_locked=False,
                     locked_by_task_id=None,
                     destination_location_id=None,
                     status="available",
-                    is_active=True,
                     created_at=created_ts,
                 )
                 db.add(cart)
             else:
                 cart.item_id = items_by_sku[sku].id
-                cart.location_id = locations_by_code[loc_code].id
+                cart.location_id = target_loc.id
                 cart.quantity = qty
                 cart.current_stage_level = 0
                 cart.is_locked = False
@@ -358,7 +337,6 @@ def seed_production_core() -> None:
                     username=uname,
                     email=uemail,
                     hashed_password=get_password_hash(upwd),
-                    is_active=True,
                 )
                 db.add(u)
                 db.flush()

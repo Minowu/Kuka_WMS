@@ -36,7 +36,6 @@ class Item(Base):
     description = Column(Text)
     standard_quantity_per_cart = Column(Integer, nullable=False, default=120, server_default="120")
     base_unit_id = Column("base_unit", Integer, nullable=True)
-    is_active = Column(Boolean, default=True, nullable=False)
     warehouse_id = Column(Integer, ForeignKey("warehouse.id"), nullable=False, index=True)
     details = Column(
         JSON().with_variant(JSONB, "postgresql"),

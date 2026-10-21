@@ -63,7 +63,6 @@ class Machine(Base):
     machine_code = Column(String(50), unique=True, nullable=False, index=True)
     machine_name = Column(String(100), nullable=True)
     warehouse_id = Column(Integer, ForeignKey("warehouse.id"), nullable=True, index=True)
-    is_active = Column(Boolean, default=True, nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(
         DateTime(timezone=True),

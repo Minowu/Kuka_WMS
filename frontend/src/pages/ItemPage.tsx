@@ -6,6 +6,8 @@ import {
   UploadOutlined,
   MinusCircleOutlined,
   BranchesOutlined,
+  EditOutlined,
+  DeleteOutlined,
 } from "@ant-design/icons";
 import type { ColumnsType } from "antd/es/table";
 import { Item, CreateItemInput, ItemImportJobStatus } from "@/types/item";
@@ -22,7 +24,7 @@ import {
   Select,
   cn,
 } from "@/components/ui";
-import { Progress } from "antd";
+import { Progress, Popconfirm, Tooltip as AntTooltip } from "antd";
 import {
   Area,
   CartesianGrid,
@@ -36,6 +38,8 @@ import {
 import {
   useItems,
   useCreateItem,
+  useUpdateItem,
+  useDeactivateItem,
   useItemAnalyze,
   useImportItems,
   useDownloadLastImportItemFile,
@@ -259,6 +263,10 @@ export default function ItemPage() {
   const navigate = useNavigate();
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [form] = Form.useForm<CreateItemFormValues>();
+  const [editingItem, setEditingItem] = useState<Item | null>(null);
+  const [editForm] = Form.useForm();
+  const updateMutation = useUpdateItem();
+  const deleteMutation = useDeactivateItem();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
   const [importJob, setImportJob] = useState<ItemImportJobStatus | null>(null);
@@ -306,13 +314,11 @@ export default function ItemPage() {
     return chunks;
   }, [itemList]);
 
-  useEffect(() => {
-    if (isCreateOpen) {
-      form.resetFields();
-    }
-  }, [isCreateOpen, form]);
-
   const handleOpenCreate = () => {
+    form.resetFields();
+    form.setFieldsValue({
+      standard_quantity_per_cart: 120,
+    });
     setIsCreateOpen(true);
   };
 
@@ -349,14 +355,14 @@ export default function ItemPage() {
         .map(({ key, value }) => [key.trim(), value.trim()] as const)
         .filter(([key]) => key.length > 0),
     );
+    const targetWarehouseId = selectedWarehouseId || warehouses[0]?.id || 3;
     createMutation.mutate(
       {
         sku: values.sku.trim(),
         name: values.name.trim(),
-        description: values.description?.trim() ?? "",
-        base_unit: Number(values.base_unit),
+        description: values.description?.trim() || null,
         standard_quantity_per_cart: Number(values.standard_quantity_per_cart ?? 120),
-        warehouse_id: selectedWarehouseId,
+        warehouse_id: targetWarehouseId,
         details,
       },
       {
@@ -370,6 +376,46 @@ export default function ItemPage() {
         },
       },
     );
+  };
+
+  const handleOpenEdit = (record: Item) => {
+    setEditingItem(record);
+    editForm.resetFields();
+    editForm.setFieldsValue({
+      sku: record.sku,
+      name: record.name,
+      standard_quantity_per_cart: record.standard_quantity_per_cart ?? 120,
+      description: record.description ?? '',
+    });
+  };
+
+  const handleUpdate = async () => {
+    if (!editingItem) return;
+    try {
+      const values = await editForm.validateFields();
+      await updateMutation.mutateAsync({
+        itemId: editingItem.id,
+        input: {
+          sku: values.sku.trim(),
+          name: values.name.trim(),
+          description: values.description?.trim() || null,
+          standard_quantity_per_cart: Number(values.standard_quantity_per_cart ?? 120),
+        },
+      });
+      message.success('Cập nhật Model sản phẩm thành công!');
+      setEditingItem(null);
+    } catch (err: any) {
+      message.error(getApiErrorMessage(err, 'Không thể cập nhật Model sản phẩm'));
+    }
+  };
+
+  const handleDeleteItem = async (itemId: number) => {
+    try {
+      await deleteMutation.mutateAsync(itemId);
+      message.success('Đã xóa Model sản phẩm thành công!');
+    } catch (err: any) {
+      message.error(getApiErrorMessage(err, 'Không thể xóa Model (có thể đang có xe gá phôi hoặc quy trình liên kết)'));
+    }
   };
 
   const handleDownloadImportFile = () => {
@@ -515,10 +561,15 @@ export default function ItemPage() {
       ),
     },
     {
-      title: "Đơn vị",
-      dataIndex: "base_unit",
-      key: "base_unit",
-      sorter: (a, b) => a.base_unit.localeCompare(b.base_unit),
+      title: "Tiêu chuẩn / xe",
+      dataIndex: "standard_quantity_per_cart",
+      key: "standard_quantity_per_cart",
+      align: "center",
+      render: (val: number) => (
+        <span className="font-semibold text-slate-800">
+          {val || 120} phôi/xe
+        </span>
+      ),
     },
     {
       title: "Ngày tạo",
@@ -526,6 +577,41 @@ export default function ItemPage() {
       key: "created_at",
       sorter: (a, b) => a.created_at.localeCompare(b.created_at),
       render: (date: string) => formatDate(date),
+    },
+    {
+      title: "Thao tác",
+      key: "actions",
+      width: 120,
+      align: "center",
+      render: (_, record) => (
+        <Space onClick={(e) => e.stopPropagation()}>
+          <AntTooltip title="Chỉnh sửa Model">
+            <Button
+              size="small"
+              variant="outline"
+              icon={<EditOutlined />}
+              onClick={() => handleOpenEdit(record)}
+            />
+          </AntTooltip>
+          <Popconfirm
+            title="Xác nhận xóa Model sản phẩm?"
+            description={`Bạn có chắc muốn xóa Model '${record.sku}' không?`}
+            onConfirm={() => handleDeleteItem(record.id)}
+            okText="Xóa"
+            cancelText="Hủy"
+            okButtonProps={{ danger: true }}
+          >
+            <AntTooltip title="Xóa Model">
+              <Button
+                size="small"
+                variant="outline"
+                className="text-red-500 hover:text-red-600 hover:border-red-300"
+                icon={<DeleteOutlined />}
+              />
+            </AntTooltip>
+          </Popconfirm>
+        </Space>
+      ),
     },
   ];
 
@@ -889,22 +975,7 @@ export default function ItemPage() {
             <Input placeholder="Ví dụ: Phôi Trục Bánh Răng" />
           </Form.Item>
 
-          <Form.Item
-            name="base_unit"
-            label="Đơn vị"
-            rules={[{ required: true, message: "Vui lòng chọn đơn vị!" }]}
-          >
-            <Select
-              showSearch
-              placeholder="Chọn đơn vị"
-              optionFilterProp="label"
-              loading={isUnitsLoading}
-              options={units.map((unit) => ({
-                value: unit.id,
-                label: unit.name,
-              }))}
-            />
-          </Form.Item>
+
 
           <Form.Item
             name="standard_quantity_per_cart"
@@ -919,10 +990,9 @@ export default function ItemPage() {
 
           <Form.Item
             name="description"
-            label="Mô tả"
-            rules={[{ required: true, message: "Vui lòng nhập mô tả!" }]}
+            label="Mô tả kỹ thuật"
           >
-            <Input placeholder="Ví dụ: Thép cuộn" />
+            <Input placeholder="Ví dụ: Thép hợp kim S45C (tùy chọn)" />
           </Form.Item>
 
           <Form.Item label="Thông tin bổ sung (tùy chọn)">
@@ -937,7 +1007,6 @@ export default function ItemPage() {
                       <Form.Item
                         {...restField}
                         name={[name, "key"]}
-                        rules={[{ required: true, message: "Nhập tên trường" }]}
                         className="!mb-0 flex-1"
                       >
                         <Input placeholder="Tên (vd: cavity_number)" />
@@ -945,7 +1014,6 @@ export default function ItemPage() {
                       <Form.Item
                         {...restField}
                         name={[name, "value"]}
-                        rules={[{ required: true, message: "Nhập giá trị" }]}
                         className="!mb-0 flex-1"
                       >
                         <Input placeholder="Giá trị (vd: 1, 2, 3)" />
@@ -1063,6 +1131,74 @@ export default function ItemPage() {
             </div>
           ) : null}
         </div>
+      </Modal>
+      {/* Modal Chỉnh sửa Model */}
+      <Modal
+        open={!!editingItem}
+        onCancel={() => setEditingItem(null)}
+        footer={null}
+        width={640}
+        centered
+        title={
+          <div className="flex items-center gap-2 text-brand-dark text-lg font-bold">
+            <EditOutlined className="text-amber-500" />
+            Chỉnh sửa Model sản phẩm
+          </div>
+        }
+      >
+        <Form
+          form={editForm}
+          layout="vertical"
+          onFinish={handleUpdate}
+          className="mt-4 space-y-4"
+        >
+          <Form.Item
+            name="sku"
+            label="Mã sản phẩm (SKU / Model Code)"
+            rules={[{ required: true, message: "Vui lòng nhập mã sản phẩm!" }]}
+          >
+            <Input placeholder="Ví dụ: MODEL-01" className="uppercase font-mono" />
+          </Form.Item>
+
+          <Form.Item
+            name="name"
+            label="Tên sản phẩm (Model Name)"
+            rules={[{ required: true, message: "Vui lòng nhập tên sản phẩm!" }]}
+          >
+            <Input placeholder="Ví dụ: Phôi Trục Chính" />
+          </Form.Item>
+
+
+
+          <Form.Item
+            name="standard_quantity_per_cart"
+            label="Tiêu chuẩn phôi / xe gá (chi tiết/rack)"
+            rules={[
+              { required: true, message: "Vui lòng nhập số lượng tiêu chuẩn/xe!" },
+              { type: "number", min: 1, message: "Giá trị phải >= 1" },
+            ]}
+          >
+            <InputNumber min={1} precision={0} placeholder="Ví dụ: 120" className="w-full" />
+          </Form.Item>
+
+          <Form.Item
+            name="description"
+            label="Mô tả kỹ thuật"
+          >
+            <Input.TextArea rows={3} placeholder="Mô tả chi tiết kỹ thuật phôi..." />
+          </Form.Item>
+
+          <Form.Item className="mb-0 flex justify-end">
+            <Space>
+              <Button variant="secondary" onClick={() => setEditingItem(null)}>
+                Hủy
+              </Button>
+              <Button htmlType="submit" variant="primary" loading={updateMutation.isPending}>
+                Lưu thay đổi
+              </Button>
+            </Space>
+          </Form.Item>
+        </Form>
       </Modal>
     </div>
   );

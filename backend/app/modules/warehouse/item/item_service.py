@@ -71,8 +71,6 @@ def list_items(
     query = db.query(Item)
     if warehouse_id is not None:
         query = query.filter(Item.warehouse_id == warehouse_id)
-    if is_active is not None:
-        query = query.filter(Item.is_active == is_active)
     if q and q.strip():
         like = f"%{q.strip()}%"
         query = query.filter(or_(Item.sku.ilike(like), Item.name.ilike(like)))
@@ -105,7 +103,6 @@ def analyze_items(db: Session, warehouse_id: int) -> ItemAnalyzeResponse:
         db.query(func.count(Item.id))
         .filter(
             Item.warehouse_id == warehouse_id,
-            Item.is_active.is_(True),
         )
         .scalar()
         or 0
@@ -117,7 +114,6 @@ def analyze_items(db: Session, warehouse_id: int) -> ItemAnalyzeResponse:
         .join(Location, Location.id == ItemStock.location_id)
         .filter(
             Item.warehouse_id == warehouse_id,
-            Item.is_active.is_(True),
             ItemStock.is_active.is_(True),
             countable_stock_level_criterion(),
             positive_stock_quantity_criterion(),
@@ -144,7 +140,6 @@ def analyze_items(db: Session, warehouse_id: int) -> ItemAnalyzeResponse:
         .join(Location, Location.id == ItemStock.location_id)
         .filter(
             Item.warehouse_id == warehouse_id,
-            Item.is_active.is_(True),
             ItemStock.is_active.is_(True),
             countable_stock_level_criterion(),
             positive_stock_quantity_criterion(),
@@ -163,7 +158,6 @@ def analyze_items(db: Session, warehouse_id: int) -> ItemAnalyzeResponse:
         .join(Location, Location.id == ItemStock.location_id)
         .filter(
             Item.warehouse_id == warehouse_id,
-            Item.is_active.is_(True),
             ItemStock.is_active.is_(True),
             countable_stock_level_criterion(),
             positive_stock_quantity_criterion(),
@@ -181,7 +175,6 @@ def analyze_items(db: Session, warehouse_id: int) -> ItemAnalyzeResponse:
         .outerjoin(stock_per_item, stock_per_item.c.item_id == Item.id)
         .filter(
             Item.warehouse_id == warehouse_id,
-            Item.is_active.is_(True),
             current_qty_expr < threshold_expr,
         )
         .scalar()
@@ -202,10 +195,7 @@ def get_item_by_id(
     *,
     include_inactive: bool = False,
 ) -> Optional[Item]:
-    query = db.query(Item).filter(Item.id == item_id)
-    if not include_inactive:
-        query = query.filter(Item.is_active.is_(True))
-    return query.first()
+    return db.query(Item).filter(Item.id == item_id).first()
 
 
 def get_item_detail(db: Session, item_id: int) -> ItemDetailResponse:
@@ -283,7 +273,6 @@ def create_item(db: Session, body: ItemCreate) -> Item:
         warehouse_id=body.warehouse_id,
         supplier=(body.supplier or "").strip(),
         details=details,
-        is_active=True,
     )
     try:
         db.add(item)
@@ -347,9 +336,13 @@ def delete_item(db: Session, item_id: int) -> bool:
         .filter(ItemStock.item_id == item_id, ItemStock.is_active.is_(True))
         .first()
     ):
-        raise ValueError("Cannot delete item: item stocks still exist")
-    item.is_active = False
-    db.commit()
+        raise ValueError("Không thể xóa Model: đang có xe gá phôi tồn tại trong kho hoặc trạm máy.")
+    try:
+        db.delete(item)
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        raise ValueError(f"Không thể xóa Model do có ràng buộc dữ liệu: {e}") from e
     return True
 
 

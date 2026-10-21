@@ -42,12 +42,12 @@ def _serialize_item_for_response(data: Any) -> Any:
             "name": data.name,
             "category": details.get("category"),
             "description": data.description if getattr(data, "description", None) is not None else details.get("description"),
-            "base_unit": str(details.get("base_unit") or "Cái"),
+            "base_unit": str(details.get("base_unit")) if details.get("base_unit") else None,
             "standard_quantity_per_cart": getattr(data, "standard_quantity_per_cart", None) or 120,
             "warehouse_id": data.warehouse_id,
-            "supplier": str(getattr(data, "supplier", None) or details.get("supplier") or ""),
+            "supplier": str(getattr(data, "supplier", None) or details.get("supplier")) if (getattr(data, "supplier", None) or details.get("supplier")) else None,
             "details": details,
-            "is_active": data.is_active,
+            "is_active": getattr(data, "is_active", True),
             "quantity": data.quantity,
             "total_price": _compute_item_total_price(data.quantity, details),
             "created_at": data.created_at,
@@ -61,10 +61,10 @@ class ItemCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=255)
     category: Optional[str] = None
     description: Optional[str] = None
-    base_unit: Optional[int] = Field(default=1)
+    base_unit: Optional[int] = None
     standard_quantity_per_cart: int = Field(default=120, gt=0)
     warehouse_id: int
-    supplier: str = Field(default="", max_length=100)
+    supplier: Optional[str] = Field(default=None, max_length=100)
     details: Optional[dict[str, Any]] = None
 
 
@@ -87,12 +87,12 @@ class ItemResponse(BaseModel):
     name: str
     category: Optional[str] = None
     description: Optional[str] = None
-    base_unit: str = "Cái"
+    base_unit: Optional[str] = None
     standard_quantity_per_cart: Optional[int] = 120
     warehouse_id: int
-    supplier: str = ""
+    supplier: Optional[str] = None
     details: dict[str, Any] = Field(default_factory=dict)
-    is_active: bool
+    is_active: bool = True
     quantity: Optional[Decimal] = None
     total_price: Decimal = Decimal("0")
     created_at: Optional[datetime] = None
