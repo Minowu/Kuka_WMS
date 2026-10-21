@@ -9,7 +9,6 @@ class LocationCreate(BaseModel):
     location_code: str = Field(..., min_length=1, max_length=100)
     function_type: Optional[int] = 2
     location_name: str = Field(..., min_length=1, max_length=100)
-    bin_code: Optional[str] = Field(None, max_length=50)
     row: Optional[str] = Field(None, max_length=10)
     column: Optional[str] = Field(None, max_length=10)
     level: Optional[str] = Field(None, max_length=10)
@@ -29,7 +28,6 @@ class LocationUpdate(BaseModel):
     location_code: Optional[str] = Field(None, min_length=1, max_length=100)
     function_type: Optional[int] = None
     location_name: Optional[str] = Field(None, min_length=1, max_length=100)
-    bin_code: Optional[str] = Field(None, max_length=50)
     row: Optional[str] = Field(None, max_length=10)
     column: Optional[str] = Field(None, max_length=10)
     level: Optional[str] = Field(None, max_length=10)
@@ -49,9 +47,9 @@ class LocationUpdate(BaseModel):
 class LocationResponse(BaseModel):
     id: int
     location_code: str
+    location_label: Optional[str] = None
     location_name: str
     function_type: Optional[int] = 2
-    bin_code: Optional[str] = None
     row: Optional[str] = None
     column: Optional[str] = None
     level: Optional[str] = None
@@ -99,7 +97,6 @@ class MapRemapEntry(BaseModel):
 
 class MapSyncMatchedItem(BaseModel):
     location_id: int
-    bin_code: Optional[str] = None
     location_name: Optional[str] = None
     matched_by: str
     previous_location_code: Optional[str] = None
@@ -108,7 +105,6 @@ class MapSyncMatchedItem(BaseModel):
 
 class MapSyncCreatedItem(BaseModel):
     location_id: int
-    bin_code: Optional[str] = None
     location_name: Optional[str] = None
     location_code: str
 
@@ -123,7 +119,6 @@ class MapSyncRemappedItem(BaseModel):
 
 class MapSyncRetiredItem(BaseModel):
     location_id: int
-    bin_code: Optional[str] = None
     location_name: Optional[str] = None
     references: dict[str, int] = {}
     quantity: Optional[str] = None
@@ -131,7 +126,6 @@ class MapSyncRetiredItem(BaseModel):
 
 class MapSyncFreedCode(BaseModel):
     location_id: int
-    bin_code: Optional[str] = None
     released_location_code: str
 
 
@@ -184,7 +178,6 @@ class ZoneMapLayoutNode(BaseModel):
     id: int
     location_code: str
     location_name: Optional[str] = None
-    bin_code: Optional[str] = None
     row: Optional[str] = None
     column: Optional[str] = None
     level: Optional[str] = None
@@ -223,7 +216,6 @@ class MapLocationItem(BaseModel):
     id: int
     location_code: str
     location_name: Optional[str] = None
-    bin_code: Optional[str] = None
     row: Optional[str] = None
     column: Optional[str] = None
     level: Optional[str] = None

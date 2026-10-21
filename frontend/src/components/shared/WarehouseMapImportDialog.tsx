@@ -34,7 +34,7 @@ function extractErrorDetail(error: unknown): string {
 }
 
 const binLabel = (item: MapSyncRetiredItem) =>
-  item.bin_code || item.location_name || String(item.location_id);
+  item.location_name || item.location_code || String(item.location_id);
 
 const totalReferences = (item: MapSyncRetiredItem) =>
   Object.values(item.references).reduce((sum, n) => sum + n, 0);
@@ -80,8 +80,8 @@ const WarehouseMapImportDialog: React.FC<WarehouseMapImportDialogProps> = ({
   const targetBinOptions = useMemo(() => {
     if (!preview) return [];
     const bins = [
-      ...preview.matched.map((m) => m.bin_code),
-      ...preview.created.map((c) => c.bin_code),
+      ...preview.matched.map((m) => m.location_name || m.location_code),
+      ...preview.created.map((c) => c.location_name || c.location_code),
     ].filter((bin): bin is string => !!bin);
     return [...new Set(bins)]
       .sort((a, b) => a.localeCompare(b))
@@ -354,17 +354,7 @@ const WarehouseMapImportDialog: React.FC<WarehouseMapImportDialogProps> = ({
               </div>
             )}
 
-            {preview.nodes_without_bin_code.length > 0 && (
-              <Alert variant="info">
-                {preview.nodes_without_bin_code.length} node trong map chưa được
-                đặt tên theo dạng{" "}
-                <code className="rounded bg-black/5 px-1">
-                  R1_C13_L1_BKH1.13
-                </code>
-                , nên sẽ được tạo mới ở mỗi lần import. Nên đặt tên node trong
-                map editor để giữ được lịch sử.
-              </Alert>
-            )}
+
           </div>
         )}
 

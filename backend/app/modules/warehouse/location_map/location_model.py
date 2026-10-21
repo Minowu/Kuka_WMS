@@ -67,7 +67,9 @@ class Location(Base):
     id = Column(Integer, primary_key=True, index=True)
     # Map nodeUuid from KUKA floor map.
     location_code = Column(String(100), nullable=False, index=True)
-    # Map nodeLabel / display name (e.g. '51', '216').
+    # Map nodeLabel (e.g. '51', '216').
+    location_label = Column(String(50), nullable=True, index=True)
+    # Station business name (e.g. 'VT-01', 'CNC01-POS1', 'WASH-01').
     location_name = Column(String(100), nullable=False, index=True)
     function_type = Column(Integer, nullable=True, default=2)  # 2: Rack node
     location_type = Column(
@@ -123,6 +125,23 @@ class Location(Base):
     def zone_id(self):
         return None
 
+    @property
+    def node_label(self):
+        return self.location_label
+
+    @node_label.setter
+    def node_label(self, value):
+        self.location_label = value
+
+    @property
+    def machine_code(self):
+        return self.machine.machine_code if self.machine else None
+
+    @machine_code.setter
+    def machine_code(self, value):
+        # Read-only property derived from machine.machine_code; setter provided for legacy init compatibility
+        pass
+
 
 class WarehouseMap(Base):
     __tablename__ = "warehouse_map"
@@ -143,3 +162,7 @@ class WarehouseMap(Base):
     @property
     def zone_id(self):
         return None
+
+    @property
+    def machine_code(self):
+        return self.machine.machine_code if self.machine else None

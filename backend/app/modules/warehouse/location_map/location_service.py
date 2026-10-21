@@ -711,8 +711,13 @@ def _apply_shelf_to_location(
     shelf: dict,
     warehouse_id: int,
 ) -> None:
-    """Update a matched location in place."""
-    location.location_name = shelf["location_name"]
+    """Update a matched location in place while preserving user-assigned location_name."""
+    lbl = shelf.get("location_label") or shelf.get("location_name")
+    if lbl is not None:
+        location.location_label = lbl
+    # Neu trc do chua duoc dat ten nghiep vu (van la UNASSIGNED hoac ten cu la so node), cap nhat ten moi
+    if location.location_type == "UNASSIGNED" or not location.location_name:
+        location.location_name = shelf["location_name"]
     if shelf.get("map_x") is not None:
         location.map_x = shelf["map_x"]
     if shelf.get("map_y") is not None:
@@ -865,6 +870,7 @@ def sync_locations_from_map(
         if location is None:
             location = Location(
                 location_code=shelf["location_code"],
+                location_label=shelf.get("location_label") or shelf["location_name"],
                 location_name=shelf["location_name"],
                 function_type=shelf.get("function_type", 2),
                 map_x=shelf.get("map_x"),
@@ -1096,6 +1102,7 @@ def _extract_shelves_from_kuka_floor_map(data: dict) -> list[dict]:
 
         shelves.append({
             "location_code": node_uuid,
+            "location_label": node_label,
             "location_name": node_label,
             "function_type": 2,
             "map_x": x_mm,
@@ -1128,8 +1135,9 @@ def adapt_kuka_floor_map_to_canvas(data: dict) -> MapDataResponse:
 
         func_list = n.get("functionList", [])
         has_func = bool(func_list)
-        node_type = 1 if has_func else 0
-        shelf_turn = 1 if any(f.get("functionType") == 2 for f in func_list) else 0
+        is_rack = any(f.get("functionType") == 2 for f in func_list)
+        node_type = 1 if is_rack else 0
+        shelf_turn = 1 if is_rack else 0
         extra = [f.get("functionType") for f in func_list if f.get("functionType") is not None]
 
         name = lbl

@@ -17,8 +17,8 @@ export interface MapData {
 export interface ZoneMapLayoutNode {
   id: number;
   location_code: string;
-  location_name: string | null;
-  bin_code: string | null;
+  bin_code?: string | null;
+  location_name?: string | null;
   row: string | null;
   column: string | null;
   level: string | null;
@@ -40,8 +40,8 @@ export interface MapRemapEntry {
 
 export interface MapSyncMatchedItem {
   location_id: number;
-  bin_code: string | null;
-  location_name: string;
+  bin_code?: string | null;
+  location_name?: string | null;
   matched_by: string;
   previous_location_code: string;
   location_code: string;
@@ -49,8 +49,8 @@ export interface MapSyncMatchedItem {
 
 export interface MapSyncCreatedItem {
   location_id: number;
-  bin_code: string | null;
-  location_name: string;
+  bin_code?: string | null;
+  location_name?: string | null;
   location_code: string;
 }
 
@@ -64,15 +64,16 @@ export interface MapSyncRemappedItem {
 
 export interface MapSyncRetiredItem {
   location_id: number;
-  bin_code: string | null;
-  location_name: string | null;
+  bin_code?: string | null;
+  location_name?: string | null;
   references: Record<string, number>;
   quantity?: string | null;
 }
 
 export interface MapSyncFreedCode {
   location_id: number;
-  bin_code: string | null;
+  bin_code?: string | null;
+  location_name?: string | null;
   released_location_code: string;
 }
 
@@ -200,7 +201,8 @@ export interface WarehouseLocationCell {
   id: number;
   location_code: string;
   location_name: string;
-  bin_code: string | null;
+  bin_code?: string | null;
+  location_name?: string | null;
   node_name: string | null;
   warehouse_id: number;
   zone_id: number | null;
