@@ -152,11 +152,22 @@ class RouteStep(Base):
         UniqueConstraint("route_id", "stage_level", name="uq_route_stage_level"),
     )
 
-    step_machines = relationship(
+    allowed_machine_links = relationship(
         "RouteStepMachine",
         backref="route_step",
         cascade="all, delete-orphan",
     )
+    step_machines = synonym("allowed_machine_links")
+
+    @property
+    def allowed_machines(self) -> list[str]:
+        if not self.allowed_machine_links:
+            return []
+        return [
+            link.machine.machine_code
+            for link in self.allowed_machine_links
+            if link.machine and link.machine.machine_code
+        ]
 
 
 class RouteStepMachine(Base):

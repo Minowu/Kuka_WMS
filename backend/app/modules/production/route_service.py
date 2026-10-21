@@ -79,7 +79,6 @@ def _get_or_create_machine(
             machine_code=code,
             machine_name=f"Máy {code}",
             warehouse_id=warehouse_id,
-            is_active=True,
         )
         db.add(machine)
         db.flush()
