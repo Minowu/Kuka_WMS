@@ -209,7 +209,30 @@ def list_locations_for_map(db: Session, warehouse_id: int) -> LocationsForMapRes
 
     items: list[MapLocationItem] = []
     location_codes: list[str] = []
-    assigned_ids = location_ids_with_assigned_qr() 
+    assigned_ids = location_ids_with_assigned_qr()
+
+    reserved_location_ids: set[int] = set()
+    in_transit_pickup_ids: set[int] = set()
+    try:
+        from app.modules.production.production_models import FleetTask, TransportRequest
+        active_fleet_tasks = (
+            db.query(FleetTask)
+            .filter(FleetTask.status.in_(["created", "sent", "dispatched", "in_progress", "executing"]))
+            .all()
+        )
+        reserved_location_ids = {t.dropoff_location_id for t in active_fleet_tasks if t.dropoff_location_id}
+        in_transit_pickup_ids = {t.pickup_location_id for t in active_fleet_tasks if t.pickup_location_id}
+
+        active_requests = (
+            db.query(TransportRequest)
+            .filter(TransportRequest.status.in_(["queued_for_cart", "in_progress"]))
+            .all()
+        )
+        for r in active_requests:
+            if r.destination_location_id:
+                reserved_location_ids.add(r.destination_location_id)
+    except Exception:
+        pass 
 
     for loc in locations:
         stocks = [
@@ -241,10 +264,20 @@ def list_locations_for_map(db: Session, warehouse_id: int) -> LocationsForMapRes
                     quantity=str(assigned.get("quantity") or 0),
                 )
             )
-        active_container = next((s.container_code for s in (loc.stocks or []) if s.is_active and s.container_code), None)
-        status = "has_stock" if (stocks or active_container) else getattr(loc, "status", "empty")
+        active_stock = next((s for s in (loc.stocks or []) if s.is_active and s.container_code), None)
+        active_container = active_stock.container_code if active_stock else None
+
+        if loc.id in reserved_location_ids:
+            status = "reserved"
+        elif loc.id in in_transit_pickup_ids or (active_stock and getattr(active_stock, "is_locked", False)):
+            status = "in_transit"
+        elif stocks or active_container:
+            status = "has_stock"
+        else:
+            status = getattr(loc, "status", "empty") or "empty"
+
         status = overlay_status_with_assign_cache(status, loc.id, assigned_ids)
-        if stocks or active_container or loc.id in assigned_ids:
+        if stocks or active_container or loc.id in assigned_ids or status in ("reserved", "in_transit", "has_stock"):
             location_codes.append(loc.location_code)
             if loc.location_label and loc.location_label not in location_codes:
                 location_codes.append(loc.location_label)

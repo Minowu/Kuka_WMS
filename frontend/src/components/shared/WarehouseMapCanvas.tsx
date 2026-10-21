@@ -327,29 +327,70 @@ const WarehouseMapCanvas: React.FC<WarehouseMapCanvasProps> = ({
           hasActiveStock;
 
         const locationStatus = locDetail?.status;
+        const isReserved = locationStatus === 'reserved';
+        const isInTransit = locationStatus === 'in_transit';
 
         if (isSelected) {
           ctx.fillStyle = SHELF_SELECTED_COLOR;
-        } else if (locationStatus === 'reserved') {
-          ctx.fillStyle = SHELF_RESERVED_COLOR;
-        } else if (locationStatus === 'in_transit') {
-          ctx.fillStyle = SHELF_IN_TRANSIT_COLOR;
+        } else if (isReserved) {
+          ctx.fillStyle = 'rgba(245, 158, 11, 0.25)';
+        } else if (isInTransit) {
+          ctx.fillStyle = 'rgba(59, 130, 246, 0.25)';
         } else if (isFull || locationStatus === 'has_stock') {
-          ctx.fillStyle = SHELF_FULL_COLOR; // Green / Teal (Có hàng)
+          ctx.fillStyle = SHELF_FULL_COLOR;
         } else {
-          ctx.fillStyle = SHELF_EMPTY_COLOR; // Light grey (Trống)
+          ctx.fillStyle = SHELF_EMPTY_COLOR;
         }
         ctx.fillRect(x - half * 1.5, y - half, half * 3, half * 2);
 
-        ctx.strokeStyle = isSelected ? SHELF_SELECTED_STROKE_COLOR : (isFull ? '#059669' : SHELF_STROKE_COLOR);
-        ctx.lineWidth = invScale * (isSelected ? 1.4 : 1.0);
-        ctx.strokeRect(x - half * 1.5, y - half, half * 3, half * 2);
+        if (isReserved) {
+          ctx.save();
+          ctx.setLineDash([invScale * 6, invScale * 3]);
+          ctx.strokeStyle = '#d97706';
+          ctx.lineWidth = invScale * 1.6;
+          ctx.strokeRect(x - half * 1.5, y - half, half * 3, half * 2);
+          ctx.restore();
+        } else if (isInTransit) {
+          ctx.save();
+          ctx.setLineDash([invScale * 4, invScale * 2]);
+          ctx.strokeStyle = '#2563eb';
+          ctx.lineWidth = invScale * 1.4;
+          ctx.strokeRect(x - half * 1.5, y - half, half * 3, half * 2);
+          ctx.restore();
+        } else {
+          ctx.strokeStyle = isSelected ? SHELF_SELECTED_STROKE_COLOR : (isFull ? '#059669' : SHELF_STROKE_COLOR);
+          ctx.lineWidth = invScale * (isSelected ? 1.4 : 1.0);
+          ctx.strokeRect(x - half * 1.5, y - half, half * 3, half * 2);
+        }
 
-        // Draw station or stock text
         const maxTextWidth = half * 2.8;
         const stationTitle = locDetail?.location_name || node.name || node.content;
 
-        if (isFull && !isSelected) {
+        if (isReserved && !isSelected) {
+          ctx.save();
+          ctx.fillStyle = '#b45309';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          const fontSize = half * 0.28;
+          ctx.font = '700 ' + fontSize + 'px sans-serif';
+          ctx.fillText('GIU CHO', x, y - fontSize * 0.6, maxTextWidth);
+          ctx.font = '500 ' + (fontSize * 0.85) + 'px sans-serif';
+          ctx.fillStyle = '#d97706';
+          ctx.fillText(stationTitle, x, y + fontSize * 0.7, maxTextWidth);
+          ctx.restore();
+        } else if (isInTransit && !isSelected) {
+          ctx.save();
+          ctx.fillStyle = '#1d4ed8';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          const fontSize = half * 0.28;
+          ctx.font = '700 ' + fontSize + 'px sans-serif';
+          ctx.fillText('DANG CHUYEN', x, y - fontSize * 0.6, maxTextWidth);
+          ctx.font = '500 ' + (fontSize * 0.85) + 'px sans-serif';
+          ctx.fillStyle = '#2563eb';
+          ctx.fillText(locDetail?.container_code ? 'CONT: ' + locDetail.container_code : stationTitle, x, y + fontSize * 0.7, maxTextWidth);
+          ctx.restore();
+        } else if (isFull && !isSelected) {
           ctx.save();
           ctx.fillStyle = '#ffffff';
           ctx.textAlign = 'center';
@@ -358,27 +399,27 @@ const WarehouseMapCanvas: React.FC<WarehouseMapCanvasProps> = ({
           ctx.shadowBlur = half * 0.1;
 
           const fontSize = half * 0.30;
-          ctx.font = `600 ${fontSize}px sans-serif`;
+          ctx.font = '600 ' + fontSize + 'px sans-serif';
 
           const stock = locDetail?.item_stock?.[0];
-          const containerLabel = locDetail?.container_code ? `📦 ${locDetail.container_code}` : (stock?.sku || 'CÓ HÀNG');
-          const qtyText = stock ? `Qty: ${formatQuantity(stock.quantity, "0")}` : (stationTitle || 'Đang có phôi');
+          const containerLabel = locDetail?.container_code ? 'CONT: ' + locDetail.container_code : (stock?.sku || 'CO HANG');
+          const qtyText = stock ? 'Qty: ' + formatQuantity(stock.quantity, '0') : (stationTitle || 'Dang co phoi');
 
           ctx.fillText(containerLabel, x, y - fontSize * 0.6, maxTextWidth);
-          ctx.font = `400 ${fontSize * 0.85}px sans-serif`;
+          ctx.font = '400 ' + (fontSize * 0.85) + 'px sans-serif';
           ctx.fillText(qtyText, x, y + fontSize * 0.8, maxTextWidth);
           ctx.restore();
         } else if (!isSelected) {
-          // Empty station: draw subtle station label so user knows which station this is
           ctx.save();
           ctx.fillStyle = '#64748b';
           ctx.textAlign = 'center';
           ctx.textBaseline = 'middle';
           const fontSize = half * 0.32;
-          ctx.font = `500 ${fontSize}px sans-serif`;
+          ctx.font = '500 ' + fontSize + 'px sans-serif';
           ctx.fillText(stationTitle, x, y, maxTextWidth);
           ctx.restore();
         }
+
       }
     }
 
