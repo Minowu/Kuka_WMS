@@ -1,10 +1,10 @@
-import React, { useState } from 'react';
+import React from 'react';
 import type { CncMachineStation, PartModel } from '@/types/pda';
 
 interface CncLineModalProps {
   stations: CncMachineStation[];
-  models: PartModel[];
-  onCallMaterial: (stationId: string, modelId: string) => void;
+  models?: PartModel[];
+  onCallMaterial: (stationId: string) => void;
   onUpdateLevel: (stationId: string) => void;
   onFastArrive?: (stationId: string) => void;
   showToast: (msg: string, type?: 'success' | 'info' | 'warning' | 'kuka') => void;
@@ -12,22 +12,11 @@ interface CncLineModalProps {
 
 export const CncLineModal: React.FC<CncLineModalProps> = ({
   stations,
-  models,
   onCallMaterial,
   onUpdateLevel,
   onFastArrive,
-  showToast,
+  showToast: _showToast,
 }) => {
-  const [callingForStationId, setCallingForStationId] = useState<string | null>(null);
-
-  const handleSelectModelAndCall = (modelId: string) => {
-    if (!callingForStationId) return;
-    if ('vibrate' in navigator) navigator.vibrate?.(40);
-
-    const targetStation = callingForStationId;
-    setCallingForStationId(null);
-    onCallMaterial(targetStation, modelId);
-  };
 
   const getLevelLabel = (level: number) => {
     switch (level) {
@@ -136,10 +125,10 @@ export const CncLineModal: React.FC<CncLineModalProps> = ({
                   </div>
                   <button
                     onClick={() => {
-                      if ('vibrate' in navigator) navigator.vibrate?.(30);
-                      setCallingForStationId(st.id);
+                      if ('vibrate' in navigator) navigator.vibrate?.(40);
+                      onCallMaterial(st.id);
                     }}
-                    className="w-full min-h-[50px] bg-[#3B82F6] hover:bg-blue-600 text-white rounded-xl font-bold text-sm tracking-wide active:scale-[0.98] transition-all cursor-pointer"
+                    className="w-full min-h-[50px] bg-[#3B82F6] hover:bg-blue-600 text-white rounded-xl font-bold text-sm tracking-wide active:scale-[0.98] transition-all cursor-pointer shadow-md"
                   >
                     GỌI PHÔI (ĐIỀU AMR ĐẾN)
                   </button>
@@ -205,48 +194,6 @@ export const CncLineModal: React.FC<CncLineModalProps> = ({
           );
         })}
       </div>
-
-      {/* Sheet chọn Model */}
-      {callingForStationId && (
-        <div className="fixed inset-0 z-50 flex flex-col justify-end bg-black/80 p-3">
-          <div className="bg-slate-900 border border-slate-700 rounded-2xl p-4 max-w-[480px] w-full mx-auto max-h-[85vh] flex flex-col">
-            <div className="flex items-center justify-between pb-2.5 border-b border-slate-800">
-              <span className="text-xs font-bold font-mono text-white">
-                GỌI PHÔI CHO {callingForStationId}
-              </span>
-              <button
-                onClick={() => setCallingForStationId(null)}
-                className="w-8 h-8 rounded-lg bg-slate-800 text-slate-300 flex items-center justify-center font-bold"
-              >
-                ✕
-              </button>
-            </div>
-
-            <div className="flex flex-col gap-2 my-3 overflow-y-auto pr-1">
-              {models.map((model) => (
-                <button
-                  key={model.id}
-                  onClick={() => handleSelectModelAndCall(model.id)}
-                  className="min-h-[50px] p-2.5 rounded-xl bg-slate-800 hover:bg-[#3B82F6] border border-slate-700 text-left flex items-center justify-between transition-all active:scale-[0.98] cursor-pointer"
-                >
-                  <div className="flex items-center gap-2.5">
-                    <span className="font-mono font-bold text-xs text-white bg-slate-900 px-2 py-1 rounded">
-                      {model.code}
-                    </span>
-                    <div>
-                      <div className="font-bold text-xs text-white">{model.name}</div>
-                      <div className="text-[11px] text-slate-400">{model.description}</div>
-                    </div>
-                  </div>
-                  <span className="text-xs font-bold text-blue-400">
-                    Gọi →
-                  </span>
-                </button>
-              ))}
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 };

@@ -912,7 +912,7 @@ class DispatchService:
         self,
         db: Session,
         destination_location_id: int,
-        item_id: int,
+        item_id: Optional[int] = None,
         required_stage_level: Optional[int] = None,
         created_by: Optional[int] = None,
         priority: int = 10,
@@ -940,6 +940,44 @@ class DispatchService:
             raise ValueError(
                 f"Vị trí '{dest_loc.location_code}' hiện đang có xe hoặc đã có AMR đặt chỗ. Vui lòng chọn vị trí trống."
             )
+
+        if item_id is None:
+            m_id = dest_loc.machine_id
+            m_code = dest_loc.machine_code
+            step_link = None
+            if m_id:
+                step_link = (
+                    db.query(RouteStepMachine)
+                    .join(RouteStep, RouteStepMachine.route_step_id == RouteStep.id)
+                    .join(ProductionRoute, RouteStep.route_id == ProductionRoute.id)
+                    .filter(
+                        RouteStepMachine.machine_id == m_id,
+                        ProductionRoute.is_active.is_(True),
+                    )
+                    .first()
+                )
+            if not step_link and m_code:
+                step_link = (
+                    db.query(RouteStepMachine)
+                    .join(Machine, RouteStepMachine.machine_id == Machine.id)
+                    .join(RouteStep, RouteStepMachine.route_step_id == RouteStep.id)
+                    .join(ProductionRoute, RouteStep.route_id == ProductionRoute.id)
+                    .filter(
+                        Machine.machine_code == m_code,
+                        ProductionRoute.is_active.is_(True),
+                    )
+                    .first()
+                )
+            if step_link and step_link.route_step and step_link.route_step.route:
+                item_id = step_link.route_step.route.item_id
+            else:
+                first_item = db.query(Item).filter(Item.is_active.is_(True)).first()
+                if first_item:
+                    item_id = first_item.id
+                else:
+                    raise ValueError(
+                        f"Không thể xác định Model sản phẩm cho vị trí '{dest_loc.location_code}'. Vui lòng cấu hình Route cho máy."
+                    )
 
         if required_stage_level is None:
             input_lvl, _, _ = self.get_stage_info_for_machine(db, dest_loc, item_id)

@@ -224,7 +224,7 @@ class RackRegistrationResponse(BaseModel):
 
 class CallMaterialRequest(BaseModel):
     destination_location_id: int = Field(..., gt=0, description="ID vị trí máy CNC đang gọi phôi")
-    item_id: int = Field(..., gt=0, description="ID Model sản phẩm cần gọi")
+    item_id: Optional[int] = Field(default=None, gt=0, description="ID Model sản phẩm cần gọi (tự suy ra từ Route của máy nếu để trống)")
     required_stage_level: Optional[int] = Field(
         default=None,
         ge=0,

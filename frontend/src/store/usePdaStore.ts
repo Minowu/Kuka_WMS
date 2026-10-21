@@ -169,7 +169,7 @@ interface PdaState {
   supplyRawMaterial: (data: { positionId: string; modelId: string; rackId: string }) => Promise<void>;
 
   // Luồng CNC
-  callMaterialToCnc: (stationId: string, modelId: string) => Promise<void>;
+  callMaterialToCnc: (stationId: string, modelId?: string) => Promise<void>;
   fastArriveCnc: (stationId: string) => Promise<void>;
   updateCncStageLevel: (stationId: string) => Promise<void>;
 
@@ -293,12 +293,14 @@ export const usePdaStore = create<PdaState>((set, get) => ({
     showToast(`Đã cấp phôi [${rackId}] cho [${modelName}] tại [${positionId}]!`, 'kuka');
   },
 
-  // 2. Gọi phôi đến trạm CNC
+  // 2. Gọi phôi đến trạm CNC (1 chạm trực tiếp theo Route đã cấu hình)
   callMaterialToCnc: async (stationId, modelId) => {
     const { cncStations, models, showToast, fetchFloorState } = get();
     const station = cncStations.find((s) => s.id === stationId);
-    const model = models.find((m) => String(m.id) === String(modelId) || m.code === modelId);
-    const modelName = model ? model.name : modelId;
+    const model = modelId
+      ? models.find((m) => String(m.id) === String(modelId) || m.code === modelId)
+      : (models.length > 0 ? models[0] : null);
+    const modelName = model ? model.name : 'Phôi theo Route';
 
     // Optimistic UI update
     set((state) => ({
@@ -309,13 +311,13 @@ export const usePdaStore = create<PdaState>((set, get) => ({
       ),
     }));
 
-    if (station && station.locationId && model && model.id) {
+    if (station && station.locationId) {
       try {
         await callMaterialToCncApi({
           destination_location_id: station.locationId,
-          item_id: Number(model.id),
+          ...(model?.id ? { item_id: Number(model.id) } : {}),
         });
-        showToast(`Đã điều AMR chở [${modelName}] tới [${stationId}]`, 'kuka');
+        showToast(`Đã điều AMR chở phôi tới [${stationId}]`, 'kuka');
         await fetchFloorState();
         return;
       } catch (err: any) {
