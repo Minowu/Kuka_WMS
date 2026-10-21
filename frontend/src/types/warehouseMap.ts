@@ -203,7 +203,6 @@ export interface FullLocationsResponse {
 export interface WarehouseLocationCell {
   id: number;
   location_code: string;
-  location_name: string;
   bin_code?: string | null;
   location_name?: string | null;
   node_name: string | null;
