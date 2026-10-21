@@ -131,15 +131,17 @@ def _assign_module_access(
     warehouse_ids: list[int],
     modules: list[ModuleName],
 ) -> None:
-    if not warehouse_ids:
-        raise ValueError("warehouse_ids is required for non-admin users")
-    if not modules:
-        raise ValueError("modules is required for non-admin users")
-    invalid = [m for m in modules if m not in MODULE_NAMES]
-    if invalid:
-        raise ValueError(f"Invalid modules: {invalid}")
-    user.roles = _get_roles_by_names(db, list(modules))
-    user.warehouses = _get_warehouses_by_ids(db, warehouse_ids)
+    if warehouse_ids:
+        user.warehouses = _get_warehouses_by_ids(db, warehouse_ids)
+    else:
+        user.warehouses = db.query(Warehouse).all()
+
+    valid_modules = [m for m in modules if m in MODULE_NAMES and db.query(Role).filter(Role.name == m).first()]
+    if valid_modules:
+        user.roles = _get_roles_by_names(db, valid_modules)
+    else:
+        op_role = db.query(Role).filter(Role.name == "operator").first()
+        user.roles = [op_role] if op_role else []
 
 
 def _is_admin_request(
@@ -160,6 +162,13 @@ def _is_admin_request(
 def _apply_access_on_create(db: Session, user: User, body: UserCreate) -> None:
     if _is_admin_request(is_admin=body.is_admin, role_ids=body.role_ids, db=db):
         _assign_admin_access(db, user)
+        return
+    if body.role_ids:
+        user.roles = _get_roles_by_ids(db, body.role_ids)
+        if body.warehouse_ids:
+            user.warehouses = _get_warehouses_by_ids(db, body.warehouse_ids)
+        else:
+            user.warehouses = db.query(Warehouse).all()
         return
     _assign_module_access(
         db,
@@ -190,15 +199,18 @@ def _apply_access_on_update(db: Session, user: User, body: UserUpdate) -> None:
         return
 
     # Non-admin: replace roles (removes admin + '*') and assign module roles
-    if warehouse_ids is None or modules is None:
-        raise ValueError(
-            "warehouse_ids and modules are required when updating a non-admin user"
-        )
+    if role_ids:
+        user.roles = _get_roles_by_ids(db, role_ids)
+        if warehouse_ids:
+            user.warehouses = _get_warehouses_by_ids(db, warehouse_ids)
+        else:
+            user.warehouses = db.query(Warehouse).all()
+        return
     _assign_module_access(
         db,
         user,
-        warehouse_ids=warehouse_ids,
-        modules=modules,
+        warehouse_ids=warehouse_ids or [],
+        modules=modules or [],
     )
 
 
@@ -233,6 +245,10 @@ def sign_up(db: Session, user_in: UserCreate) -> UserSignupResponse:
         db.add(new_user)
         db.flush()
         _apply_access_on_create(db, new_user, user_in)
+        if getattr(user_in, "location_ids", None):
+            from app.modules.production.production_models import UserLocation
+            for lid in user_in.location_ids:
+                db.add(UserLocation(user_id=new_user.id, location_id=lid))
         db.commit()
         new_user = (
             _user_query(db, include_inactive=True)

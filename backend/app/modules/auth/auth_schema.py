@@ -3,8 +3,10 @@ from typing import Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 
-ModuleName = Literal["inbound", "outbound", "stocktake"]
-MODULE_NAMES: tuple[ModuleName, ...] = ("inbound", "outbound", "stocktake")
+ModuleName = str
+MODULE_NAMES: tuple[str, ...] = (
+    "inbound", "outbound", "stocktake", "operator", "operator_raw", "operator_cnc", "operator_washing"
+)
 
 
 class RoleBrief(BaseModel):
@@ -56,6 +58,7 @@ class UserCreate(BaseModel):
     is_admin: bool = False
     warehouse_ids: list[int] = Field(default_factory=list)
     modules: list[ModuleName] = Field(default_factory=list)
+    location_ids: list[int] = Field(default_factory=list)
 
     @field_validator("password_confirm")
     @classmethod
@@ -96,6 +99,7 @@ class UserUpdate(BaseModel):
     is_admin: Optional[bool] = None
     warehouse_ids: Optional[list[int]] = None
     modules: Optional[list[ModuleName]] = None
+    location_ids: Optional[list[int]] = None
 
     @field_validator("password", "password_confirm", mode="before")
     @classmethod

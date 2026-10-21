@@ -83,6 +83,7 @@ export interface CreateUserInput {
   is_admin?: boolean;
   warehouse_ids?: number[];
   modules?: UserModule[];
+  location_ids?: number[];
 }
 
 export interface UpdateUserInput {
@@ -93,6 +94,7 @@ export interface UpdateUserInput {
   is_admin?: boolean;
   warehouse_ids?: number[];
   modules?: UserModule[];
+  location_ids?: number[];
 }
 
 /** Temporary role options until BE exposes GET /roles */
