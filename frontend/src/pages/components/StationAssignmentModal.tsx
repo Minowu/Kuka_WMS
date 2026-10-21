@@ -62,16 +62,31 @@ export default function StationAssignmentModal({
             (catalog.machines || []).flatMap((m) => (m.slots || []).map((s) => s.id))
           );
 
-          const hasWash = userIds.some((id) => washIds.has(id));
-          const hasRaw = userIds.some((id) => rawIds.has(id));
-          const hasCnc = userIds.some((id) => cncIds.has(id));
+          // Nhận diện theo Role của User trước tiên nếu có role chuyên biệt
+          const roleNames = (user.roles || []).map((r) => r.name.toLowerCase());
+          const isRawRole = roleNames.some((r) => r.includes('raw'));
+          const isCncRole = roleNames.some((r) => r.includes('cnc'));
+          const isWashRole = roleNames.some((r) => r.includes('washing') || r.includes('wash'));
 
-          if (hasRaw && !hasCnc && !hasWash) {
+          if (isRawRole) {
             setSelectedArea('raw_material');
-          } else if (hasWash && !hasCnc && !hasRaw) {
+          } else if (isWashRole) {
             setSelectedArea('washing');
-          } else {
+          } else if (isCncRole) {
             setSelectedArea('cnc');
+          } else {
+            // Fallback theo các location đã được gán trước đó
+            const hasWash = userIds.some((id) => washIds.has(id));
+            const hasRaw = userIds.some((id) => rawIds.has(id));
+            const hasCnc = userIds.some((id) => cncIds.has(id));
+
+            if (hasRaw && !hasCnc && !hasWash) {
+              setSelectedArea('raw_material');
+            } else if (hasWash && !hasCnc && !hasRaw) {
+              setSelectedArea('washing');
+            } else {
+              setSelectedArea('cnc');
+            }
           }
         })
         .catch(() => {
@@ -275,51 +290,65 @@ export default function StationAssignmentModal({
               Tầng 1: Chọn Phân Khu Sản Xuất Trực Thuộc
             </div>
 
-            <Segmented
-              block
-              size="large"
-              value={selectedArea}
-              onChange={handleAreaChange}
-              className="p-1 bg-slate-100 rounded-xl font-bold [&_.ant-segmented-item-selected]:!bg-white [&_.ant-segmented-item-selected]:!text-brand-primary [&_.ant-segmented-item-selected]:!shadow-sm"
-              options={[
-                {
-                  label: (
-                    <div className="flex items-center justify-center gap-2 py-1.5">
-                      <InboxOutlined className="text-amber-600 text-base" />
-                      <span className="text-sm">📦 Khu Cấp Phôi</span>
-                      <Tag color="orange" className="!ml-1 !mr-0 !px-1.5 !text-[11px] !font-bold">
-                        {catalog.raw_materials?.length || 0}
-                      </Tag>
-                    </div>
-                  ),
-                  value: 'raw_material',
-                },
-                {
-                  label: (
-                    <div className="flex items-center justify-center gap-2 py-1.5">
-                      <ToolOutlined className="text-brand-primary text-base" />
-                      <span className="text-sm">⚙️ Khu Máy CNC</span>
-                      <Tag color="blue" className="!ml-1 !mr-0 !px-1.5 !text-[11px] !font-bold">
-                        {catalog.machines?.length || 0} máy
-                      </Tag>
-                    </div>
-                  ),
-                  value: 'cnc',
-                },
-                {
-                  label: (
-                    <div className="flex items-center justify-center gap-2 py-1.5">
-                      <ExperimentOutlined className="text-emerald-600 text-base" />
-                      <span className="text-sm">🧼 Khu Tẩy Rửa</span>
-                      <Tag color="green" className="!ml-1 !mr-0 !px-1.5 !text-[11px] !font-bold">
-                        {catalog.washing_slots?.length || 0}
-                      </Tag>
-                    </div>
-                  ),
-                  value: 'washing',
-                },
-              ]}
-            />
+            {(() => {
+              const roleNames = (user?.roles || []).map((r) => r.name.toLowerCase());
+              const isRawRole = roleNames.some((r) => r.includes('raw'));
+              const isCncRole = roleNames.some((r) => r.includes('cnc'));
+              const isWashRole = roleNames.some((r) => r.includes('washing') || r.includes('wash'));
+              const isSpecificRole = isRawRole || isCncRole || isWashRole;
+
+              return (
+                <Segmented
+                  block
+                  size="large"
+                  value={selectedArea}
+                  onChange={handleAreaChange}
+                  disabled={isSpecificRole}
+                  className="p-1 bg-slate-100 rounded-xl font-bold [&_.ant-segmented-item-selected]:!bg-white [&_.ant-segmented-item-selected]:!text-brand-primary [&_.ant-segmented-item-selected]:!shadow-sm"
+                  options={[
+                    {
+                      label: (
+                        <div className="flex items-center justify-center gap-2 py-1.5">
+                          <InboxOutlined className="text-amber-600 text-base" />
+                          <span className="text-sm">📦 Khu Cấp Phôi</span>
+                          <Tag color="orange" className="!ml-1 !mr-0 !px-1.5 !text-[11px] !font-bold">
+                            {catalog.raw_materials?.length || 0}
+                          </Tag>
+                        </div>
+                      ),
+                      value: 'raw_material',
+                      disabled: isSpecificRole && !isRawRole,
+                    },
+                    {
+                      label: (
+                        <div className="flex items-center justify-center gap-2 py-1.5">
+                          <ToolOutlined className="text-brand-primary text-base" />
+                          <span className="text-sm">⚙️ Khu Máy CNC</span>
+                          <Tag color="blue" className="!ml-1 !mr-0 !px-1.5 !text-[11px] !font-bold">
+                            {catalog.machines?.length || 0} máy
+                          </Tag>
+                        </div>
+                      ),
+                      value: 'cnc',
+                      disabled: isSpecificRole && !isCncRole,
+                    },
+                    {
+                      label: (
+                        <div className="flex items-center justify-center gap-2 py-1.5">
+                          <ExperimentOutlined className="text-emerald-600 text-base" />
+                          <span className="text-sm">🧼 Khu Tẩy Rửa</span>
+                          <Tag color="green" className="!ml-1 !mr-0 !px-1.5 !text-[11px] !font-bold">
+                            {catalog.washing_slots?.length || 0}
+                          </Tag>
+                        </div>
+                      ),
+                      value: 'washing',
+                      disabled: isSpecificRole && !isWashRole,
+                    },
+                  ]}
+                />
+              );
+            })()}
           </div>
 
           {/* ========================================================================= */}

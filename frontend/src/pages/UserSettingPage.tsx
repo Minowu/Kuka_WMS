@@ -462,11 +462,14 @@ export default function UserSettingPage() {
                 <Select
                   placeholder="Chọn vai trò"
                   options={[
-                    { value: ADMIN_ROLE_ID, label: "Admin" },
-                    { value: OPERATOR_ROLE_ID, label: "Nhân viên" },
+                    { value: 2, label: "Admin (Quản trị viên)" },
+                    { value: 3, label: "Operator Cấp Phôi (Khu Nguyên Liệu)" },
+                    { value: 4, label: "Operator CNC (Khu Máy CNC)" },
+                    { value: 5, label: "Operator Tẩy Rửa (Khu Tẩy Rửa & Xe Rỗng)" },
+                    { value: 1, label: "Operator Vận Hành Chung" },
                   ]}
                   onChange={(value) => {
-                    if (value === ADMIN_ROLE_ID) {
+                    if (value === 2) {
                       setStep(0);
                     }
                   }}

@@ -98,6 +98,9 @@ export interface UpdateUserInput {
 /** Temporary role options until BE exposes GET /roles */
 export const ROLE_OPTIONS: RoleBrief[] = [
   { id: 2, name: 'admin' },
+  { id: 3, name: 'operator_raw' },
+  { id: 4, name: 'operator_cnc' },
+  { id: 5, name: 'operator_washing' },
   { id: 1, name: 'operator' },
 ];
 
