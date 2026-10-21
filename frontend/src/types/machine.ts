@@ -5,6 +5,7 @@ export interface AvailableMapNode {
   map_y: number;
   function_type?: number | string | null;
   is_assigned?: boolean;
+  assigned_to?: string | null;
 }
 
 export interface SlotConfigInput {
@@ -20,12 +21,13 @@ export interface SlotConfigInput {
 export interface MachineSlotInfo {
   id: number;
   location_code: string;
+  location_label?: string | null;
   location_name: string | null;
   position_index: number | null;
   node_label?: string | null;
   map_x: number | null;
   map_y: number | null;
-  is_active: boolean;
+  is_active?: boolean;
 }
 
 export interface MachineItem {
@@ -33,7 +35,7 @@ export interface MachineItem {
   machine_code: string;
   machine_name: string | null;
   warehouse_id: number | null;
-  is_active: boolean;
+  is_active?: boolean;
   location_count: number;
   positions: string[];
   slots: MachineSlotInfo[];
@@ -55,6 +57,7 @@ export interface MachineUpdateInput {
 export interface StationCatalogItem {
   id: number;
   location_code: string;
+  location_label?: string | null;
   location_name: string | null;
   location_type: string;
   machine_code?: string | null;
@@ -62,14 +65,14 @@ export interface StationCatalogItem {
   node_label?: string | null;
   map_x: number | null;
   map_y: number | null;
-  is_active: boolean;
+  is_active?: boolean;
 }
 
 export interface MachineCatalogGroup {
   id: number;
   machine_code: string;
   machine_name: string | null;
-  is_active: boolean;
+  is_active?: boolean;
   slots: StationCatalogItem[];
 }
 

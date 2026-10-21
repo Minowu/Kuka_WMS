@@ -82,25 +82,8 @@ export default function ProductionRoutePage() {
       is_active: true,
       steps: [
         {
-          step_number: 1,
-          stage_level: 1,
-          step_name: 'Tiện thô mặt đầu & tiện bậc ngoài',
-          allowed_machines: ['CNC-01', 'CNC-02'],
-          is_final_cnc_step: false,
-        },
-        {
-          step_number: 2,
-          stage_level: 2,
-          step_name: 'Phay rãnh then & khoan 4 lỗ taro M8',
-          allowed_machines: ['CNC-03'],
-          is_final_cnc_step: false,
-        },
-        {
-          step_number: 3,
-          stage_level: 3,
-          step_name: 'Tiện tinh & mài bóng đạt Ra 0.8',
-          allowed_machines: ['CNC-04'],
-          is_final_cnc_step: true,
+          step_name: '',
+          allowed_machines: [],
         },
       ],
     });
@@ -123,12 +106,9 @@ export default function ProductionRoutePage() {
         version: detailData.version,
         is_active: detailData.is_active,
         steps:
-          detailData.steps?.map((s, idx) => ({
-            step_number: s.step_number || idx + 1,
-            stage_level: s.stage_level || idx + 1,
+          detailData.steps?.map((s) => ({
             step_name: s.step_name,
             allowed_machines: s.allowed_machines || [],
-            is_final_cnc_step: !!s.is_final_cnc_step,
           })) || [],
       });
     }
@@ -138,13 +118,19 @@ export default function ProductionRoutePage() {
   const handleFormSubmit = async () => {
     try {
       const values = await form.validateFields();
-      const stepsPayload: RouteStepInput[] = (values.steps || []).map(
+      const rawSteps = values.steps || [];
+      if (rawSteps.length === 0) {
+        message.warning('Vui lòng thêm ít nhất 1 bước công đoạn gia công!');
+        return;
+      }
+      const totalSteps = rawSteps.length;
+      const stepsPayload: RouteStepInput[] = rawSteps.map(
         (s: any, idx: number) => ({
           step_number: idx + 1,
-          stage_level: Number(s.stage_level),
-          step_name: s.step_name.trim(),
+          stage_level: idx + 1,
+          step_name: (s.step_name || '').trim(),
           allowed_machines: s.allowed_machines || [],
-          is_final_cnc_step: !!s.is_final_cnc_step,
+          is_final_cnc_step: idx + 1 === totalSteps,
         }),
       );
 
@@ -441,117 +427,94 @@ export default function ProductionRoutePage() {
           </Form.Item>
 
           <Divider orientation="left" className="!text-sm !font-bold text-slate-700">
-            DANH SÁCH CÁC CÔNG ĐOẠN GIA CÔNG (STAGE LEVEL & MÁY CNC)
+            CÁC BƯỚC CÔNG ĐOẠN GIA CÔNG (TUẦN TỰ)
           </Divider>
 
           <Form.List name="steps">
             {(fields, { add, remove }) => (
               <div className="space-y-4">
-                {fields.map((field, index) => (
-                  <Card
-                    key={field.key}
-                    size="small"
-                    className="bg-slate-50/80 border-slate-200 rounded-lg shadow-sm"
-                    title={
-                      <div className="flex items-center justify-between text-xs font-semibold text-slate-700">
-                        <span className="flex items-center gap-2">
-                          <Tag color="red" className="font-mono font-bold">
-                            BƯỚC {index + 1}
-                          </Tag>
-                          <span>CÔNG ĐOẠN GIA CÔNG</span>
-                        </span>
-                        {fields.length > 1 && (
-                          <Button
-                            type="text"
-                            danger
-                            size="small"
-                            icon={<DeleteOutlined />}
-                            onClick={() => remove(field.name)}
-                          >
-                            Xóa bước
-                          </Button>
-                        )}
+                {fields.map((field, index) => {
+                  const isLast = index === fields.length - 1;
+                  return (
+                    <Card
+                      key={field.key}
+                      size="small"
+                      className="bg-slate-50 border-slate-200 rounded-lg shadow-sm"
+                      title={
+                        <div className="flex items-center justify-between text-xs font-semibold text-slate-700">
+                          <div className="flex items-center gap-2">
+                            <Tag color="orange" className="font-mono font-bold !text-xs px-2 py-0.5">
+                              BƯỚC {index + 1}
+                            </Tag>
+                            {isLast ? (
+                              <Tag color="green" className="font-medium !text-xs">
+                                🏁 Bước cuối ➔ Tự điều AMR sang Tẩy Rửa
+                              </Tag>
+                            ) : (
+                              <Tag color="blue" className="font-medium !text-xs">
+                                ➔ Hoàn tất chuyển sang Bước {index + 2}
+                              </Tag>
+                            )}
+                          </div>
+                          {fields.length > 1 && (
+                            <Button
+                              type="text"
+                              danger
+                              size="small"
+                              icon={<DeleteOutlined />}
+                              onClick={() => remove(field.name)}
+                            >
+                              Xóa bước
+                            </Button>
+                          )}
+                        </div>
+                      }
+                    >
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <Form.Item
+                          {...field}
+                          name={[field.name, 'step_name']}
+                          label="Tên công đoạn gia công"
+                          rules={[{ required: true, message: 'Vui lòng nhập tên công đoạn!' }]}
+                          className="!mb-1"
+                        >
+                          <Input placeholder="Ví dụ: Tiện thô, Phay rãnh, Khoan taro, Tiện tinh..." />
+                        </Form.Item>
+
+                        <Form.Item
+                          {...field}
+                          name={[field.name, 'allowed_machines']}
+                          label="Máy CNC thực hiện"
+                          rules={[{ required: true, message: 'Vui lòng chọn ít nhất 1 máy CNC!' }]}
+                          className="!mb-1"
+                        >
+                          <Select
+                            mode="multiple"
+                            placeholder="Chọn các máy CNC thực hiện"
+                            options={machines.map((m) => ({
+                              label: `${m.machine_code} (${m.machine_name || 'Máy CNC'})`,
+                              value: m.machine_code,
+                            }))}
+                          />
+                        </Form.Item>
                       </div>
-                    }
-                  >
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                      <Form.Item
-                        {...field}
-                        name={[field.name, 'step_name']}
-                        label="Tên công đoạn"
-                        rules={[{ required: true, message: 'Nhập tên công đoạn' }]}
-                        className="md:col-span-2 !mb-2"
-                      >
-                        <Input placeholder="Ví dụ: Tiện thô mặt đầu & tiện bậc" />
-                      </Form.Item>
-
-                      <Form.Item
-                        {...field}
-                        name={[field.name, 'stage_level']}
-                        label="Stage Level"
-                        rules={[{ required: true, message: 'Chọn level' }]}
-                        className="!mb-2"
-                      >
-                        <Select placeholder="Chọn level">
-                          <Select.Option value={1}>Stage Level 1</Select.Option>
-                          <Select.Option value={2}>Stage Level 2</Select.Option>
-                          <Select.Option value={3}>Stage Level 3</Select.Option>
-                          <Select.Option value={4}>Stage Level 4</Select.Option>
-                          <Select.Option value={5}>Stage Level 5</Select.Option>
-                        </Select>
-                      </Form.Item>
-                    </div>
-
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-1 pt-2 border-t border-slate-100">
-                      <Form.Item
-                        {...field}
-                        name={[field.name, 'allowed_machines']}
-                        label="Máy CNC được phép thực hiện (Liên kết bảng Machine)"
-                        rules={[{ required: true, message: 'Chọn ít nhất 1 máy' }]}
-                        className="!mb-2"
-                      >
-                        <Select
-                          mode="multiple"
-                          placeholder="Chọn các máy CNC thực hiện công đoạn này"
-                          options={machines.map((m) => ({
-                            label: `${m.machine_code} (${m.location_count} vị trí đỗ: ${m.positions.join(', ')})`,
-                            value: m.machine_code,
-                          }))}
-                        />
-                      </Form.Item>
-
-                      <Form.Item
-                        {...field}
-                        name={[field.name, 'is_final_cnc_step']}
-                        valuePropName="checked"
-                        label="Hành động khi hoàn thành"
-                        className="!mb-2"
-                      >
-                        <Switch
-                          checkedChildren="LÀ BƯỚC CUỐI (TỰ ĐIỀU AMR SANG TẨY RỬA)"
-                          unCheckedChildren="Chuyển sang công đoạn tiếp theo"
-                        />
-                      </Form.Item>
-                    </div>
-                  </Card>
-                ))}
+                    </Card>
+                  );
+                })}
 
                 <Button
                   type="dashed"
                   onClick={() =>
                     add({
-                      step_number: fields.length + 1,
-                      stage_level: fields.length + 1,
-                      step_name: `Công đoạn ${fields.length + 1}`,
+                      step_name: '',
                       allowed_machines: [],
-                      is_final_cnc_step: false,
                     })
                   }
                   block
                   icon={<PlusOutlined />}
                   className="h-10 text-amber-600 border-amber-300 hover:border-amber-500 font-medium"
                 >
-                  + Thêm công đoạn gia công
+                  + Thêm bước công đoạn tiếp theo
                 </Button>
               </div>
             )}
@@ -611,7 +574,7 @@ function RouteDetailTimeline({ routeId }: { routeId: number }) {
             >
               <div className="flex items-center gap-2 mb-1">
                 <Tag color={s.is_final_cnc_step ? 'orange' : 'blue'} className="!mr-0 font-medium">
-                  Level {s.stage_level}
+                  Bước {s.step_number || idx + 1}
                 </Tag>
                 <span className="font-semibold text-xs text-slate-800">{s.step_name}</span>
               </div>

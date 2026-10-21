@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useMemo, useCallback } from 'react';
 import {
   Card,
   Button,
@@ -54,7 +54,12 @@ interface SlotFormItem {
 
 export default function StationSettingPage() {
   const { data: catalog, isLoading, refetch } = useStationCatalog();
-  const { data: availableNodes = [] } = useAvailableNodes();
+  const { data: availableNodes = [], refetch: refetchNodes } = useAvailableNodes();
+
+  const handleRefreshAll = useCallback(() => {
+    refetch();
+    refetchNodes();
+  }, [refetch, refetchNodes]);
 
   const createMachineMutation = useCreateMachine();
   const updateMachineMutation = useUpdateMachine();
@@ -93,15 +98,116 @@ export default function StationSettingPage() {
   const [editingBuffer, setEditingBuffer] = useState<StationCatalogItem | null>(null);
   const [bufferForm] = Form.useForm();
 
-  // Helper options for map node select
-  const nodeOptions = availableNodes.map((n) => ({
-    value: n.node_label,
-    label: `Node ${n.node_label} (${(n.map_x / 1000).toFixed(1)}m, ${(n.map_y / 1000).toFixed(1)}m)${
-      n.is_assigned ? ' [Đang dùng]' : ''
-    }`,
-    node: n,
-  }));
+  // Realtime in-memory derivation: Quét toàn bộ các vị trí đã gán hiện có trên toàn xưởng từ catalog
+  const assignedNodesMap = useMemo(() => {
+    const map = new Map<string, { id?: number; name: string; zone: string }>();
 
+    // 1. Raw Materials
+    catalog?.raw_materials?.forEach((rm) => {
+      const label = rm.node_label || rm.location_label;
+      if (label) {
+        map.set(String(label), {
+          id: rm.id,
+          name: rm.location_name || rm.location_code,
+          zone: 'Khu Cấp Phôi',
+        });
+      }
+    });
+
+    // 2. CNC Machines and Slots
+    catalog?.machines?.forEach((m) => {
+      m.slots?.forEach((s) => {
+        const label = s.node_label || s.location_label;
+        if (label) {
+          map.set(String(label), {
+            id: s.id,
+            name: `${m.machine_code} (POS${s.position_index})`,
+            zone: 'Khu Máy CNC',
+          });
+        }
+      });
+    });
+
+    // 3. Washing Slots
+    catalog?.washing_slots?.forEach((w) => {
+      const label = w.node_label || w.location_label;
+      if (label) {
+        map.set(String(label), {
+          id: w.id,
+          name: w.location_name || w.location_code,
+          zone: 'Khu Tẩy Rửa',
+        });
+      }
+    });
+
+    // 4. Empty Buffers
+    const buffers = catalog?.empty_buffers || catalog?.buffer_slots || [];
+    buffers.forEach((b) => {
+      const label = b.node_label || b.location_label;
+      if (label) {
+        map.set(String(label), {
+          id: b.id,
+          name: b.location_name || b.location_code,
+          zone: 'Bãi Đệm Xe Rỗng',
+        });
+      }
+    });
+
+    return map;
+  }, [catalog]);
+
+  // Helper options for map node select: Tự động vô hiệu hóa (xám) node đã gán ở bất kỳ khu vực nào
+  const getNodeOptions = useCallback(
+    (options?: {
+      currentLocationId?: number | null;
+      selectedInForm?: (string | undefined)[];
+      currentSlotNode?: string;
+    }) => {
+      const { currentLocationId, selectedInForm = [], currentSlotNode } = options || {};
+
+      return availableNodes.map((n) => {
+        const labelStr = String(n.node_label);
+        const assignedInfo = assignedNodesMap.get(labelStr);
+        const isAssignedInDb = n.is_assigned;
+
+        // Is it assigned to the current entity being edited?
+        const isAssignedToSelf = currentLocationId && assignedInfo?.id === currentLocationId;
+
+        // Is it picked by another slot in the current multi-slot CNC form?
+        const isPickedByOtherSlotInForm =
+          selectedInForm.includes(n.node_label) && n.node_label !== currentSlotNode;
+
+        let isDisabled = false;
+        let badge = '[Chưa gán]';
+
+        if (isPickedByOtherSlotInForm) {
+          isDisabled = true;
+          badge = '[Đang chọn ở vị trí khác trong máy]';
+        } else if (assignedInfo) {
+          if (isAssignedToSelf) {
+            isDisabled = false;
+            badge = `[Hiện tại: ${assignedInfo.name}]`;
+          } else {
+            isDisabled = true;
+            badge = `[Đã gán: ${assignedInfo.name} - ${assignedInfo.zone}]`;
+          }
+        } else if (isAssignedInDb) {
+          isDisabled = true;
+          badge = `[Đã gán: ${n.assigned_to || 'Khu khác'}]`;
+        }
+
+        return {
+          value: n.node_label,
+          disabled: isDisabled,
+          label: `Node ${n.node_label} (${(n.map_x / 1000).toFixed(1)}m, ${(n.map_y / 1000).toFixed(1)}m) ${badge}`,
+          node: n,
+        };
+      });
+    },
+    [availableNodes, assignedNodesMap]
+  );
+
+  const nodeOptions = useMemo(() => getNodeOptions(), [getNodeOptions]);
   // =========================================================================
   // HANDLERS: TAB 1 - KHU CẤP PHÔI
   // =========================================================================
@@ -109,8 +215,7 @@ export default function StationSettingPage() {
     setEditingRaw(null);
     rawForm.resetFields();
     rawForm.setFieldsValue({
-      location_code: `VT-0${(catalog?.raw_materials?.length || 0) + 1}`,
-      location_name: `Ô Cấp Phôi ${(catalog?.raw_materials?.length || 0) + 1}`,
+      location_name: `VT-0${(catalog?.raw_materials?.length || 0) + 1}`,
     });
     setIsRawModalOpen(true);
   };
@@ -136,17 +241,16 @@ export default function StationSettingPage() {
         await updateLocationMutation.mutateAsync({
           id: editingRaw.id,
           data: {
-            location_name: values.location_name,
+            location_name: values.location_name.trim(),
             node_label: values.node_label,
             map_x: selectedNode ? selectedNode.map_x : editingRaw.map_x ?? undefined,
             map_y: selectedNode ? selectedNode.map_y : editingRaw.map_y ?? undefined,
-            is_active: values.is_active,
-          },
+            },
         });
-        message.success(`Cập nhật ô cấp phôi '${editingRaw.location_code}' thành công!`);
+        message.success(`Cập nhật ô cấp phôi '${values.location_name}' thành công!`);
       } else {
         await createLocationMutation.mutateAsync({
-          location_code: values.location_code.trim(),
+          location_code: selectedNode?.node_label || values.node_label,
           location_name: values.location_name.trim(),
           location_type: 'RAW_MATERIAL',
           node_label: values.node_label,
@@ -154,10 +258,10 @@ export default function StationSettingPage() {
           map_y: selectedNode ? selectedNode.map_y : undefined,
           position_index: (catalog?.raw_materials?.length || 0) + 1,
         });
-        message.success(`Thêm ô cấp phôi '${values.location_code}' thành công!`);
+        message.success(`Gán ô cấp phôi '${values.location_name}' (Node ${values.node_label}) thành công!`);
       }
       setIsRawModalOpen(false);
-      refetch();
+      handleRefreshAll();
     } catch (err: any) {
       if (err?.response?.data?.detail) {
         message.error(err.response.data.detail);
@@ -171,7 +275,7 @@ export default function StationSettingPage() {
     try {
       await deleteLocationMutation.mutateAsync(id);
       message.success(`Đã xóa ô cấp phôi '${code}'`);
-      refetch();
+      handleRefreshAll();
     } catch (err: any) {
       message.error(err?.response?.data?.detail || 'Không thể xóa ô cấp phôi');
     }
@@ -274,7 +378,7 @@ export default function StationSettingPage() {
 
       message.success(`Thêm máy '${code}' cùng ${createSlots.length} vị trí đỗ thành công!`);
       setIsCncCreateOpen(false);
-      refetch();
+      handleRefreshAll();
     } catch (err: any) {
       if (err?.response?.data?.detail) {
         message.error(err.response.data.detail);
@@ -289,7 +393,6 @@ export default function StationSettingPage() {
     cncEditForm.resetFields();
     cncEditForm.setFieldsValue({
       machine_name: m.machine_name || `Máy ${m.machine_code}`,
-      is_active: m.is_active,
     });
 
     const currentSlots: SlotFormItem[] = (m.slots || []).map((s, idx) => ({
@@ -372,14 +475,13 @@ export default function StationSettingPage() {
         id: editingCnc.id,
         data: {
           machine_name: values.machine_name.trim(),
-          is_active: values.is_active,
           slots: slotsPayload,
         },
       });
 
       message.success(`Cập nhật cấu hình máy '${editingCnc.machine_code}' thành công!`);
       setEditingCnc(null);
-      refetch();
+      handleRefreshAll();
     } catch (err: any) {
       if (err?.response?.data?.detail) {
         message.error(err.response.data.detail);
@@ -393,7 +495,7 @@ export default function StationSettingPage() {
     try {
       await deleteMachineMutation.mutateAsync(id);
       message.success(`Đã xóa máy CNC '${code}'`);
-      refetch();
+      handleRefreshAll();
     } catch (err: any) {
       message.error(err?.response?.data?.detail || 'Không thể xóa máy CNC');
     }
@@ -407,8 +509,7 @@ export default function StationSettingPage() {
     washForm.resetFields();
     const count = (catalog?.washing_slots?.length || 0) + 1;
     washForm.setFieldsValue({
-      location_code: `WASH-0${count}`,
-      location_name: `Trạm Tẩy Rửa 0${count}`,
+      location_name: `WASH-0${count}`,
     });
     setIsWashModalOpen(true);
   };
@@ -438,13 +539,12 @@ export default function StationSettingPage() {
             node_label: values.node_label,
             map_x: selectedNode ? selectedNode.map_x : editingWash.map_x ?? undefined,
             map_y: selectedNode ? selectedNode.map_y : editingWash.map_y ?? undefined,
-            is_active: values.is_active,
-          },
+            },
         });
         message.success(`Cập nhật slot tẩy rửa '${editingWash.location_code}' thành công!`);
       } else {
         await createLocationMutation.mutateAsync({
-          location_code: values.location_code.trim(),
+          location_code: selectedNode?.node_label || values.node_label,
           location_name: values.location_name.trim(),
           location_type: 'WASHING_SLOT',
           node_label: values.node_label,
@@ -452,10 +552,10 @@ export default function StationSettingPage() {
           map_y: selectedNode ? selectedNode.map_y : undefined,
           position_index: (catalog?.washing_slots?.length || 0) + 1,
         });
-        message.success(`Thêm slot tẩy rửa '${values.location_code}' thành công!`);
+        message.success(`Gán slot tẩy rửa '${values.location_name}' (Node ${values.node_label}) thành công!`);
       }
       setIsWashModalOpen(false);
-      refetch();
+      handleRefreshAll();
     } catch (err: any) {
       if (err?.response?.data?.detail) {
         message.error(err.response.data.detail);
@@ -469,7 +569,7 @@ export default function StationSettingPage() {
     try {
       await deleteLocationMutation.mutateAsync(id);
       message.success(`Đã xóa slot tẩy rửa '${code}'`);
-      refetch();
+      handleRefreshAll();
     } catch (err: any) {
       message.error(err?.response?.data?.detail || 'Không thể xóa slot tẩy rửa');
     }
@@ -483,8 +583,7 @@ export default function StationSettingPage() {
     bufferForm.resetFields();
     const count = bufferList.length + 1;
     bufferForm.setFieldsValue({
-      location_code: `EMPTY-0${count}`,
-      location_name: `Bãi Đệm Xe Rỗng 0${count}`,
+      location_name: `EMPTY-0${count}`,
     });
     setIsBufferModalOpen(true);
   };
@@ -514,13 +613,12 @@ export default function StationSettingPage() {
             node_label: values.node_label,
             map_x: selectedNode ? selectedNode.map_x : editingBuffer.map_x ?? undefined,
             map_y: selectedNode ? selectedNode.map_y : editingBuffer.map_y ?? undefined,
-            is_active: values.is_active,
-          },
+            },
         });
         message.success(`Cập nhật bãi đệm '${editingBuffer.location_code}' thành công!`);
       } else {
         await createLocationMutation.mutateAsync({
-          location_code: values.location_code.trim(),
+          location_code: selectedNode?.node_label || values.node_label,
           location_name: values.location_name.trim(),
           location_type: 'EMPTY_CART_BUFFER',
           node_label: values.node_label,
@@ -528,10 +626,10 @@ export default function StationSettingPage() {
           map_y: selectedNode ? selectedNode.map_y : undefined,
           position_index: bufferList.length + 1,
         });
-        message.success(`Thêm bãi đệm '${values.location_code}' thành công!`);
+        message.success(`Gán bãi đệm '${values.location_name}' (Node ${values.node_label}) thành công!`);
       }
       setIsBufferModalOpen(false);
-      refetch();
+      handleRefreshAll();
     } catch (err: any) {
       if (err?.response?.data?.detail) {
         message.error(err.response.data.detail);
@@ -545,7 +643,7 @@ export default function StationSettingPage() {
     try {
       await deleteLocationMutation.mutateAsync(id);
       message.success(`Đã xóa bãi đệm '${code}'`);
-      refetch();
+      handleRefreshAll();
     } catch (err: any) {
       message.error(err?.response?.data?.detail || 'Không thể xóa bãi đệm');
     }
@@ -629,34 +727,34 @@ export default function StationSettingPage() {
                     className="[&_.ant-table-thead_th]:!bg-slate-50 [&_.ant-table-thead_th]:!text-slate-600 [&_.ant-table-thead_th]:!font-semibold"
                     columns={[
                       {
-                        title: 'Mã Ô',
-                        dataIndex: 'location_code',
-                        key: 'location_code',
-                        width: 140,
+                        title: 'Tên Đặt Nghiệp Vụ',
+                        dataIndex: 'location_name',
+                        key: 'location_name',
+                        width: 180,
                         render: (text: string) => (
                           <span className="font-mono font-bold text-amber-900 bg-amber-50 px-2.5 py-1 rounded-md border border-amber-200">
-                            {text}
+                            {text || '—'}
                           </span>
                         ),
                       },
                       {
-                        title: 'Tên Vị Trí',
-                        dataIndex: 'location_name',
-                        key: 'location_name',
-                        render: (text: string) => (
-                          <span className="font-medium text-slate-800">{text || '—'}</span>
+                        title: 'Node Bản Đồ',
+                        key: 'location_label',
+                        width: 140,
+                        render: (_: any, record: StationCatalogItem) => (
+                          <Tag color="cyan" className="!font-bold !m-0 font-mono">
+                            Node {record.location_label || record.node_label || '--'}
+                          </Tag>
                         ),
                       },
                       {
-                        title: 'Node Map Liên Kết',
-                        key: 'node_label',
-                        width: 180,
-                        render: (_: any, record: StationCatalogItem) => (
-                          <div className="flex items-center gap-1.5 font-mono text-xs">
-                            <Tag color="cyan" className="!font-bold !m-0">
-                              Node {record.node_label || '--'}
-                            </Tag>
-                          </div>
+                        title: 'Mã Node KUKA (UUID Fleet)',
+                        dataIndex: 'location_code',
+                        key: 'location_code',
+                        render: (text: string) => (
+                          <span className="font-mono text-xs text-slate-600 bg-slate-100 px-2 py-0.5 rounded">
+                            {text}
+                          </span>
                         ),
                       },
                       {
@@ -773,15 +871,6 @@ export default function StationSettingPage() {
                             <div>
                               <div className="flex items-center gap-2">
                                 <span className="text-lg font-bold text-slate-800">{machine.machine_code}</span>
-                                {machine.is_active ? (
-                                  <Tag color="success" icon={<CheckCircleOutlined />}>
-                                    Hoạt động
-                                  </Tag>
-                                ) : (
-                                  <Tag color="default" icon={<StopOutlined />}>
-                                    Tạm dừng
-                                  </Tag>
-                                )}
                               </div>
                               <div className="text-xs text-slate-500 font-medium mt-0.5">
                                 {machine.machine_name || `Máy ${machine.machine_code}`}
@@ -1150,44 +1239,30 @@ export default function StationSettingPage() {
       >
         <Form form={rawForm} layout="vertical" className="mt-4">
           <Form.Item
-            name="location_code"
-            label="Mã ô cấp phôi"
-            rules={[
-              { required: true, message: 'Vui lòng nhập mã ô!' },
-              { pattern: /^[A-Z0-9_-]+$/, message: 'Mã chỉ gồm chữ hoa, số và dấu gạch nối (VD: VT-01)' },
-            ]}
-          >
-            <Input placeholder="Ví dụ: VT-01" className="uppercase" disabled={!!editingRaw} />
-          </Form.Item>
-
-          <Form.Item
-            name="location_name"
-            label="Tên hiển thị ô"
-            rules={[{ required: true, message: 'Vui lòng nhập tên ô!' }]}
-          >
-            <Input placeholder="Ví dụ: Ô Cấp Phôi VT-01" />
-          </Form.Item>
-
-          <Form.Item
             name="node_label"
-            label="Chọn Node Map KUKA liên kết"
+            label="Chọn Node Bản Đồ KUKA"
             rules={[{ required: true, message: 'Vui lòng chọn Node Map KUKA!' }]}
           >
             <Select
               showSearch
-              placeholder="Chọn điểm đỗ Node trên Map"
-              options={nodeOptions}
+              placeholder="Chọn điểm đỗ Node trên Map (chưa gán)"
+              options={getNodeOptions({ currentLocationId: editingRaw?.id })}
+              disabled={!!editingRaw}
               filterOption={(input, option) =>
                 (option?.label as string || '').toLowerCase().includes(input.toLowerCase())
               }
             />
           </Form.Item>
 
-          {editingRaw && (
-            <Form.Item name="is_active" label="Trạng thái hoạt động" valuePropName="checked">
-              <Switch checkedChildren="Hoạt động" unCheckedChildren="Tạm dừng" />
-            </Form.Item>
-          )}
+          <Form.Item
+            name="location_name"
+            label="Tên Đặt Nghiệp Vụ (Hiển thị PDA / Web)"
+            rules={[{ required: true, message: 'Vui lòng nhập tên đặt cho ô!' }]}
+          >
+            <Input placeholder="Ví dụ: VT-01, Ô Cấp Phôi 1..." />
+          </Form.Item>
+
+
         </Form>
       </Modal>
 
@@ -1275,7 +1350,10 @@ export default function StationSettingPage() {
                       placeholder={`Chọn Node Map cho POS${slot.position_index}`}
                       value={slot.node_label}
                       onChange={(val) => handleCreateSlotNodeChange(idx, val)}
-                      options={nodeOptions}
+                      options={getNodeOptions({
+                        selectedInForm: createSlots.map((s) => s.node_label),
+                        currentSlotNode: slot.node_label,
+                      })}
                       filterOption={(input, option) =>
                         (option?.label as string || '').toLowerCase().includes(input.toLowerCase())
                       }
@@ -1324,9 +1402,7 @@ export default function StationSettingPage() {
               <Input placeholder="Ví dụ: Máy Phay CNC 01" />
             </Form.Item>
 
-            <Form.Item name="is_active" label="Trạng thái hoạt động" valuePropName="checked">
-              <Switch checkedChildren="Hoạt động" unCheckedChildren="Tạm dừng" />
-            </Form.Item>
+
           </div>
 
           <div className="border border-slate-200 rounded-xl p-3 bg-slate-50/50 mb-3 space-y-3">
@@ -1373,7 +1449,11 @@ export default function StationSettingPage() {
                       placeholder={`Chọn Node Map cho POS${slot.position_index}`}
                       value={slot.node_label}
                       onChange={(val) => handleEditSlotNodeChange(idx, val)}
-                      options={nodeOptions}
+                      options={getNodeOptions({
+                        currentLocationId: slot.id,
+                        selectedInForm: editSlots.map((s) => s.node_label),
+                        currentSlotNode: slot.node_label,
+                      })}
                       filterOption={(input, option) =>
                         (option?.label as string || '').toLowerCase().includes(input.toLowerCase())
                       }
@@ -1414,44 +1494,30 @@ export default function StationSettingPage() {
       >
         <Form form={washForm} layout="vertical" className="mt-4">
           <Form.Item
-            name="location_code"
-            label="Mã slot tẩy rửa"
-            rules={[
-              { required: true, message: 'Vui lòng nhập mã slot!' },
-              { pattern: /^[A-Z0-9_-]+$/, message: 'Mã chỉ gồm chữ hoa, số và dấu gạch nối (VD: WASH-01)' },
-            ]}
-          >
-            <Input placeholder="Ví dụ: WASH-01" className="uppercase" disabled={!!editingWash} />
-          </Form.Item>
-
-          <Form.Item
-            name="location_name"
-            label="Tên hiển thị slot"
-            rules={[{ required: true, message: 'Vui lòng nhập tên slot!' }]}
-          >
-            <Input placeholder="Ví dụ: Trạm Tẩy Rửa 01" />
-          </Form.Item>
-
-          <Form.Item
             name="node_label"
-            label="Chọn Node Map KUKA liên kết"
+            label="Chọn Node Bản Đồ KUKA"
             rules={[{ required: true, message: 'Vui lòng chọn Node Map KUKA!' }]}
           >
             <Select
               showSearch
-              placeholder="Chọn điểm đỗ Node trên Map"
-              options={nodeOptions}
+              placeholder="Chọn điểm đỗ Node trên Map (chưa gán)"
+              options={getNodeOptions({ currentLocationId: editingWash?.id })}
+              disabled={!!editingWash}
               filterOption={(input, option) =>
                 (option?.label as string || '').toLowerCase().includes(input.toLowerCase())
               }
             />
           </Form.Item>
 
-          {editingWash && (
-            <Form.Item name="is_active" label="Trạng thái hoạt động" valuePropName="checked">
-              <Switch checkedChildren="Hoạt động" unCheckedChildren="Tạm dừng" />
-            </Form.Item>
-          )}
+          <Form.Item
+            name="location_name"
+            label="Tên Đặt Nghiệp Vụ (Hiển thị PDA / Web)"
+            rules={[{ required: true, message: 'Vui lòng nhập tên slot!' }]}
+          >
+            <Input placeholder="Ví dụ: WASH-01, Bồn Rửa 1..." />
+          </Form.Item>
+
+
         </Form>
       </Modal>
 
@@ -1471,44 +1537,30 @@ export default function StationSettingPage() {
       >
         <Form form={bufferForm} layout="vertical" className="mt-4">
           <Form.Item
-            name="location_code"
-            label="Mã bãi đệm"
-            rules={[
-              { required: true, message: 'Vui lòng nhập mã bãi đệm!' },
-              { pattern: /^[A-Z0-9_-]+$/, message: 'Mã chỉ gồm chữ hoa, số và dấu gạch nối (VD: EMPTY-01)' },
-            ]}
-          >
-            <Input placeholder="Ví dụ: EMPTY-01" className="uppercase" disabled={!!editingBuffer} />
-          </Form.Item>
-
-          <Form.Item
-            name="location_name"
-            label="Tên hiển thị bãi đệm"
-            rules={[{ required: true, message: 'Vui lòng nhập tên bãi đệm!' }]}
-          >
-            <Input placeholder="Ví dụ: Bãi Đệm Xe Rỗng 01" />
-          </Form.Item>
-
-          <Form.Item
             name="node_label"
-            label="Chọn Node Map KUKA liên kết"
+            label="Chọn Node Bản Đồ KUKA"
             rules={[{ required: true, message: 'Vui lòng chọn Node Map KUKA!' }]}
           >
             <Select
               showSearch
-              placeholder="Chọn điểm đỗ Node trên Map"
-              options={nodeOptions}
+              placeholder="Chọn điểm đỗ Node trên Map (chưa gán)"
+              options={getNodeOptions({ currentLocationId: editingBuffer?.id })}
+              disabled={!!editingBuffer}
               filterOption={(input, option) =>
                 (option?.label as string || '').toLowerCase().includes(input.toLowerCase())
               }
             />
           </Form.Item>
 
-          {editingBuffer && (
-            <Form.Item name="is_active" label="Trạng thái hoạt động" valuePropName="checked">
-              <Switch checkedChildren="Hoạt động" unCheckedChildren="Tạm dừng" />
-            </Form.Item>
-          )}
+          <Form.Item
+            name="location_name"
+            label="Tên Đặt Nghiệp Vụ (Hiển thị PDA / Web)"
+            rules={[{ required: true, message: 'Vui lòng nhập tên bãi đệm!' }]}
+          >
+            <Input placeholder="Ví dụ: EMPTY-01, Bãi Đệm 1..." />
+          </Form.Item>
+
+
         </Form>
       </Modal>
     </div>

@@ -34,6 +34,7 @@ export const useCreateMachine = () => {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['machines'] });
       queryClient.invalidateQueries({ queryKey: ['stationCatalog'] });
+      queryClient.invalidateQueries({ queryKey: ['availableMapNodes'] });
     },
   });
 };
@@ -46,6 +47,7 @@ export const useUpdateMachine = () => {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['machines'] });
       queryClient.invalidateQueries({ queryKey: ['stationCatalog'] });
+      queryClient.invalidateQueries({ queryKey: ['availableMapNodes'] });
     },
   });
 };
@@ -57,6 +59,7 @@ export const useDeleteMachine = () => {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['machines'] });
       queryClient.invalidateQueries({ queryKey: ['stationCatalog'] });
+      queryClient.invalidateQueries({ queryKey: ['availableMapNodes'] });
     },
   });
 };
@@ -65,7 +68,7 @@ export const useStationCatalog = () => {
   return useQuery({
     queryKey: ['stationCatalog'],
     queryFn: getStationCatalogApi,
-    staleTime: 30 * 1000,
+    staleTime: 0,
   });
 };
 
@@ -73,7 +76,7 @@ export const useAvailableNodes = () => {
   return useQuery({
     queryKey: ['availableMapNodes'],
     queryFn: getAvailableMapNodesApi,
-    staleTime: 5 * 60 * 1000,
+    staleTime: 0,
   });
 };
 
@@ -84,6 +87,7 @@ export const useCreateStationLocation = () => {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['stationCatalog'] });
       queryClient.invalidateQueries({ queryKey: ['machines'] });
+      queryClient.invalidateQueries({ queryKey: ['availableMapNodes'] });
     },
   });
 };
@@ -96,6 +100,7 @@ export const useUpdateStationLocation = () => {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['stationCatalog'] });
       queryClient.invalidateQueries({ queryKey: ['machines'] });
+      queryClient.invalidateQueries({ queryKey: ['availableMapNodes'] });
     },
   });
 };
@@ -107,6 +112,7 @@ export const useDeleteStationLocation = () => {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['stationCatalog'] });
       queryClient.invalidateQueries({ queryKey: ['machines'] });
+      queryClient.invalidateQueries({ queryKey: ['availableMapNodes'] });
     },
   });
 };

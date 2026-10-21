@@ -14,7 +14,7 @@ from app.modules.auth.auth_model import User
 from app.modules.production import route_service
 from app.modules.production.dispatch_service import dispatch_service
 from app.modules.production.production_celery_task import persist_task_status
-from app.modules.production.production_models import FleetTask, TransportRequest, UserLocation
+from app.modules.production.production_models import FleetTask, Machine, TransportRequest, UserLocation
 from app.modules.production.route_schema import (
     AvailableMachineResponse,
     CallMaterialRequest,
@@ -183,29 +183,29 @@ def get_station_catalog(
     return route_service.get_station_catalog(db)
 
 
-# CRUD Station Slots (Raw Materials, Washing Slots, Empty Buffers)
-
+# Generic Station Locations (Raw Material, Washing, Buffer)
 @router.post(
-    "/production/stations/raw-materials",
+    "/production/stations/locations",
     response_model=StationCatalogItem,
     status_code=status.HTTP_201_CREATED,
 )
-def create_raw_material_slot(
+def create_station_location(
     payload: StationSlotCreateRequest,
     db: DbSession,
     _user: CurrentUser,
 ):
+    loc_type = payload.location_type or "RAW_MATERIAL"
     try:
-        return route_service.create_station_slot(db, "RAW_MATERIAL", payload)
+        return route_service.create_station_slot(db, loc_type, payload)
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
 
 
 @router.put(
-    "/production/stations/raw-materials/{location_id}",
+    "/production/stations/locations/{location_id}",
     response_model=StationCatalogItem,
 )
-def update_raw_material_slot(
+def update_station_location(
     location_id: int,
     payload: StationSlotUpdateRequest,
     db: DbSession,
@@ -218,10 +218,10 @@ def update_raw_material_slot(
 
 
 @router.delete(
-    "/production/stations/raw-materials/{location_id}",
+    "/production/stations/locations/{location_id}",
     status_code=status.HTTP_204_NO_CONTENT,
 )
-def delete_raw_material_slot(
+def delete_station_location(
     location_id: int,
     db: DbSession,
     _user: CurrentUser,
@@ -231,103 +231,6 @@ def delete_raw_material_slot(
         return None
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
-
-
-@router.post(
-    "/production/stations/washing-slots",
-    response_model=StationCatalogItem,
-    status_code=status.HTTP_201_CREATED,
-)
-def create_washing_slot(
-    payload: StationSlotCreateRequest,
-    db: DbSession,
-    _user: CurrentUser,
-):
-    try:
-        return route_service.create_station_slot(db, "WASHING_SLOT", payload)
-    except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
-
-
-@router.put(
-    "/production/stations/washing-slots/{location_id}",
-    response_model=StationCatalogItem,
-)
-def update_washing_slot(
-    location_id: int,
-    payload: StationSlotUpdateRequest,
-    db: DbSession,
-    _user: CurrentUser,
-):
-    try:
-        return route_service.update_station_slot(db, location_id, payload)
-    except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
-
-
-@router.delete(
-    "/production/stations/washing-slots/{location_id}",
-    status_code=status.HTTP_204_NO_CONTENT,
-)
-def delete_washing_slot(
-    location_id: int,
-    db: DbSession,
-    _user: CurrentUser,
-):
-    try:
-        route_service.delete_station_slot(db, location_id)
-        return None
-    except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
-
-
-@router.post(
-    "/production/stations/empty-buffers",
-    response_model=StationCatalogItem,
-    status_code=status.HTTP_201_CREATED,
-)
-def create_empty_buffer_slot(
-    payload: StationSlotCreateRequest,
-    db: DbSession,
-    _user: CurrentUser,
-):
-    try:
-        return route_service.create_station_slot(db, "EMPTY_CART_BUFFER", payload)
-    except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
-
-
-@router.put(
-    "/production/stations/empty-buffers/{location_id}",
-    response_model=StationCatalogItem,
-)
-def update_empty_buffer_slot(
-    location_id: int,
-    payload: StationSlotUpdateRequest,
-    db: DbSession,
-    _user: CurrentUser,
-):
-    try:
-        return route_service.update_station_slot(db, location_id, payload)
-    except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
-
-
-@router.delete(
-    "/production/stations/empty-buffers/{location_id}",
-    status_code=status.HTTP_204_NO_CONTENT,
-)
-def delete_empty_buffer_slot(
-    location_id: int,
-    db: DbSession,
-    _user: CurrentUser,
-):
-    try:
-        route_service.delete_station_slot(db, location_id)
-        return None
-    except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
-
 
 
 @router.get(
@@ -575,7 +478,6 @@ def get_pda_models(
     """Lấy danh sách các Model sản phẩm khả dụng cho giao diện PDA."""
     items = (
         db.query(Item)
-        .filter(Item.is_active == True)
         .order_by(Item.id.asc())
         .all()
     )
@@ -659,11 +561,15 @@ def get_pda_cnc_stations(
     if not is_admin and user_loc_ids:
         query = query.filter(Location.id.in_(user_loc_ids))
 
-    locations = query.order_by(
-        Location.machine_code.asc().nullslast(),
-        Location.position_index.asc().nullslast(),
-        Location.location_code.asc(),
-    ).all()
+    locations = (
+        query.outerjoin(Location.machine)
+        .order_by(
+            Machine.machine_code.asc().nullslast(),
+            Location.position_index.asc().nullslast(),
+            Location.location_code.asc(),
+        )
+        .all()
+    )
 
     result = []
     for loc in locations:

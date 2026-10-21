@@ -127,6 +127,7 @@ class MachineUpdateRequest(BaseModel):
 class StationCatalogItem(BaseModel):
     id: int
     location_code: str
+    location_label: Optional[str] = None
     location_name: Optional[str] = None
     location_type: Optional[str] = None
     machine_code: Optional[str] = None
@@ -168,8 +169,9 @@ class MapAvailableNodeResponse(BaseModel):
 
 
 class StationSlotCreateRequest(BaseModel):
-    location_code: str = Field(..., min_length=1, max_length=50)
+    location_code: Optional[str] = Field(None, max_length=100)
     location_name: Optional[str] = Field(None, max_length=100)
+    location_type: Optional[str] = Field(default="RAW_MATERIAL", max_length=30)
     position_index: Optional[int] = Field(None, ge=1)
     node_label: Optional[str] = Field(None, max_length=50)
     map_x: Optional[int] = None
