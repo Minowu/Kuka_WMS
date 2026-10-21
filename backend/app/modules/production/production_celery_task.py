@@ -18,22 +18,22 @@ logger = get_logger("main")
     acks_late=True,
 )
 def persist_task_status(self, payload: dict[str, Any]) -> Optional[dict[str, Any]]:
-    order_id = payload.get("orderId")
-    logger.info("Processing fleet task status for order_id=%s", order_id)
+    mission_code = payload.get("missionCode") or payload.get("mission_code") or payload.get("orderId")
+    logger.info("Processing fleet task status for mission_code=%s", mission_code)
 
     try:
         with db_session() as db:
             record = dispatch_service.receive_task_status(db, payload)
             if record:
-                return {"code": 1000, "order_id": str(order_id)}
+                return {"code": 0, "mission_code": str(mission_code)}
             return None
 
     except ValueError as exc:
-        logger.error("Invalid fleet task status payload (order_id=%s): %s", order_id, exc)
+        logger.error("Invalid fleet task status payload (mission_code=%s): %s", mission_code, exc)
         raise
 
     except Exception as exc:
-        logger.exception("Failed to persist fleet task status (order_id=%s)", order_id)
+        logger.exception("Failed to persist fleet task status (mission_code=%s)", mission_code)
         raise self.retry(exc=exc, countdown=5 * (2 ** self.request.retries))
 
 
@@ -44,7 +44,7 @@ def persist_task_status(self, payload: dict[str, Any]) -> Optional[dict[str, Any
 def scan_transport_queue() -> dict[str, int]:
     """
     Periodic 'Always Scan' worker that checks `TransportQueue` (`WAITING_CART` & `WAITING_SLOT`)
-    and automatically dispatches AMRs whenever matching carts or slots become available.
+    and automatically dispatches AMRs whenever matching containers or slots become available.
     """
     with db_session() as db:
         result = dispatch_service.scan_all_transport_queues(db)

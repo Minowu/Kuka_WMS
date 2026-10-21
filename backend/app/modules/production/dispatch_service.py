@@ -3,7 +3,7 @@ Production & AMR Dispatch Engine Service.
 
 Implements:
 1. User Location Assignment (`assign_locations_to_user` — unrestricted assignment across zones/machines).
-2. Raw Material Rack QR Registration (reusable physical rack `cart_code` -> Fleet POST insert + ItemStock upsert + auto-resolve WAITING_CART queue).
+2. Raw Material Rack QR Registration (reusable physical rack `container_code` -> Fleet POST insert + ItemStock upsert + auto-resolve WAITING_CART queue).
 3. Cart Selection (FIFO for Level 0 raw material; 2D Euclidean distance + FIFO with `FOR UPDATE SKIP LOCKED` for Level > 0).
 4. POS1 / POS2 CNC Slot Allocation (normalized 3NF via `Machine` & `RouteStepMachine`) & Waiting Queue Management (`TransportQueue`).
 5. Stage Progression (`complete_machining_stage`: Intermediate steps update stage_level & trigger WAITING_CART scan; Final CNC step pushes to Washing -> Empty Cart Return).
@@ -24,7 +24,9 @@ from sqlalchemy.orm import Session, joinedload
 from app.core.config import settings
 from app.core.logger import get_logger
 from app.modules.production.production_models import (
+    FLEET_MISSION_STATUS,
     MAPPING_STATUS,
+    FleetApiCall,
     FleetTask,
     Machine,
     ProductionRecord,
@@ -60,185 +62,450 @@ class DispatchService:
     """Core service for CNC work-in-progress (WIP) cart routing and KUKA AMR fleet dispatch."""
 
     # =========================================================================
-    # 0. KUKA FLEET MANAGER (RCS / ICS) HTTP ADAPTER & COMMAND HOOKS
+    # 0. KUKA FLEET MANAGER HTTP ADAPTER & COMMAND HOOKS (100% REAL KUKA FLEET)
     # =========================================================================
 
-    def add_task(self, payload: dict[str, Any], endpoint_path: str = "/ics/taskOrder/addTask") -> dict[str, Any]:
-        """
-        Send a low-level HTTP POST request to KUKA Fleet Manager (RCS/ICS).
-        When running locally without a live RCS server configured, returns a simulated success response.
-        """
-        if not _ics_configured():
-            logger.info("ICS offline/dev mode — simulated POST %s payload=%s", endpoint_path, payload)
-            return {"code": 1000, "simulated": True, "payload": payload}
-
-        base = settings.ics_base_url.rstrip("/")
+    def _post_kuka(
+        self,
+        endpoint_path: str,
+        payload: dict[str, Any],
+        api_name: str,
+        mission_code: Optional[str] = None,
+        container_code: Optional[str] = None,
+        request_id: Optional[str] = None,
+        db: Optional[Session] = None,
+    ) -> dict[str, Any]:
+        """Low-level HTTP POST to KUKA Fleet Manager with audit logging in fleet_api_call."""
+        req_id = request_id or str(payload.get("requestId") or f"REQ_{uuid.uuid4().hex[:12].upper()}")
+        base = getattr(settings, "kuka_base_url", None) or getattr(settings, "ics_base_url", "")
+        base = base.rstrip("/")
         endpoint = endpoint_path if endpoint_path.startswith("/") else f"/{endpoint_path}"
         url = f"{base}{endpoint}"
-        try:
-            with httpx.Client(timeout=httpx.Timeout(5.0)) as client:
-                response = client.post(url, json=payload)
-                response.raise_for_status()
-                data = response.json()
-            logger.info("ICS POST %s response: %s", endpoint_path, data)
-            return data
-        except httpx.HTTPStatusError as e:
-            retryable = e.response.status_code >= 500
-            raise IcsError(f"ICS server error ({e.response.status_code})", retryable=retryable) from e
-        except httpx.RequestError as e:
-            raise IcsError("Cannot reach ICS server", retryable=True) from e
 
-    def fleet_insert_rack(self, location_code: str, cart_code: str) -> dict[str, Any]:
-        """
-        [FLEET COMMAND 1 - POST INSERT RACK]
-        Bind/insert physical rack QR (`cart_code`) into `location_code` on KUKA Fleet Manager
-        so Fleet knows a rack is present at that node before dispatching an AMR to pick it up.
-        (Exact endpoint/payload will be plugged in when provided.)
-        """
-        payload = {
-            "action": "INSERT_RACK",
-            "locationCode": location_code,
-            "shelfNumber": cart_code,
-            "qrCode": cart_code,
-            "fromSystem": "MES",
+        if not _ics_configured():
+            logger.info("KUKA offline/dev mode — simulated POST %s payload=%s", endpoint_path, payload)
+            simulated_resp = {"code": 0, "message": "success", "simulated": True}
+            if db:
+                call_log = FleetApiCall(
+                    api_name=api_name,
+                    request_id=req_id,
+                    mission_code=mission_code,
+                    container_code=container_code,
+                    request_body=payload,
+                    http_status=200,
+                    response_body=simulated_resp,
+                    success=True,
+                )
+                db.add(call_log)
+                db.flush()
+            return simulated_resp
+
+        timeout_sec = float(getattr(settings, "kuka_http_timeout_seconds", 5.0))
+        http_status = None
+        resp_data = None
+        error_msg = None
+        headers = {
+            "Content-Type": "application/json",
+            "orgId": getattr(settings, "kuka_org_id", "KUKA011021"),
         }
-        logger.info("Fleet insert rack: cart_code=%s at location_code=%s", cart_code, location_code)
-        return self.add_task(payload, endpoint_path="/ics/shelf/insert")
+        token = getattr(settings, "kuka_access_token", None) or getattr(settings, "kuka_api_token", None)
+        if token:
+            headers["Authorization"] = token
+
+        try:
+            with httpx.Client(timeout=httpx.Timeout(timeout_sec)) as client:
+                response = client.post(url, json=payload, headers=headers)
+                http_status = response.status_code
+                response.raise_for_status()
+                resp_data = response.json()
+            logger.info("KUKA Fleet POST %s [%s] response: %s", endpoint_path, api_name, resp_data)
+            if db:
+                call_log = FleetApiCall(
+                    api_name=api_name,
+                    request_id=req_id,
+                    mission_code=mission_code,
+                    container_code=container_code,
+                    request_body=payload,
+                    http_status=http_status,
+                    response_body=resp_data,
+                    success=True,
+                )
+                db.add(call_log)
+                db.flush()
+            return resp_data
+        except httpx.HTTPStatusError as e:
+            http_status = e.response.status_code
+            error_msg = f"KUKA Fleet server error ({http_status}): {e.response.text}"
+            if db:
+                call_log = FleetApiCall(
+                    api_name=api_name,
+                    request_id=req_id,
+                    mission_code=mission_code,
+                    container_code=container_code,
+                    request_body=payload,
+                    http_status=http_status,
+                    response_body=None,
+                    success=False,
+                    error=error_msg,
+                )
+                db.add(call_log)
+                db.flush()
+            raise IcsError(error_msg, retryable=(http_status >= 500)) from e
+        except httpx.RequestError as e:
+            error_msg = f"Cannot reach KUKA Fleet server: {e}"
+            if db:
+                call_log = FleetApiCall(
+                    api_name=api_name,
+                    request_id=req_id,
+                    mission_code=mission_code,
+                    container_code=container_code,
+                    request_body=payload,
+                    http_status=None,
+                    response_body=None,
+                    success=False,
+                    error=error_msg,
+                )
+                db.add(call_log)
+                db.flush()
+            raise IcsError(error_msg, retryable=True) from e
+
+    def add_task(self, payload: dict[str, Any], endpoint_path: str = "/amr/submitMission") -> dict[str, Any]:
+        """Backward-compatibility bridge for raw task dispatching."""
+        return self._post_kuka(endpoint_path, payload, api_name="raw_submitMission")
+
+    def fleet_container_in(
+        self,
+        location_code: str,
+        container_code: str,
+        is_new: bool = False,
+        db: Optional[Session] = None,
+    ) -> dict[str, Any]:
+        """
+        [FLEET API - POST /amr/containerIn]
+        Register presence of physical container (`container_code`) at location (`location_code`).
+        """
+        request_id = f"CIN{datetime.now().strftime('%Y%m%d%H%M%S%f')[:17]}{uuid.uuid4().hex[:4].upper()}"
+        payload = {
+            "containerCode": container_code,
+            "enterOrientation": "",
+            "isNew": is_new,
+            "position": location_code,
+            "requestId": request_id,
+        }
+        logger.info("Fleet containerIn: container=%s at position=%s isNew=%s", container_code, location_code, is_new)
+        return self._post_kuka(
+            "/amr/containerIn",
+            payload,
+            api_name="containerIn",
+            container_code=container_code,
+            request_id=request_id,
+            db=db,
+        )
+
+    def fleet_insert_rack(self, location_code: str, container_code: str) -> dict[str, Any]:
+        """Alias for fleet_container_in."""
+        return self.fleet_container_in(location_code, container_code)
+
+    def fleet_container_out(
+        self,
+        location_code: str = "",
+        container_code: str = "",
+        db: Optional[Session] = None,
+    ) -> dict[str, Any]:
+        """
+        [FLEET API - POST /amr/containerOut]
+        De-register physical container (`container_code`) when returned to Empty Cart Buffer.
+        """
+        request_id = f"COUT{datetime.now().strftime('%Y%m%d%H%M%S%f')[:17]}{uuid.uuid4().hex[:4].upper()}"
+        payload = {
+            "requestId": request_id,
+            "containerType": "",
+            "containerCode": container_code,
+            "position": location_code,
+            "isDelete": False,
+        }
+        logger.info("Fleet containerOut: container=%s at position=%s", container_code, location_code)
+        return self._post_kuka(
+            "/amr/containerOut",
+            payload,
+            api_name="containerOut",
+            container_code=container_code,
+            request_id=request_id,
+            db=db,
+        )
+
+    def fleet_remove_rack(self, location_code: str, container_code: str) -> dict[str, Any]:
+        """Alias for fleet_container_out."""
+        return self.fleet_container_out(location_code=location_code, container_code=container_code)
+
+    def fleet_cancel_task(self, mission_code: str) -> dict[str, Any]:
+        """
+        [FLEET API - POST /amr/missionCancel]
+        Cancel an active Fleet task by `missionCode`.
+        """
+        request_id = f"CXL{datetime.now().strftime('%Y%m%d%H%M%S%f')[:17]}{uuid.uuid4().hex[:4].upper()}"
+        payload = {
+            "requestId": request_id,
+            "missionCode": mission_code,
+            "containerCode": "",
+            "position": "",
+            "cancelMode": "FORCE",
+        }
+        return self._post_kuka(
+            "/amr/missionCancel",
+            payload,
+            api_name="missionCancel",
+            mission_code=mission_code,
+            request_id=request_id,
+        )
+
+    # -------------------------------------------------------------------------
+    # 3 Move Functions (User constraint D15: keep 3 distinct explicit functions)
+    # -------------------------------------------------------------------------
 
     def fleet_move_material(
         self,
         task: FleetTask,
         pickup_code: str,
         dropoff_code: str,
-        cart_code: Optional[str],
+        container_code: Optional[str],
+        db: Optional[Session] = None,
     ) -> dict[str, Any]:
         """
-        [FLEET COMMAND 2 - POST MOVE MATERIAL]
-        Dispatch AMR to move a loaded rack (`cart_code`) from Raw Material -> CNC or CNC Level N -> CNC Level N+1.
+        [FLEET MOVE 1 - Raw Material -> CNC or CNC Level N -> CNC Level N+1]
+        Dispatches AMR via POST /amr/submitMission with 2 waypoints (Sequence 1 pickup, Sequence 2 dropoff).
         """
-        detail = [
+        org_id = getattr(settings, "kuka_org_id", "KUKA011021")
+        container_model = getattr(settings, "kuka_container_model_code", "1001")
+        robot_type = getattr(settings, "kuka_robot_type", "LIFT")
+        mission_type = getattr(settings, "kuka_mission_type", "RACK_MOVE")
+
+        req_id = task.fleet_request_id or f"SUB{datetime.now().strftime('%Y%m%d%H%M%S%f')[:17]}{uuid.uuid4().hex[:4].upper()}"
+        task.fleet_request_id = req_id
+
+        mission_data = [
             {
-                "taskPath": f"{pickup_code},{dropoff_code}",
-                "shelfNumber": cart_code or "",
-            }
+                "sequence": 1,
+                "position": pickup_code,
+                "type": "NODE_POINT",
+                "putDown": False,
+                "passStrategy": "AUTO",
+                "waitingMillis": 0,
+            },
+            {
+                "sequence": 2,
+                "position": dropoff_code,
+                "type": "NODE_POINT",
+                "putDown": True,
+                "passStrategy": "AUTO",
+                "waitingMillis": 0,
+            },
         ]
-        task.process_code = task.process_code or getattr(settings, "cnc_move_material_code", "move_material")
-        task.system_code = task.system_code or "MES"
-        task.task_order_detail = json.dumps(detail, ensure_ascii=False)
+        task.mission_data = mission_data
+        task.container_code = container_code
+
         payload = {
-            "orderId": task.task_code,
-            "modelProcessCode": task.process_code,
-            "fromSystem": task.system_code,
-            "taskOrderDetail": detail,
+            "orgId": org_id,
+            "requestId": req_id,
+            "missionCode": task.mission_code,
+            "missionType": mission_type,
+            "viewBoardType": "",
+            "robotModels": [],
+            "robotIds": [],
+            "robotType": robot_type,
+            "priority": 1,
+            "containerModelCode": container_model,
+            "templateCode": "",
+            "lockRobotAfterFinish": False,
+            "unlockRobotId": "",
+            "unlockMissionCode": "",
+            "idleNode": "",
+            "missionData": mission_data,
         }
-        return self.add_task(payload)
+        return self._post_kuka(
+            "/amr/submitMission",
+            payload,
+            api_name="submitMission:material",
+            mission_code=task.mission_code,
+            container_code=container_code,
+            request_id=req_id,
+            db=db,
+        )
 
     def fleet_move_to_wash(
         self,
         task: FleetTask,
         pickup_code: str,
         wash_code: str,
-        cart_code: Optional[str],
+        container_code: Optional[str],
+        db: Optional[Session] = None,
     ) -> dict[str, Any]:
         """
-        [FLEET COMMAND 3 - POST MOVE TO WASH]
-        Dispatch AMR to move a finished CNC rack (`cart_code`) from final CNC step to Washing station.
+        [FLEET MOVE 2 - Final CNC -> Washing Station]
+        Dispatches AMR via POST /amr/submitMission with 2 waypoints.
         """
-        detail = [
-            {
-                "taskPath": f"{pickup_code},{wash_code}",
-                "shelfNumber": cart_code or "",
-            }
-        ]
-        task.process_code = task.process_code or getattr(settings, "cnc_move_wash_code", "move_to_wash")
-        task.system_code = task.system_code or "MES"
-        task.task_order_detail = json.dumps(detail, ensure_ascii=False)
-        payload = {
-            "orderId": task.task_code,
-            "modelProcessCode": task.process_code,
-            "fromSystem": task.system_code,
-            "taskOrderDetail": detail,
-        }
-        return self.add_task(payload)
+        org_id = getattr(settings, "kuka_org_id", "KUKA011021")
+        container_model = getattr(settings, "kuka_container_model_code", "1001")
+        robot_type = getattr(settings, "kuka_robot_type", "LIFT")
+        mission_type = getattr(settings, "kuka_mission_type", "RACK_MOVE")
 
-    def fleet_move_empty_rack(
+        req_id = task.fleet_request_id or f"SUB{datetime.now().strftime('%Y%m%d%H%M%S%f')[:17]}{uuid.uuid4().hex[:4].upper()}"
+        task.fleet_request_id = req_id
+
+        mission_data = [
+            {
+                "sequence": 1,
+                "position": pickup_code,
+                "type": "NODE_POINT",
+                "putDown": False,
+                "passStrategy": "AUTO",
+                "waitingMillis": 0,
+            },
+            {
+                "sequence": 2,
+                "position": wash_code,
+                "type": "NODE_POINT",
+                "putDown": True,
+                "passStrategy": "AUTO",
+                "waitingMillis": 0,
+            },
+        ]
+        task.mission_data = mission_data
+        task.container_code = container_code
+
+        payload = {
+            "orgId": org_id,
+            "requestId": req_id,
+            "missionCode": task.mission_code,
+            "missionType": mission_type,
+            "viewBoardType": "",
+            "robotModels": [],
+            "robotIds": [],
+            "robotType": robot_type,
+            "priority": 1,
+            "containerModelCode": container_model,
+            "templateCode": "",
+            "lockRobotAfterFinish": False,
+            "unlockRobotId": "",
+            "unlockMissionCode": "",
+            "idleNode": "",
+            "missionData": mission_data,
+        }
+        return self._post_kuka(
+            "/amr/submitMission",
+            payload,
+            api_name="submitMission:wash",
+            mission_code=task.mission_code,
+            container_code=container_code,
+            request_id=req_id,
+            db=db,
+        )
+
+    def fleet_move_empty_container(
         self,
         task: FleetTask,
         pickup_code: str,
         buffer_code: str,
-        cart_code: Optional[str],
+        container_code: Optional[str],
+        db: Optional[Session] = None,
     ) -> dict[str, Any]:
         """
-        [FLEET COMMAND 4 - POST MOVE EMPTY RACK]
-        Dispatch AMR to return an empty rack (`cart_code`) from CNC/Washing to Empty Cart Buffer.
+        [FLEET MOVE 3 - Empty Container Return -> Empty Cart Buffer]
+        Dispatches AMR via POST /amr/submitMission with 2 waypoints.
         """
-        detail = [
+        org_id = getattr(settings, "kuka_org_id", "KUKA011021")
+        container_model = getattr(settings, "kuka_container_model_code", "1001")
+        robot_type = getattr(settings, "kuka_robot_type", "LIFT")
+        mission_type = getattr(settings, "kuka_mission_type", "RACK_MOVE")
+
+        req_id = task.fleet_request_id or f"SUB{datetime.now().strftime('%Y%m%d%H%M%S%f')[:17]}{uuid.uuid4().hex[:4].upper()}"
+        task.fleet_request_id = req_id
+
+        mission_data = [
             {
-                "taskPath": f"{pickup_code},{buffer_code}",
-                "shelfNumber": cart_code or "",
-            }
+                "sequence": 1,
+                "position": pickup_code,
+                "type": "NODE_POINT",
+                "putDown": False,
+                "passStrategy": "AUTO",
+                "waitingMillis": 0,
+            },
+            {
+                "sequence": 2,
+                "position": buffer_code,
+                "type": "NODE_POINT",
+                "putDown": True,
+                "passStrategy": "AUTO",
+                "waitingMillis": 0,
+            },
         ]
-        task.process_code = task.process_code or getattr(settings, "cnc_move_empty_code", "move_empty_rack")
-        task.system_code = task.system_code or "MES"
-        task.task_order_detail = json.dumps(detail, ensure_ascii=False)
-        payload = {
-            "orderId": task.task_code,
-            "modelProcessCode": task.process_code,
-            "fromSystem": task.system_code,
-            "taskOrderDetail": detail,
-        }
-        return self.add_task(payload)
+        task.mission_data = mission_data
+        task.container_code = container_code
 
-    def fleet_remove_rack(self, location_code: str, cart_code: str) -> dict[str, Any]:
-        """
-        [FLEET COMMAND 5 - POST REMOVE/UNBIND RACK]
-        Clear rack binding on Fleet Manager when a rack is manually removed or dropped at Empty Cart Buffer.
-        """
         payload = {
-            "action": "REMOVE_RACK",
-            "locationCode": location_code,
-            "shelfNumber": cart_code,
-            "fromSystem": "MES",
+            "orgId": org_id,
+            "requestId": req_id,
+            "missionCode": task.mission_code,
+            "missionType": mission_type,
+            "viewBoardType": "",
+            "robotModels": [],
+            "robotIds": [],
+            "robotType": robot_type,
+            "priority": 1,
+            "containerModelCode": container_model,
+            "templateCode": "",
+            "lockRobotAfterFinish": False,
+            "unlockRobotId": "",
+            "unlockMissionCode": "",
+            "idleNode": "",
+            "missionData": mission_data,
         }
-        logger.info("Fleet remove rack: cart_code=%s from location_code=%s", cart_code, location_code)
-        return self.add_task(payload, endpoint_path="/ics/shelf/remove")
+        return self._post_kuka(
+            "/amr/submitMission",
+            payload,
+            api_name="submitMission:empty_container",
+            mission_code=task.mission_code,
+            container_code=container_code,
+            request_id=req_id,
+            db=db,
+        )
 
-    def fleet_cancel_task(self, task_code: str) -> dict[str, Any]:
-        """
-        [FLEET COMMAND 6 - POST CANCEL TASK]
-        Cancel an active Fleet task by `orderId` (`task_code`).
-        """
-        payload = {
-            "orderId": task_code,
-            "fromSystem": "MES",
-        }
-        return self.add_task(payload, endpoint_path="/ics/taskOrder/cancelTask")
+    def fleet_move_empty_rack(self, task: FleetTask, pickup_code: str, buffer_code: str, container_code: Optional[str]) -> dict[str, Any]:
+        """Alias for fleet_move_empty_container."""
+        return self.fleet_move_empty_container(task, pickup_code, buffer_code, container_code)
 
-    def create_fleet_task(self, db: Session, task: FleetTask, request_type: str = "CALL_MATERIAL") -> FleetTask:
-        """
-        Send the appropriate POST command to KUKA Fleet Manager for a `FleetTask` and persist it.
-        Replaces legacy `TaskStatusService.create_robot_task`.
-        """
+    def submit_fleet_task(self, db: Session, task: FleetTask, request_type: str = "CALL_MATERIAL") -> FleetTask:
+        """Submit an already-persisted FleetTask to KUKA Fleet Manager via submitMission."""
         pickup_loc = db.query(Location).filter(Location.id == task.pickup_location_id).first()
         dropoff_loc = db.query(Location).filter(Location.id == task.dropoff_location_id).first()
-        cart = db.query(ItemStock).filter(ItemStock.id == task.cart_id).first() if task.cart_id else None
+        container = db.query(ItemStock).filter(ItemStock.id == task.container_id).first() if task.container_id else None
 
         pickup_code = pickup_loc.location_code if pickup_loc else str(task.pickup_location_id)
         dropoff_code = dropoff_loc.location_code if dropoff_loc else str(task.dropoff_location_id)
-        cart_code = cart.cart_code if cart else None
+        c_code = container.container_code if container else task.container_code
 
-        if request_type in ("MOVE_TO_WASH", "SEND_TO_WASH"):
-            self.fleet_move_to_wash(task, pickup_code, dropoff_code, cart_code)
-        elif request_type == "RETURN_EMPTY_CART":
-            self.fleet_move_empty_rack(task, pickup_code, dropoff_code, cart_code)
-        else:
-            self.fleet_move_material(task, pickup_code, dropoff_code, cart_code)
+        try:
+            if request_type in ("MOVE_TO_WASH", "SEND_TO_WASH"):
+                self.fleet_move_to_wash(task, pickup_code, dropoff_code, c_code, db=db)
+            elif request_type == "RETURN_EMPTY_CART":
+                self.fleet_move_empty_container(task, pickup_code, dropoff_code, c_code, db=db)
+            else:
+                self.fleet_move_material(task, pickup_code, dropoff_code, c_code, db=db)
 
-        task.status = "sent"
-        task.sent_at = datetime.now(timezone.utc)
-        db.add(task)
-        db.flush()
+            task.status = "sent"
+            task.sent_at = datetime.now(timezone.utc)
+            db.flush()
+        except IcsError as e:
+            logger.warning("Could not submit task %s to Fleet immediately: %s", task.mission_code, e)
+            task.status = "pending_submit"
+            task.submit_attempts += 1
+            task.error_message = str(e)
+            db.flush()
         return task
+
+    def create_fleet_task(self, db: Session, task: FleetTask, request_type: str = "CALL_MATERIAL") -> FleetTask:
+        """Alias for submit_fleet_task."""
+        return self.submit_fleet_task(db, task, request_type=request_type)
 
     # =========================================================================
     # 1. USER LOCATION ASSIGNMENT (UNRESTRICTED)
@@ -293,7 +560,7 @@ class DispatchService:
         db: Session,
         location_id: int,
         item_id: int,
-        cart_code: str,
+        container_code: str,
         quantity: Optional[int] = None,
         lot_number: Optional[str] = None,
         operator_id: Optional[int] = None,
@@ -302,18 +569,18 @@ class DispatchService:
         When a worker at the Raw Material zone:
         1. Selects a Raw Material location (`location_id`)
         2. Selects a Product Model (`item_id`)
-        3. Scans the reusable physical Rack QR (`cart_code`)
+        3. Scans the reusable physical Rack QR (`container_code`)
 
         This method:
         - Validates that the location is free.
         - Sends `fleet_insert_rack` POST to KUKA Fleet Manager so Fleet binds the rack at that node.
-        - Creates or reuses the `ItemStock` row for `cart_code` with `current_stage_level = 0`, `is_locked = False`.
+        - Creates or reuses the `ItemStock` row for `container_code` with `current_stage_level = 0`, `is_locked = False`.
         - Immediately calls `try_resolve_waiting_cart_queue(db, stage_level=0)` so if a CNC machine is
           already waiting in `TransportQueue` (`WAITING_CART`) for that model, an AMR is dispatched right away!
         """
-        clean_cart_code = cart_code.strip()
-        if not clean_cart_code:
-            raise ValueError("Mã QR của rack (cart_code) không được để trống.")
+        clean_container_code = container_code.strip()
+        if not clean_container_code:
+            raise ValueError("Mã QR của rack (container_code) không được để trống.")
 
         location = (
             db.query(Location)
@@ -337,27 +604,27 @@ class DispatchService:
             .filter(
                 ItemStock.location_id == location.id,
                 ItemStock.is_active.is_(True),
-                ItemStock.cart_code != clean_cart_code,
+                ItemStock.container_code != clean_container_code,
             )
             .first()
         )
         if occupying_cart:
             raise ValueError(
-                f"Vị trí '{location.location_code}' đang có xe/rack '{occupying_cart.cart_code}' đỗ."
+                f"Vị trí '{location.location_code}' đang có xe/rack '{occupying_cart.container_code}' đỗ."
             )
 
         qty = quantity if (quantity is not None and quantity > 0) else (item.standard_quantity_per_cart or 120)
 
         # 1. Notify KUKA Fleet Manager to insert/bind the rack at this location
-        self.fleet_insert_rack(location.location_code, clean_cart_code)
+        self.fleet_insert_rack(location.location_code, clean_container_code)
 
         # 2. Reuse existing ItemStock row if rack QR was used in a previous cycle, or create new
-        cart = db.query(ItemStock).filter(ItemStock.cart_code == clean_cart_code).first()
+        cart = db.query(ItemStock).filter(ItemStock.container_code == clean_container_code).first()
         now = datetime.now(timezone.utc)
         if cart:
             if cart.is_locked:
                 raise ValueError(
-                    f"Rack '{clean_cart_code}' đang bị khóa bởi tác vụ vận chuyển '{cart.locked_by_task_id}'."
+                    f"Rack '{clean_container_code}' đang bị khóa bởi tác vụ vận chuyển '{cart.locked_by_mission_code}'."
                 )
             cart.item_id = item.id
             cart.location_id = location.id
@@ -367,11 +634,12 @@ class DispatchService:
             cart.status = "available"
             cart.is_active = True
             cart.is_locked = False
-            cart.locked_by_task_id = None
+            cart.locked_by_mission_code = None
+            cart.fleet_registered = True
             cart.created_at = now
         else:
             cart = ItemStock(
-                cart_code=clean_cart_code,
+                container_code=clean_container_code,
                 item_id=item.id,
                 location_id=location.id,
                 destination_location_id=None,
@@ -380,7 +648,8 @@ class DispatchService:
                 status="available",
                 is_active=True,
                 is_locked=False,
-                locked_by_task_id=None,
+                locked_by_mission_code=None,
+                fleet_registered=True,
             )
             db.add(cart)
 
@@ -392,8 +661,8 @@ class DispatchService:
         db.refresh(cart)
 
         return {
-            "cart_id": cart.id,
-            "cart_code": cart.cart_code,
+            "container_id": cart.id,
+            "container_code": cart.container_code,
             "item_id": item.id,
             "sku": item.sku,
             "location_id": location.id,
@@ -403,7 +672,7 @@ class DispatchService:
             "is_locked": cart.is_locked,
             "fleet_inserted": True,
             "resolved_queue_count": resolved_count,
-            "dispatched_task_code": cart.locked_by_task_id,
+            "dispatched_mission_code": cart.locked_by_mission_code,
         }
 
     # =========================================================================
@@ -727,7 +996,7 @@ class DispatchService:
     def complete_machining_stage(
         self,
         db: Session,
-        cart_code: Optional[str] = None,
+        container_code: Optional[str] = None,
         location_id: Optional[int] = None,
         operator_id: Optional[int] = None,
         notes: Optional[str] = None,
@@ -747,20 +1016,20 @@ class DispatchService:
                or enqueues into `TransportQueue` (`WAITING_SLOT`) if all 4 washing slots are full.
         """
         query = db.query(ItemStock).filter(ItemStock.is_active.is_(True))
-        if cart_code and cart_code.strip():
-            query = query.filter(ItemStock.cart_code == cart_code.strip())
+        if container_code and container_code.strip():
+            query = query.filter(ItemStock.container_code == container_code.strip())
         elif location_id:
             query = query.filter(ItemStock.location_id == location_id)
         else:
-            raise ValueError("Phải cung cấp mã xe (cart_code) hoặc vị trí trạm máy (location_id).")
+            raise ValueError("Phải cung cấp mã xe (container_code) hoặc vị trí trạm máy (location_id).")
 
         cart = query.with_for_update(of=ItemStock).first()
         if not cart:
-            raise ValueError(f"Không tìm thấy xe hàng hợp lệ (cart_code='{cart_code}', location_id={location_id}).")
+            raise ValueError(f"Không tìm thấy xe hàng hợp lệ (container_code='{container_code}', location_id={location_id}).")
         if cart.is_locked:
-            raise ValueError(f"Xe hàng '{cart.cart_code}' đang bị khóa bởi tác vụ vận chuyển khác.")
+            raise ValueError(f"Xe hàng '{cart.container_code}' đang bị khóa bởi tác vụ vận chuyển khác.")
         if not cart.location_id:
-            raise ValueError(f"Xe hàng '{cart.cart_code}' chưa có vị trí hiện tại.")
+            raise ValueError(f"Xe hàng '{cart.container_code}' chưa có vị trí hiện tại.")
 
         current_loc = db.query(Location).filter(Location.id == cart.location_id).first()
 
@@ -769,11 +1038,11 @@ class DispatchService:
         cart.current_stage_level = completed_stage
         cart.status = "available"
         cart.is_locked = False
-        cart.locked_by_task_id = None
+        cart.locked_by_mission_code = None
         cart.destination_location_id = None
 
         prod_record = ProductionRecord(
-            cart_code=cart.cart_code,
+            container_code=cart.container_code,
             cart_id=cart.id,
             item_id=cart.item_id,
             machine_code=current_loc.machine_code if current_loc else None,
@@ -832,8 +1101,8 @@ class DispatchService:
             db.refresh(cart)
 
             matched_req_code: Optional[str] = None
-            if cart.is_locked and cart.locked_by_task_id:
-                ft = db.query(FleetTask).filter(FleetTask.task_code == cart.locked_by_task_id).first()
+            if cart.is_locked and cart.locked_by_mission_code:
+                ft = db.query(FleetTask).filter(FleetTask.mission_code == cart.locked_by_mission_code).first()
                 if ft and ft.request:
                     matched_req_code = ft.request.request_code
 
@@ -841,12 +1110,12 @@ class DispatchService:
                 "DISPATCHED_TO_WAITING_CNC" if (resolved_count > 0 and cart.is_locked) else "STAGE_COMPLETED_WAITING_CALL"
             )
             return {
-                "cart_code": cart.cart_code,
+                "container_code": cart.container_code,
                 "completed_stage_level": completed_stage,
                 "is_final_cnc_step": False,
                 "action": action_result,
                 "resolved_queue_count": resolved_count,
-                "dispatched_task_code": cart.locked_by_task_id,
+                "dispatched_mission_code": cart.locked_by_mission_code,
                 "request_code": matched_req_code,
             }
 
@@ -905,7 +1174,7 @@ class DispatchService:
 
         db.commit()
         return {
-            "cart_code": cart.cart_code,
+            "container_code": cart.container_code,
             "completed_stage_level": completed_stage,
             "is_final_cnc_step": True,
             "action": action_result,
@@ -919,7 +1188,7 @@ class DispatchService:
     def complete_washing_and_return_empty_cart(
         self,
         db: Session,
-        cart_code: str,
+        container_code: str,
         operator_id: Optional[int] = None,
     ) -> TransportRequest:
         """
@@ -931,14 +1200,14 @@ class DispatchService:
         """
         cart = (
             db.query(ItemStock)
-            .filter(ItemStock.cart_code == cart_code.strip(), ItemStock.is_active.is_(True))
+            .filter(ItemStock.container_code == container_code.strip(), ItemStock.is_active.is_(True))
             .with_for_update(of=ItemStock)
             .first()
         )
         if not cart or not cart.location_id:
-            raise ValueError(f"Không tìm thấy xe '{cart_code}' tại vị trí hợp lệ.")
+            raise ValueError(f"Không tìm thấy container '{container_code}' tại vị trí hợp lệ.")
         if cart.is_locked:
-            raise ValueError(f"Xe '{cart_code}' đang bị khóa bởi lệnh vận chuyển khác.")
+            raise ValueError(f"Xe '{container_code}' đang bị khóa bởi lệnh vận chuyển khác.")
 
         cart.quantity = 0
         cart.current_stage_level = 0
@@ -1012,96 +1281,174 @@ class DispatchService:
         pickup_location_id: int,
         dropoff_location_id: int,
     ) -> FleetTask:
-        """Atomically lock the cart, set its destination, create a `FleetTask`, and call Fleet Manager."""
-        task_code = f"TASK-{uuid.uuid4().hex[:8].upper()}"
+        """
+        Atomically lock the container, set destination, create FleetTask in DB (Tx1 commit),
+        and then dispatch submitMission to KUKA Fleet Manager (Tx2 commit).
+        """
+        mission_code = f"MS{datetime.now().strftime('%Y%m%d%H%M%S%f')[:17]}{uuid.uuid4().hex[:4].upper()}"
+        fleet_req_id = f"SUB{datetime.now().strftime('%Y%m%d%H%M%S%f')[:17]}{uuid.uuid4().hex[:4].upper()}"
 
+        # 1. Lock container immediately in MES DB (prevents any other machine from picking it)
         cart.is_locked = True
-        cart.locked_by_task_id = task_code
+        cart.locked_by_mission_code = mission_code
         cart.destination_location_id = dropoff_location_id
 
-        transport_req.cart_id = cart.id
+        transport_req.container_id = cart.id
         transport_req.source_location_id = pickup_location_id
         transport_req.destination_location_id = dropoff_location_id
         transport_req.status = "in_progress"
 
         fleet_task = FleetTask(
-            task_code=task_code,
-            request_id=transport_req.id,
+            mission_code=mission_code,
+            fleet_request_id=fleet_req_id,
+            transport_request_id=transport_req.id,
             pickup_location_id=pickup_location_id,
             dropoff_location_id=dropoff_location_id,
-            cart_id=cart.id,
-            status="created",
+            container_id=cart.id,
+            container_code=cart.container_code,
+            status="pending_submit",
         )
         db.add(fleet_task)
-        db.flush()
+        # Tx1 Commit: Task is securely persisted before calling Fleet (eliminates race condition with MOVE_BEGIN callback)
+        db.commit()
+        db.refresh(fleet_task)
 
-        self.create_fleet_task(db, fleet_task, request_type=transport_req.request_type)
+        # 2. Call KUKA Fleet submitMission
+        self.submit_fleet_task(db, fleet_task, request_type=transport_req.request_type)
+        db.commit()
+        db.refresh(fleet_task)
         return fleet_task
 
     def receive_task_status(self, db: Session, payload: dict[str, Any]) -> Optional[TaskStatus]:
         """
-        Process a status callback webhook from KUKA Fleet Manager (`/receive-status`).
-        1. Persists a `TaskStatus` audit record in `task_status`.
-        2. Maps KUKA status code (`6`: in_progress, `7`: failed, `3`: cancelled, `8`/`9`: completed).
-        3. Updates `FleetTask`, `TransportRequest`, and `ItemStock` directly without any legacy Inbound/Outbound tables.
+        Process incoming callback webhook from KUKA Fleet Manager (/api/v1/receive-status).
+        1. Persists complete audit record in `task_status` (including raw_payload, coordinates, position).
+        2. Acquires row lock (FOR UPDATE) on FleetTask by mission_code.
+        3. Enforces strict state-machine (no backward state transitions):
+           - MOVE_BEGIN / ARRIVED: AMR in-transit -> in_progress
+           - UP_CONTAINER: AMR lifted container -> in_progress, confirm container locked
+           - DOWN_CONTAINER: AMR put container down -> still in_progress (D2)
+           - COMPLETED: Mission 100% finished -> marks completed, relocates container, unlocks, scans queues
+           - FAILED / CANCELLED: Mission terminated -> unlocks container
         """
-        logger.info("=== [KUKA FLEET WEBHOOK RECEIVED] === payload=%s", json.dumps(payload, ensure_ascii=False))
-        order_id = payload.get("orderId")
-        if not order_id:
-            raise ValueError("orderId is required")
+        mission_code = (
+            payload.get("missionCode")
+            or payload.get("mission_code")
+            or payload.get("orderId")
+        )
+        if not mission_code:
+            logger.warning("Fleet webhook missing missionCode in payload: %s", payload)
+            return None
 
-        ics_status = str(payload.get("status") or "")
-        mapped_status = MAPPING_STATUS.get(ics_status)
+        mission_code_str = str(mission_code).strip()
+        raw_status = str(payload.get("missionStatus") or payload.get("mission_status") or payload.get("status") or "").strip()
+        robot_id = str(payload.get("robotId") or payload.get("robot_id") or payload.get("deviceCode") or "").strip() or None
+        container_code = str(payload.get("containerCode") or payload.get("container_code") or payload.get("shelfNumber") or "").strip() or None
+        location_code = str(payload.get("containerLocationCode") or "").strip() or None
+        curr_pos = str(payload.get("currentPosition") or "").strip() or None
+        map_code = str(payload.get("mapCode") or "").strip() or None
+        org_id = str(payload.get("orgId") or "").strip() or None
+        msg = str(payload.get("message") or "").strip() or None
 
+        robot_x = None
+        robot_y = None
+        try:
+            rx_val = payload.get("robotX")
+            if rx_val not in ("", None):
+                robot_x = float(rx_val)
+            ry_val = payload.get("robotY")
+            if ry_val not in ("", None):
+                robot_y = float(ry_val)
+        except (ValueError, TypeError):
+            pass
+
+        # 1. Audit log in task_status
         record = TaskStatus(
-            sub_task_status=str(payload.get("subTaskStatus")) if payload.get("subTaskStatus") is not None else None,
-            order_id=str(order_id),
-            device_code=payload.get("deviceCode"),
-            device_num=str(payload.get("deviceNum")) if payload.get("deviceNum") is not None else None,
-            qr_code=payload.get("qrCode"),
-            shelf_number=payload.get("shelfNumber"),
-            status=ics_status,
+            mission_code=mission_code_str,
+            mission_status=raw_status,
+            robot_id=robot_id,
+            container_code=container_code,
+            container_location_code=location_code,
+            current_position=curr_pos,
+            robot_x=robot_x,
+            robot_y=robot_y,
+            org_id=org_id,
+            map_code=map_code,
+            message=msg,
+            raw_payload=payload,
         )
         db.add(record)
         db.flush()
 
+        # 2. Lock FleetTask by mission_code
         fleet_task = (
             db.query(FleetTask)
-            .filter(FleetTask.task_code == str(order_id))
+            .filter(FleetTask.mission_code == mission_code_str)
+            .with_for_update(of=FleetTask)
             .first()
         )
         if not fleet_task:
-            logger.warning("Received status for unknown FleetTask orderId=%s", order_id)
+            logger.warning("Received status '%s' for unknown missionCode=%s", raw_status, mission_code_str)
             db.commit()
             db.refresh(record)
             return record
 
-        if fleet_task.status == "completed":
+        # 3. Check for immutable final states (no backward transitions)
+        if fleet_task.status in ("completed", "failed", "cancelled"):
+            logger.info("FleetTask %s already in terminal state '%s', ignoring event '%s'", mission_code_str, fleet_task.status, raw_status)
             db.commit()
             db.refresh(record)
             return record
 
-        if payload.get("deviceCode") or payload.get("deviceNum"):
-            fleet_task.amr_code = str(payload.get("deviceCode") or payload.get("deviceNum"))
+        fleet_task.last_mission_status = raw_status
+        if curr_pos:
+            fleet_task.current_position = curr_pos
+        if robot_id:
+            fleet_task.robot_id = robot_id
 
-        if mapped_status == "in_progress":
+        # 4. State transition
+        mapped_status = FLEET_MISSION_STATUS.get(raw_status) or MAPPING_STATUS.get(raw_status)
+
+        if raw_status in ("MOVE_BEGIN", "ARRIVED"):
             fleet_task.status = "in_progress"
             if fleet_task.request:
                 fleet_task.request.status = "in_progress"
             db.commit()
-        elif mapped_status == "completed":
-            db.commit()
-            self.complete_fleet_task(db, fleet_task.task_code)
-        elif mapped_status in ("failed", "cancelled"):
-            fleet_task.status = mapped_status
-            fleet_task.error_message = f"Fleet reported {mapped_status} (raw status={ics_status})"
+
+        elif raw_status == "UP_CONTAINER":
+            fleet_task.status = "in_progress"
+            fleet_task.picked_up_at = datetime.now(timezone.utc)
             if fleet_task.request:
-                fleet_task.request.status = mapped_status
-            if fleet_task.cart_id:
-                cart = db.query(ItemStock).filter(ItemStock.id == fleet_task.cart_id).first()
+                fleet_task.request.status = "in_progress"
+            # Ensure container is locked
+            if fleet_task.container_id:
+                cart = db.query(ItemStock).filter(ItemStock.id == fleet_task.container_id).first()
+                if cart:
+                    cart.is_locked = True
+                    cart.locked_by_mission_code = mission_code_str
+            db.commit()
+
+        elif raw_status == "DOWN_CONTAINER":
+            # D2: Still in_progress! Robot is putting container down, not finished yet
+            fleet_task.status = "in_progress"
+            db.commit()
+
+        elif raw_status == "COMPLETED" or mapped_status == "completed":
+            # D2: ONLY completion signal that finalizes mission
+            db.commit()
+            self.complete_fleet_task(db, mission_code_str)
+
+        elif mapped_status in ("failed", "cancelled") or raw_status in ("FAILED", "CANCELLED", "CANCEL"):
+            term_status = "cancelled" if "cancel" in raw_status.lower() else "failed"
+            fleet_task.status = term_status
+            fleet_task.error_message = msg or f"Fleet reported {raw_status}"
+            if fleet_task.request:
+                fleet_task.request.status = term_status
+            if fleet_task.container_id:
+                cart = db.query(ItemStock).filter(ItemStock.id == fleet_task.container_id).first()
                 if cart:
                     cart.is_locked = False
-                    cart.locked_by_task_id = None
+                    cart.locked_by_mission_code = None
                     cart.destination_location_id = None
             db.commit()
         else:
@@ -1110,26 +1457,26 @@ class DispatchService:
         db.refresh(record)
         return record
 
-    def complete_fleet_task(self, db: Session, task_code: str) -> FleetTask:
+    def complete_fleet_task(self, db: Session, mission_code: str) -> FleetTask:
         """
-        Callback handler when KUKA RCS reports that an AMR has completed its dropoff:
-        1. If the dropoff is at `EMPTY_CART_BUFFER` (or `RETURN_EMPTY_CART`):
-           - Opposite of Raw Material QR registration: immediately calls `fleet_remove_rack`
-             and clears the cart (`location_id = None`, `is_active = False`, `quantity = 0`, `status = 'empty'`)
-             so the buffer slot is immediately free for future cycles!
-        2. Otherwise (normal CNC or Washing delivery):
-           - Moves `cart.location_id = fleet_task.dropoff_location_id` and unlocks the cart.
-        3. Marks `FleetTask` and `TransportRequest` as `completed`.
-        4. Triggers queue resolution (`scan_all_transport_queues`) since the pickup location just became free!
+        Official completion handler when KUKA Fleet reports COMPLETED:
+        1. If dropoff is at EMPTY_CART_BUFFER (or RETURN_EMPTY_CART):
+           - Calls fleet_container_out to de-register container at Fleet.
+           - Sets container location_id=None, is_active=False, status='empty'.
+        2. Otherwise (CNC station or Washing slot):
+           - Moves container.location_id to dropoff_location_id.
+           - Clears container lock: is_locked=False, locked_by_mission_code=None.
+        3. Marks FleetTask and TransportRequest completed.
+        4. Scans TransportQueue (scan_all_transport_queues) to release next waiting workpiece.
         """
         fleet_task = (
             db.query(FleetTask)
-            .filter(FleetTask.task_code == task_code)
+            .filter(FleetTask.mission_code == mission_code)
             .with_for_update(of=FleetTask)
             .first()
         )
         if not fleet_task:
-            raise ValueError(f"Không tìm thấy FleetTask '{task_code}'.")
+            raise ValueError(f"Không tìm thấy FleetTask '{mission_code}'.")
 
         now = datetime.now(timezone.utc)
         fleet_task.status = "completed"
@@ -1151,13 +1498,15 @@ class DispatchService:
             or (dropoff_loc and dropoff_loc.location_type == "EMPTY_CART_BUFFER")
         )
 
-        if fleet_task.cart_id:
-            cart = db.query(ItemStock).filter(ItemStock.id == fleet_task.cart_id).first()
+        if fleet_task.container_id:
+            cart = db.query(ItemStock).filter(ItemStock.id == fleet_task.container_id).first()
             if cart:
                 if is_empty_buffer_dropoff:
-                    # Opposite of Raw Material insert: automatically remove/unbind rack at Empty Cart Buffer upon dropoff!
-                    if dropoff_loc and cart.cart_code:
-                        self.fleet_remove_rack(dropoff_loc.location_code, cart.cart_code)
+                    if dropoff_loc and cart.container_code:
+                        try:
+                            self.fleet_container_out(location_code=dropoff_loc.location_code, container_code=cart.container_code, db=db)
+                        except Exception as e:
+                            logger.error("Could not call fleet_container_out: %s", e)
                     cart.location_id = None
                     cart.destination_location_id = None
                     cart.quantity = 0
@@ -1165,17 +1514,17 @@ class DispatchService:
                     cart.status = "empty"
                     cart.is_active = False
                     cart.is_locked = False
-                    cart.locked_by_task_id = None
+                    cart.locked_by_mission_code = None
                 else:
                     cart.location_id = fleet_task.dropoff_location_id
                     cart.destination_location_id = None
                     cart.is_locked = False
-                    cart.locked_by_task_id = None
+                    cart.locked_by_mission_code = None
                     cart.status = "available"
 
         db.commit()
 
-        # Since pickup_location_id is now free and a cart settled, scan all queues
+        # Since pickup location is now free, immediately scan queues
         self.scan_all_transport_queues(db)
         return fleet_task
 

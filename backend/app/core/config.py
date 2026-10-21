@@ -39,11 +39,17 @@ class Settings(BaseSettings):
     access_token_expire_minutes: int = 60
     refresh_token_expire_minutes: int = 10080
 
-    # ICS / KUKA Fleet Manager
+    # KUKA Fleet Manager (Real KUKA ICS Protocol)
+    kuka_base_url: str = "http://192.168.1.71:10870/interfaces/api"
+    kuka_access_token: str = ""
+    kuka_org_id: str = "KUKA011021"
+    kuka_container_model_code: str = "1001"
+    kuka_robot_type: str = "LIFT"
+    kuka_mission_type: str = "RACK_MOVE"
+    kuka_http_timeout_seconds: float = 5.0
+    kuka_submit_max_retries: int = 3
+    # Backward compatibility alias
     ics_base_url: str = "http://192.168.1.71:10870/interfaces/api"
-    cnc_move_material_code: str = "move_material"
-    cnc_move_wash_code: str = "move_to_wash"
-    cnc_move_empty_code: str = "move_empty_rack"
 
     # Warehouses using manual (full-form) print templates — JSON array or comma list, e.g. [2]
     manual_warehouse_ids: list[int] = []
@@ -71,4 +77,3 @@ class Settings(BaseSettings):
         case_sensitive = False
 
 settings = Settings()
-
