@@ -1,4 +1,4 @@
-"""Item stock model for warehouse cell inventory (WIP Carts / Racks)."""
+"""Item stock model for warehouse cell inventory (WIP Containers / Racks)."""
 
 from sqlalchemy import (
     CheckConstraint,
@@ -19,13 +19,13 @@ from app.core.database import Base
 
 
 class ItemStock(Base):
-    """Current item stock rows stored in warehouse locations (WIP Carts)."""
+    """Current item stock rows stored in warehouse locations (WIP Containers / Racks)."""
 
     __tablename__ = "item_stock"
 
     id = Column(Integer, primary_key=True, index=True)
     stock_code = Column(UUID(as_uuid=True), unique=True, nullable=False, index=True, default=uuid.uuid4)
-    cart_code = Column(String(50), unique=True, nullable=True, index=True)
+    container_code = Column(String(50), unique=True, nullable=True, index=True)
     item_id = Column("item_id", Integer, ForeignKey("item.id"), nullable=False, index=True)
     location_id = Column(
         "location_id",
@@ -43,7 +43,8 @@ class ItemStock(Base):
     quantity = Column(Numeric(12, 3), nullable=False, default=0)
     current_stage_level = Column(Integer, nullable=False, default=0, server_default="0", index=True)
     is_locked = Column(Boolean, nullable=False, default=False, server_default="false", index=True)
-    locked_by_task_id = Column(String(100), nullable=True)
+    locked_by_mission_code = Column(String(100), nullable=True)
+    fleet_registered = Column(Boolean, nullable=False, default=False, server_default="false")
 
     status = Column(
         String(20),
@@ -56,22 +57,26 @@ class ItemStock(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
+    available_quantity = synonym("quantity")
+
     item = relationship("Item", lazy="joined")
     location = relationship(
         "Location",
+        lazy="joined",
         foreign_keys=[location_id],
         back_populates="stocks",
-        lazy="joined"
     )
     destination_location = relationship(
         "Location",
+        lazy="joined",
         foreign_keys=[destination_location_id],
-        lazy="joined"
     )
-    available_quantity = synonym("quantity")
 
     __table_args__ = (
-        CheckConstraint("quantity >= 0", name="ck_item_stock_quantity_non_negative"),
+        CheckConstraint(
+            "quantity >= 0",
+            name="check_item_stock_quantity_non_negative",
+        ),
     )
 
 

@@ -125,7 +125,7 @@ class ItemStockInDetail(BaseModel):
     item_id: int
     location_id: Optional[int] = None
     unit_id: Optional[int] = None
-    cart_code: Optional[str] = None
+    container_code: Optional[str] = None
     current_stage_level: int = 0
     location_code: Optional[str] = None
     location_name: Optional[str] = None

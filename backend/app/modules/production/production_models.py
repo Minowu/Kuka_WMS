@@ -1,4 +1,17 @@
-"""Production & AMR Dispatch Core Models."""
+"""
+Production and AMR dispatch SQLAlchemy models for KUKA machining workshop.
+
+3NF normalized structure:
+- `Machine`: physical CNC machines.
+- `Location`: slots / parking points (CNC_SLOT, RAW_MATERIAL, WASHING_SLOT, EMPTY_CART_BUFFER).
+- `ProductionRoute`, `RouteStep`, `RouteStepMachine`: route definition per Model.
+- `TransportRequest`: high-level transport intent from operator or automated logic.
+- `TransportQueue`: FIFO queues (WAITING_CART, WAITING_SLOT).
+- `FleetTask`: low-level AMR mission dispatched to KUKA Fleet Manager (/amr/submitMission).
+- `TaskStatus`: audit log of callbacks received from KUKA Fleet Manager (/receive-status).
+- `FleetApiCall`: audit log of outbound API calls to KUKA Fleet Manager.
+- `ProductionRecord`: completion audit trail per container.
+"""
 
 from sqlalchemy import (
     Boolean,
@@ -7,24 +20,32 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     Integer,
+    Numeric,
     String,
     Text,
     UniqueConstraint,
     func,
 )
-from sqlalchemy.orm import foreign, relationship
+from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.orm import foreign, relationship, synonym
 
 from app.core.database import Base
 
 
-# Mapping status codes sent by KUKA Fleet Manager (ICS/RCS) webhook
-MAPPING_STATUS = {
-    "6": "in_progress",
-    "7": "failed",
-    "3": "cancelled",
-    "8": "completed",
-    "9": "completed",
+# Real KUKA Fleet Mission Statuses
+FLEET_MISSION_STATUS = {
+    "MOVE_BEGIN": "in_progress",
+    "ARRIVED": "in_progress",
+    "UP_CONTAINER": "in_progress",
+    "DOWN_CONTAINER": "in_progress",  # D2: Still in_progress!
+    "COMPLETED": "completed",         # D2: Only completion signal!
+    "FAILED": "failed",
+    "CANCELLED": "cancelled",
+    "CANCEL": "cancelled",
 }
+
+# Compatibility alias
+MAPPING_STATUS = FLEET_MISSION_STATUS
 
 
 class UserLocation(Base):
@@ -61,7 +82,7 @@ class Machine(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     machine_code = Column(String(50), unique=True, nullable=False, index=True)
-    machine_name = Column(String(100), nullable=True)
+    machine_name = Column(String(100), nullable=False)
     warehouse_id = Column(Integer, ForeignKey("warehouse.id"), nullable=True, index=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(
@@ -71,30 +92,26 @@ class Machine(Base):
         nullable=False,
     )
 
-    locations = relationship("Location", back_populates="machine")
-    route_step_links = relationship(
-        "RouteStepMachine",
+    locations = relationship(
+        "Location",
+        primaryjoin="Location.machine_id == Machine.id",
+        order_by="Location.position_index",
         back_populates="machine",
-        cascade="all, delete-orphan",
     )
+    slots = synonym("locations")
 
 
 class ProductionRoute(Base):
-    """Manufacturing route header for a specific product model (Item)."""
+    """Production route definition per Item (Model)."""
 
     __tablename__ = "production_route"
 
     id = Column(Integer, primary_key=True, index=True)
     route_code = Column(String(50), unique=True, nullable=False, index=True)
     route_name = Column(String(100), nullable=False)
-    item_id = Column(
-        Integer,
-        ForeignKey("item.id", ondelete="CASCADE"),
-        nullable=False,
-        index=True,
-    )
+    item_id = Column(Integer, ForeignKey("item.id"), nullable=False, index=True)
     version = Column(Integer, default=1, nullable=False)
-    is_active = Column(Boolean, default=True, nullable=False)
+    is_active = Column(Boolean, default=True, nullable=False, index=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(
         DateTime(timezone=True),
@@ -106,14 +123,14 @@ class ProductionRoute(Base):
     item = relationship("Item", backref="production_routes")
     steps = relationship(
         "RouteStep",
-        back_populates="route",
+        backref="route",
         cascade="all, delete-orphan",
         order_by="RouteStep.step_number",
     )
 
 
 class RouteStep(Base):
-    """Detailed CNC processing step within a production route (normalized 3NF)."""
+    """A processing stage within a production route (3NF: normalized step)."""
 
     __tablename__ = "route_step"
 
@@ -125,36 +142,25 @@ class RouteStep(Base):
         index=True,
     )
     step_number = Column(Integer, nullable=False)
-    stage_level = Column(Integer, nullable=False)  # 1: Level 1, 2: Level 2, 3: Level 3...
+    stage_level = Column(Integer, nullable=False)
     step_name = Column(String(100), nullable=False)
     is_final_cnc_step = Column(Boolean, default=False, nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
-    route = relationship("ProductionRoute", back_populates="steps")
-    allowed_machine_links = relationship(
-        "RouteStepMachine",
-        back_populates="route_step",
-        cascade="all, delete-orphan",
-        lazy="selectin",
-    )
-
-    @property
-    def allowed_machines(self) -> list[str]:
-        """Return list of machine_codes from normalized RouteStepMachine links."""
-        return [
-            link.machine.machine_code
-            for link in (self.allowed_machine_links or [])
-            if link.machine and link.machine.machine_code
-        ]
-
     __table_args__ = (
         UniqueConstraint("route_id", "step_number", name="uq_route_step_number"),
-        Index("idx_route_step_lookup", "route_id", "stage_level"),
+        UniqueConstraint("route_id", "stage_level", name="uq_route_stage_level"),
+    )
+
+    step_machines = relationship(
+        "RouteStepMachine",
+        backref="route_step",
+        cascade="all, delete-orphan",
     )
 
 
 class RouteStepMachine(Base):
-    """Many-to-many join table linking RouteStep to allowed physical CNC Machines (3NF)."""
+    """Association table linking RouteStep to Machine (3NF bridge table)."""
 
     __tablename__ = "route_step_machine"
 
@@ -173,8 +179,7 @@ class RouteStepMachine(Base):
     )
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
-    route_step = relationship("RouteStep", back_populates="allowed_machine_links")
-    machine = relationship("Machine", back_populates="route_step_links", lazy="joined")
+    machine = relationship("Machine")
 
     __table_args__ = (
         UniqueConstraint("route_step_id", "machine_id", name="uq_route_step_machine"),
@@ -193,7 +198,7 @@ class TransportRequest(Base):
     item_id = Column(Integer, ForeignKey("item.id"), nullable=True, index=True)
     source_location_id = Column(Integer, ForeignKey("location.id"), nullable=True)
     destination_location_id = Column(Integer, ForeignKey("location.id"), nullable=False, index=True)
-    cart_id = Column(Integer, ForeignKey("item_stock.id"), nullable=True)
+    container_id = Column(Integer, ForeignKey("item_stock.id"), nullable=True)
     required_stage_level = Column(Integer, default=0, nullable=False)
     # pending | queued_for_cart | queued_for_slot | in_progress | completed | cancelled | failed
     status = Column(String(30), default="pending", nullable=False, index=True)
@@ -211,12 +216,20 @@ class TransportRequest(Base):
     item = relationship("Item", foreign_keys=[item_id])
     source_location = relationship("Location", foreign_keys=[source_location_id])
     destination_location = relationship("Location", foreign_keys=[destination_location_id])
-    cart = relationship("ItemStock", foreign_keys=[cart_id])
+    container = relationship("ItemStock", foreign_keys=[container_id])
     creator = relationship("User", foreign_keys=[created_by])
+
+    @property
+    def cart(self):
+        return self.container
+
+    @cart.setter
+    def cart(self, value):
+        self.container = value
 
 
 class TransportQueue(Base):
-    """Persistent FIFO queue for requests waiting for an available Cart or CNC Slot."""
+    """Persistent FIFO queue for requests waiting for an available Container or CNC Slot."""
 
     __tablename__ = "transport_queue"
 
@@ -245,26 +258,31 @@ class TransportQueue(Base):
 
 
 class FleetTask(Base):
-    """Low-level AMR mission dispatched to KUKA Fleet Manager (RCS/ICS)."""
+    """Low-level AMR mission dispatched to KUKA Fleet Manager (/amr/submitMission)."""
 
     __tablename__ = "fleet_task"
 
     id = Column(Integer, primary_key=True, index=True)
-    task_code = Column(String(50), unique=True, nullable=False, index=True)
-    request_id = Column(
+    mission_code = Column(String(50), unique=True, nullable=False, index=True)
+    transport_request_id = Column(
         Integer,
         ForeignKey("transport_request.id"),
         nullable=False,
         index=True,
     )
-    amr_code = Column(String(50), nullable=True)
+    fleet_request_id = Column(String(50), nullable=True)
+    robot_id = Column(String(50), nullable=True)
     pickup_location_id = Column(Integer, ForeignKey("location.id"), nullable=False)
     dropoff_location_id = Column(Integer, ForeignKey("location.id"), nullable=False)
-    cart_id = Column(Integer, ForeignKey("item_stock.id"), nullable=True)
-    process_code = Column(String(50), nullable=True)
-    system_code = Column(String(50), nullable=True, default="MES")
-    task_order_detail = Column(Text, nullable=True)
-    # created | sent | in_progress | completed | failed | cancelled
+    container_id = Column(Integer, ForeignKey("item_stock.id"), nullable=True)
+    container_code = Column(String(50), nullable=True)
+    mission_data = Column(JSONB, nullable=True)
+    last_mission_status = Column(String(30), nullable=True)
+    current_position = Column(String(50), nullable=True)
+    picked_up_at = Column(DateTime(timezone=True), nullable=True)
+    submit_attempts = Column(Integer, default=0, nullable=False)
+
+    # created | pending_submit | sent | in_progress | completed | failed | cancelled
     status = Column(String(30), default="created", nullable=False, index=True)
     error_message = Column(Text, nullable=True)
     sent_at = Column(DateTime(timezone=True), nullable=True)
@@ -277,48 +295,71 @@ class FleetTask(Base):
         nullable=False,
     )
 
-    request = relationship("TransportRequest", backref="fleet_tasks")
+    request = relationship("TransportRequest", backref="fleet_tasks", foreign_keys=[transport_request_id])
     pickup_location = relationship("Location", foreign_keys=[pickup_location_id])
     dropoff_location = relationship("Location", foreign_keys=[dropoff_location_id])
-    cart = relationship("ItemStock", foreign_keys=[cart_id])
+    container = relationship("ItemStock", foreign_keys=[container_id])
     task_statuses = relationship(
         "TaskStatus",
-        primaryjoin="FleetTask.task_code == foreign(TaskStatus.order_id)",
+        primaryjoin="FleetTask.mission_code == foreign(TaskStatus.mission_code)",
         viewonly=True,
         order_by="TaskStatus.id.desc()",
     )
 
 
 class TaskStatus(Base):
-    """Audit log of raw status callbacks received from KUKA Fleet Manager (/receive-status)."""
+    """Audit log of status callbacks received from KUKA Fleet Manager (/receive-status)."""
 
     __tablename__ = "task_status"
 
     id = Column(Integer, primary_key=True, index=True)
-    sub_task_status = Column(String(50), nullable=True)
-    order_id = Column(String(50), nullable=True, index=True)
-    device_code = Column(String(50), nullable=True)
-    device_num = Column(String(50), nullable=True)
-    qr_code = Column(String(255), nullable=True)
-    shelf_number = Column(String(50), nullable=True)
-    status = Column(String(50), nullable=True)
+    mission_code = Column(String(50), nullable=True, index=True)
+    robot_id = Column(String(50), nullable=True)
+    container_code = Column(String(50), nullable=True)
+    mission_status = Column(String(50), nullable=True)
+    org_id = Column(String(50), nullable=True)
+    container_location_code = Column(String(50), nullable=True)
+    current_position = Column(String(50), nullable=True)
+    robot_x = Column(Numeric(10, 3), nullable=True)
+    robot_y = Column(Numeric(10, 3), nullable=True)
+    map_code = Column(String(50), nullable=True)
+    message = Column(String(255), nullable=True)
+    raw_payload = Column(JSONB, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     fleet_task = relationship(
         "FleetTask",
-        primaryjoin="TaskStatus.order_id == foreign(FleetTask.task_code)",
+        primaryjoin="TaskStatus.mission_code == foreign(FleetTask.mission_code)",
         viewonly=True,
     )
 
 
+class FleetApiCall(Base):
+    """Audit log of outbound API calls dispatched to KUKA Fleet Manager."""
+
+    __tablename__ = "fleet_api_call"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    api_name = Column(String(50), nullable=False)
+    request_id = Column(String(50), unique=True, nullable=False, index=True)
+    mission_code = Column(String(50), nullable=True, index=True)
+    container_code = Column(String(50), nullable=True)
+    request_body = Column(JSONB, nullable=False)
+    http_status = Column(Integer, nullable=True)
+    response_body = Column(JSONB, nullable=True)
+    success = Column(Boolean, default=False, nullable=False)
+    error = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
 class ProductionRecord(Base):
-    """Audit trail of completed CNC machining stages per cart."""
+    """Audit trail of completed CNC machining stages per container."""
 
     __tablename__ = "production_record"
 
     id = Column(Integer, primary_key=True, index=True)
-    cart_code = Column(String(50), nullable=False, index=True)
-    cart_id = Column(Integer, ForeignKey("item_stock.id"), nullable=True)
+    container_code = Column(String(50), nullable=False, index=True)
+    container_id = Column(Integer, ForeignKey("item_stock.id"), nullable=True)
     item_id = Column(Integer, ForeignKey("item.id"), nullable=False)
     machine_code = Column(String(50), nullable=True)
     location_id = Column(Integer, ForeignKey("location.id"), nullable=False, index=True)
@@ -327,7 +368,7 @@ class ProductionRecord(Base):
     completed_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     notes = Column(Text, nullable=True)
 
-    cart = relationship("ItemStock", foreign_keys=[cart_id])
+    container = relationship("ItemStock", foreign_keys=[container_id])
     item = relationship("Item", foreign_keys=[item_id])
     location = relationship("Location", foreign_keys=[location_id])
     operator = relationship("User", foreign_keys=[operator_id])

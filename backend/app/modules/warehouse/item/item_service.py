@@ -233,7 +233,7 @@ def get_item_detail(db: Session, item_id: int) -> ItemDetailResponse:
                 item_id=stock.item_id,
                 location_id=stock.location_id,
                 unit_id=getattr(stock, "unit_id", None),
-                cart_code=stock.cart_code,
+                container_code=stock.container_code,
                 current_stage_level=stock.current_stage_level or 0,
                 location_code=location_code,
                 location_name=location_name,
