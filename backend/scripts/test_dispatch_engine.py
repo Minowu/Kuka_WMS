@@ -96,7 +96,7 @@ def run_verification() -> None:
         req1 = dispatch_service.call_material_to_cnc(
             db, destination_location_id=cnc01_pos1.id, item_id=model_a.id
         )
-        cart1 = db.query(ItemStock).filter(ItemStock.id == req1.cart_id).first()
+        cart1 = db.query(ItemStock).filter(ItemStock.id == req1.container_id).first()
         assert cart1.cart_code == "CART-001", f"Expected FIFO CART-001, got {cart1.cart_code}"
         assert cart1.is_locked is True
         assert req1.destination_location_id == cnc01_pos1.id
@@ -116,7 +116,7 @@ def run_verification() -> None:
         req2 = dispatch_service.call_material_to_cnc(
             db, destination_location_id=cnc01_pos2.id, item_id=model_a.id
         )
-        cart2 = db.query(ItemStock).filter(ItemStock.id == req2.cart_id).first()
+        cart2 = db.query(ItemStock).filter(ItemStock.id == req2.container_id).first()
         assert cart2.cart_code == "CART-002", f"Expected second FIFO CART-002, got {cart2.cart_code}"
         assert req2.destination_location_id == cnc01_pos2.id, "Expected destination to be CNC-01-POS2!"
         print(f"  ✔ [Test 2b] Khóa chặt vị trí công nhân chọn: Chặn gọi vào POS1 bận, điều xe chính xác vào CNC-01-POS2 ({cart2.cart_code})!")
@@ -161,7 +161,7 @@ def run_verification() -> None:
             db, destination_location_id=cnc03_pos1.id, item_id=model_a.id
         )
         assert req_lvl2.required_stage_level == 1, f"Expected auto-inferred required_stage_level=1, got {req_lvl2.required_stage_level}"
-        assert req_lvl2.cart_id == cart1.id and req_lvl2.status == "in_progress"
+        assert req_lvl2.container_id == cart1.id and req_lvl2.status == "in_progress"
         task_lvl2 = db.query(FleetTask).filter(FleetTask.request_id == req_lvl2.id).first()
         dispatch_service.receive_task_status(db, {"orderId": task_lvl2.task_code, "status": "8"})
         db.refresh(cart1)
