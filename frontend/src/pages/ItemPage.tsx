@@ -328,24 +328,9 @@ export default function ItemPage() {
 
   const kpiCards = [
     {
-      label: "Tổng sản phẩm",
-      value: formatKpi(analyze?.total_items),
+      label: "Tổng Model Sản Phẩm",
+      value: formatKpi(analyze?.total_items || items.length),
       color: "#3aa6a6",
-    },
-    {
-      label: "Tổng số lượng",
-      value: formatKpi(analyze?.total_quantity),
-      color: "#0f3d46",
-    },
-    {
-      label: "Giá trị tồn kho",
-      value: formatInventoryValue(analyze?.total_inventory_value),
-      color: "#0f3460",
-    },
-    {
-      label: "Số lượng còn ít",
-      value: formatKpi(analyze?.total_low_stock),
-      color: "#6b7280",
     },
   ];
 
@@ -528,37 +513,6 @@ export default function ItemPage() {
       dataIndex: "description",
       key: "description",
       sorter: (a, b) => (a.description ?? '').localeCompare(b.description ?? ''),
-    },
-    {
-      title: "Số lượng",
-      dataIndex: "quantity",
-      key: "quantity",
-      sorter: (a, b) => parseQuantity(a.quantity) - parseQuantity(b.quantity),
-      render: (qty: number | string) => {
-        const amount = parseQuantity(qty);
-        return (
-          <span
-            className={
-              amount === 0 || amount < 10
-                ? "font-semibold text-orange-500"
-                : "font-semibold text-brand-dark"
-            }
-          >
-            {formatQuantity(qty)}
-          </span>
-        );
-      },
-    },
-    {
-      title: "Tổng giá trị",
-      dataIndex: "total_price",
-      key: "total_price",
-      sorter: (a, b) => parseQuantity(a.total_price) - parseQuantity(b.total_price),
-      render: (totalPrice: number | string) => (
-        <span className="font-semibold text-brand-dark">
-          {formatInventoryValue(totalPrice)}
-        </span>
-      ),
     },
     {
       title: "Tiêu chuẩn / xe",
