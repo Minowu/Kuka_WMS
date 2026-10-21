@@ -1081,7 +1081,7 @@ class DispatchService:
 
         prod_record = ProductionRecord(
             container_code=cart.container_code,
-            cart_id=cart.id,
+            container_id=cart.id,
             item_id=cart.item_id,
             machine_code=current_loc.machine_code if current_loc else None,
             location_id=cart.location_id,
@@ -1167,7 +1167,7 @@ class DispatchService:
                 item_id=cart.item_id,
                 source_location_id=cart.location_id,
                 destination_location_id=wash_slot.id,
-                cart_id=cart.id,
+                container_id=cart.id,
                 required_stage_level=completed_stage,
                 status="pending",
                 priority=5,
@@ -1191,7 +1191,7 @@ class DispatchService:
                 item_id=cart.item_id,
                 source_location_id=cart.location_id,
                 destination_location_id=cart.location_id,
-                cart_id=cart.id,
+                container_id=cart.id,
                 required_stage_level=completed_stage,
                 status="queued_for_slot",
                 priority=5,
@@ -1261,7 +1261,7 @@ class DispatchService:
                 item_id=cart.item_id,
                 source_location_id=cart.location_id,
                 destination_location_id=empty_buffer.id,
-                cart_id=cart.id,
+                container_id=cart.id,
                 required_stage_level=0,
                 status="pending",
                 priority=15,
@@ -1284,7 +1284,7 @@ class DispatchService:
                 item_id=cart.item_id,
                 source_location_id=cart.location_id,
                 destination_location_id=cart.location_id,
-                cart_id=cart.id,
+                container_id=cart.id,
                 required_stage_level=0,
                 status="queued_for_slot",
                 priority=15,
@@ -1635,10 +1635,10 @@ class DispatchService:
         resolved_count = 0
         for entry in pending_entries:
             req = entry.request
-            if not req or not req.cart_id:
+            if not req or not req.container_id:
                 continue
 
-            cart = db.query(ItemStock).filter(ItemStock.id == req.cart_id).first()
+            cart = db.query(ItemStock).filter(ItemStock.id == req.container_id).first()
             if not cart or cart.is_locked or not cart.location_id:
                 continue
 

@@ -238,6 +238,14 @@ class TransportRequest(Base):
     def cart(self, value):
         self.container = value
 
+    @property
+    def cart_id(self):
+        return self.container_id
+
+    @cart_id.setter
+    def cart_id(self, value):
+        self.container_id = value
+
 
 class TransportQueue(Base):
     """Persistent FIFO queue for requests waiting for an available Container or CNC Slot."""
@@ -383,3 +391,11 @@ class ProductionRecord(Base):
     item = relationship("Item", foreign_keys=[item_id])
     location = relationship("Location", foreign_keys=[location_id])
     operator = relationship("User", foreign_keys=[operator_id])
+
+    @property
+    def cart_id(self):
+        return self.container_id
+
+    @cart_id.setter
+    def cart_id(self, value):
+        self.container_id = value

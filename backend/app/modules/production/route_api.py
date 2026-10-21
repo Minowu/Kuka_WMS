@@ -372,7 +372,8 @@ def call_material(
             "id": req.id,
             "request_code": req.request_code,
             "status": req.status,
-            "cart_id": req.cart_id,
+            "container_id": req.container_id,
+            "cart_id": req.container_id,
             "destination_location_id": req.destination_location_id,
             "required_stage_level": req.required_stage_level,
         }
@@ -427,7 +428,8 @@ def return_empty_cart_from_washing(
             "id": req.id,
             "request_code": req.request_code,
             "status": req.status,
-            "cart_id": req.cart_id,
+            "container_id": req.container_id,
+            "cart_id": req.container_id,
             "destination_location_id": req.destination_location_id,
         }
     except ValueError as e:
