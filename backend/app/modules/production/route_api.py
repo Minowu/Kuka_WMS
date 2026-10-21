@@ -18,7 +18,7 @@ from app.modules.production.production_models import FleetTask, Machine, Transpo
 from app.modules.production.route_schema import (
     AvailableMachineResponse,
     CallMaterialRequest,
-    CartActionRequest,
+    ContainerActionRequest,
     CompleteStageRequest,
     MachineCreateRequest,
     MachineUpdateRequest,
@@ -329,7 +329,7 @@ def register_rack_at_raw_material(
     user: CurrentUser,
 ):
     """
-    Công nhân tại khu Nguyên liệu chọn vị trí, chọn Model sản phẩm và quét QR mã Rack (`cart_code`):
+    Công nhân tại khu Nguyên liệu chọn vị trí, chọn Model sản phẩm và quét QR mã Rack (`container_code`):
     1. Gửi POST `fleet_insert_rack` báo cho KUKA Fleet Manager biết rack đã được đặt vào vị trí đó.
     2. Lưu/cập nhật `ItemStock` (tái sử dụng mã rack sau mỗi chu kỳ) ở `current_stage_level = 0`.
     3. Tự động kiểm tra `TransportQueue` (`WAITING_CART`): nếu có máy CNC đang chờ phôi của Model này
@@ -340,7 +340,7 @@ def register_rack_at_raw_material(
             db=db,
             location_id=body.location_id,
             item_id=body.item_id,
-            cart_code=body.cart_code,
+            container_code=body.container_code,
             quantity=body.quantity,
             lot_number=body.lot_number,
             operator_id=user.id,
@@ -393,7 +393,7 @@ def complete_machining_stage(
     try:
         return dispatch_service.complete_machining_stage(
             db=db,
-            cart_code=body.cart_code,
+            container_code=body.container_code,
             location_id=body.location_id,
             operator_id=user.id,
             notes=body.notes,
@@ -412,7 +412,7 @@ def complete_machining_stage(
     include_in_schema=False,
 )
 def return_empty_cart_from_washing(
-    body: CartActionRequest,
+    body: ContainerActionRequest,
     db: DbSession,
     user: CurrentUser,
 ):
@@ -420,7 +420,7 @@ def return_empty_cart_from_washing(
     try:
         req = dispatch_service.complete_washing_and_return_empty_cart(
             db=db,
-            cart_code=body.cart_code,
+            container_code=body.container_code,
             operator_id=user.id,
         )
         return {
@@ -440,27 +440,17 @@ def return_empty_cart_from_washing(
 
 @router.post("/receive-status", status_code=status.HTTP_200_OK)
 @router.post("/production/fleet/receive-status", status_code=status.HTTP_200_OK)
-def receive_task_status(payload: dict[str, Any], db: DbSession) -> dict[str, int]:
+def receive_task_status(payload: dict[str, Any], db: DbSession) -> dict[str, Any]:
     """
-    Webhook nhận trạng thái thực thi task từ KUKA Fleet Manager (RCS/ICS).
-    Hỗ trợ cả chạy qua Celery (`persist_task_status`) và fallback trực tiếp qua DB session.
+    Webhook tiếp nhận trạng thái từ KUKA Fleet Manager (/api/v1/receive-status).
+    Chạy trực tiếp đồng bộ để đảm bảo thứ tự chính xác tuyệt đối (DOWN_CONTAINER và COMPLETED cách nhau ms).
+    Luôn trả về HTTP 200 theo quy định của KUKA Fleet.
     """
-    if not payload.get("orderId"):
-        return {"code": 1000}
     try:
-        if settings.debug:
-            dispatch_service.receive_task_status(db, payload)
-        else:
-            try:
-                run_logic_task(persist_task_status, payload=payload)
-            except Exception:
-                # Fallback to synchronous execution if Celery broker is unreachable
-                dispatch_service.receive_task_status(db, payload)
-        return {"code": 1000}
-    except ValueError as e:
-        msg = str(e)
-        code = 404 if "not found" in msg.lower() else 400
-        raise HTTPException(status_code=code, detail=msg) from e
+        dispatch_service.receive_task_status(db, payload)
+    except Exception as e:
+        logger.error("Error processing KUKA Fleet webhook: %s", e)
+    return {"code": 0, "message": "success"}
 
 
 # =========================================================================
@@ -522,7 +512,7 @@ def get_pda_raw_materials(
             .first()
         )
         has_rack = cart is not None
-        current_rack_id = cart.cart_code if cart else None
+        current_rack_id = cart.container_code if cart else None
         current_model = cart.item.name if (cart and cart.item) else None
         result.append(
             PdaRawMaterialSlot(
@@ -616,13 +606,13 @@ def get_pda_cnc_stations(
                 else (cart.created_at.strftime("%H:%M") if cart.created_at else None)
             )
             current_rack = PdaCncStationRack(
-                rack_id=cart.cart_code,
+                rack_id=cart.container_code,
                 model=cart.item.name if cart.item else "Phôi gia công",
                 level=cart.current_stage_level,
                 started_at=started_at,
             )
             calling_model = None
-            calling_task_code = None
+            calling_mission_code = None
         else:
             incoming_task = (
                 db.query(FleetTask)
@@ -635,7 +625,7 @@ def get_pda_cnc_stations(
             )
             if incoming_task:
                 status_str = "CALLING"
-                calling_task_code = incoming_task.task_code
+                calling_mission_code = incoming_task.mission_code
                 calling_model = (
                     incoming_task.request.item.name
                     if (incoming_task.request and incoming_task.request.item)
@@ -657,12 +647,12 @@ def get_pda_cnc_stations(
                     calling_model = (
                         waiting_req.item.name if waiting_req.item else "Phôi tiêu chuẩn"
                     )
-                    calling_task_code = None
+                    calling_mission_code = None
                     current_rack = None
                 else:
                     status_str = "EMPTY"
                     calling_model = None
-                    calling_task_code = None
+                    calling_mission_code = None
                     current_rack = None
 
         result.append(
@@ -676,7 +666,7 @@ def get_pda_cnc_stations(
                 stage_name=stage_name,
                 status=status_str,
                 calling_model=calling_model,
-                calling_task_code=calling_task_code,
+                calling_mission_code=calling_mission_code,
                 current_rack=current_rack,
             )
         )
@@ -721,7 +711,7 @@ def get_pda_washing_slots(
                 else (cart.created_at.strftime("%H:%M") if cart.created_at else None)
             )
             current_rack = PdaWashingSlotRack(
-                rack_id=cart.cart_code,
+                rack_id=cart.container_code,
                 model=cart.item.name if cart.item else "Thành phẩm",
                 from_station="Từ CNC-04",
                 arrived_at=arrived_at or "--:--",
@@ -739,7 +729,7 @@ def get_pda_washing_slots(
             if incoming and incoming.request and incoming.request.cart:
                 c = incoming.request.cart
                 current_rack = PdaWashingSlotRack(
-                    rack_id=c.cart_code,
+                    rack_id=c.container_code,
                     model=c.item.name if c.item else "Thành phẩm",
                     from_station="Đang chuyển tới",
                     arrived_at="AMR",
@@ -771,11 +761,12 @@ def pda_fast_arrive(
 ):
     """
     Simulation helper endpoint cho PDA:
-    Bắn tín hiệu hoàn tất hạ kệ (status='8') cho task AMR đang di chuyển tới vị trí này.
+    Bắn tín hiệu hoàn tất hạ kệ (COMPLETED) chuẩn KUKA Fleet cho task AMR đang di chuyển tới vị trí này.
     """
     task = None
-    if body.task_code:
-        task = db.query(FleetTask).filter(FleetTask.task_code == body.task_code).first()
+    target_code = body.mission_code
+    if target_code:
+        task = db.query(FleetTask).filter(FleetTask.mission_code == target_code).first()
     elif body.station_id:
         loc = db.query(Location).filter(Location.location_code == body.station_id).first()
         if loc:
@@ -783,7 +774,7 @@ def pda_fast_arrive(
                 db.query(FleetTask)
                 .filter(
                     FleetTask.dropoff_location_id == loc.id,
-                    FleetTask.status.in_(["created", "sent", "dispatched", "in_progress"]),
+                    FleetTask.status.in_(["created", "pending_submit", "sent", "dispatched", "in_progress"]),
                 )
                 .order_by(FleetTask.id.desc())
                 .first()
@@ -793,7 +784,7 @@ def pda_fast_arrive(
             db.query(FleetTask)
             .filter(
                 FleetTask.dropoff_location_id == body.location_id,
-                FleetTask.status.in_(["created", "sent", "dispatched", "in_progress"]),
+                FleetTask.status.in_(["created", "pending_submit", "sent", "dispatched", "in_progress"]),
             )
             .order_by(FleetTask.id.desc())
             .first()
@@ -802,7 +793,7 @@ def pda_fast_arrive(
     if not task:
         task = (
             db.query(FleetTask)
-            .filter(FleetTask.status.in_(["created", "sent", "dispatched", "in_progress"]))
+            .filter(FleetTask.status.in_(["created", "pending_submit", "sent", "dispatched", "in_progress"]))
             .order_by(FleetTask.id.desc())
             .first()
         )
@@ -813,10 +804,16 @@ def pda_fast_arrive(
             detail="Không tìm thấy task AMR nào đang di chuyển tới vị trí này",
         )
 
-    dispatch_service.receive_task_status(db, {"orderId": task.task_code, "status": "8"})
+    dispatch_service.receive_task_status(db, {
+        "missionCode": task.mission_code,
+        "missionStatus": "COMPLETED",
+        "robotId": task.robot_id or "1515",
+        "containerCode": task.container_code or "",
+    })
     return {
         "success": True,
-        "task_code": task.task_code,
+        "mission_code": task.mission_code,
+        "mission_code": task.mission_code,
         "status": "completed",
         "dropoff_location_id": task.dropoff_location_id,
     }

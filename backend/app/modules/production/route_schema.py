@@ -1,10 +1,14 @@
-"""Pydantic schemas for Production Routing, Rack Registration & AMR Dispatch API."""
+"""Pydantic schemas for Production Routing, Rack/Container Registration & AMR Dispatch API."""
 
 from datetime import datetime
-from typing import Optional
+from typing import Any, Optional
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+
+# =========================================================================
+# 1. PRODUCTION ROUTE & STEP SCHEMAS
+# =========================================================================
 
 class RouteStepBase(BaseModel):
     step_number: int = Field(..., ge=1, description="Thứ tự bước trong quy trình (1, 2, 3...)")
@@ -75,6 +79,10 @@ class ProductionRouteResponse(BaseModel):
 class ProductionRouteDetailResponse(ProductionRouteResponse):
     steps: list[RouteStepResponse] = Field(default_factory=list)
 
+
+# =========================================================================
+# 2. CNC MACHINE & WORKSHOP LOCATION SCHEMAS (3NF)
+# =========================================================================
 
 class MachineSlotCreate(BaseModel):
     position_index: int = Field(..., ge=1, le=3, description="Vị trí đỗ: 1 (POS1), 2 (POS2), 3 (POS3)")
@@ -187,17 +195,21 @@ class StationSlotUpdateRequest(BaseModel):
     is_active: Optional[bool] = None
 
 
+# =========================================================================
+# 3. CONTAINER / RACK REGISTRATION & DISPATCH SCHEMAS
+# =========================================================================
+
 class RackRegistrationRequest(BaseModel):
     location_id: int = Field(..., gt=0, description="ID vị trí khu Nguyên liệu (RAW_MATERIAL)")
     item_id: int = Field(..., gt=0, description="ID Model sản phẩm (Item)")
-    cart_code: str = Field(..., min_length=1, max_length=50, description="Mã QR của Rack/Xe phôi (tái sử dụng)")
+    container_code: str = Field(..., min_length=1, max_length=50, description="Mã QR của Container/Xe phôi")
     quantity: Optional[int] = Field(None, gt=0, description="Số lượng phôi trên rack (mặc định theo chuẩn của Model)")
     lot_number: Optional[str] = Field(None, max_length=100, description="Mã lô sản xuất (tùy chọn)")
 
 
 class RackRegistrationResponse(BaseModel):
-    cart_id: int
-    cart_code: str
+    container_id: int
+    container_code: str
     item_id: int
     sku: str
     location_id: int
@@ -207,7 +219,7 @@ class RackRegistrationResponse(BaseModel):
     is_locked: bool
     fleet_inserted: bool
     resolved_queue_count: int = 0
-    dispatched_task_code: Optional[str] = None
+    dispatched_mission_code: Optional[str] = None
 
 
 class CallMaterialRequest(BaseModel):
@@ -218,21 +230,23 @@ class CallMaterialRequest(BaseModel):
         ge=0,
         description="Stage level cần gọi (nếu để trống sẽ tự suy ra từ bước công đoạn của máy CNC trong Route)",
     )
-    priority: int = Field(default=10, ge=1)
+    priority: int = Field(default=1, ge=1)
 
 
 class CompleteStageRequest(BaseModel):
-    cart_code: Optional[str] = Field(None, min_length=1, max_length=50, description="Mã QR của Rack vừa gia công xong")
-    location_id: Optional[int] = Field(None, gt=0, description="ID vị trí trạm CNC vừa gia công xong (tùy chọn nếu truyền cart_code)")
+    container_code: Optional[str] = Field(None, min_length=1, max_length=50, description="Mã QR của Container vừa gia công xong")
+    location_id: Optional[int] = Field(None, gt=0, description="ID vị trí trạm CNC vừa gia công xong (tùy chọn nếu truyền container_code)")
     notes: Optional[str] = None
 
 
-class CartActionRequest(BaseModel):
-    cart_code: str = Field(..., min_length=1, max_length=50, description="Mã QR của Rack/Xe phôi")
+class ContainerActionRequest(BaseModel):
+    container_code: str = Field(..., min_length=1, max_length=50, description="Mã QR của Container/Xe phôi")
+
+CartActionRequest = ContainerActionRequest
 
 
 # =========================================================================
-# 3. PDA CLIENT SCHEMAS (RAW MATERIAL, CNC LINE, WASHING STATION)
+# 4. PDA CLIENT SCHEMAS (RAW MATERIAL, CNC LINE, WASHING STATION)
 # =========================================================================
 
 class PdaModelItem(BaseModel):
@@ -271,7 +285,7 @@ class PdaCncStation(BaseModel):
     stage_name: str
     status: str
     calling_model: Optional[str] = None
-    calling_task_code: Optional[str] = None
+    calling_mission_code: Optional[str] = None
     current_rack: Optional[PdaCncStationRack] = None
 
 
@@ -294,5 +308,4 @@ class PdaWashingSlot(BaseModel):
 class PdaFastArriveRequest(BaseModel):
     station_id: Optional[str] = None
     location_id: Optional[int] = None
-    task_code: Optional[str] = None
-
+    mission_code: Optional[str] = None

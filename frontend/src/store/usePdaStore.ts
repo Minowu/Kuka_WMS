@@ -262,10 +262,10 @@ export const usePdaStore = create<PdaState>((set, get) => ({
         const res = await registerRawMaterialApi({
           location_id: pos.locationId,
           item_id: Number(model.id),
-          cart_code: rackId,
+          container_code: rackId,
         });
         showToast(
-          `Đã nạp rack [${res.cart_code}] tại [${res.location_code}] thành công!`,
+          `Đã nạp rack [${res.container_code}] tại [${res.location_code}] thành công!`,
           'kuka'
         );
         await fetchFloorState();
@@ -417,7 +417,7 @@ export const usePdaStore = create<PdaState>((set, get) => ({
     if (station.locationId) {
       try {
         await completeMachiningStageApi({
-          cart_code: rackCode,
+          container_code: rackCode,
           location_id: station.locationId,
         });
         if (isFinalStage) {
@@ -502,7 +502,7 @@ export const usePdaStore = create<PdaState>((set, get) => ({
 
     if (slot && slot.currentRack?.rackId) {
       try {
-        await returnEmptyCartFromWashingApi({ cart_code: slot.currentRack.rackId });
+        await returnEmptyCartFromWashingApi({ container_code: slot.currentRack.rackId });
         showToast(`Đã giải phóng ${slot.name} (${slot.currentRack.rackId}) -> AMR đang đưa xe rỗng về bãi đệm!`, 'success');
         await fetchFloorState();
         return;

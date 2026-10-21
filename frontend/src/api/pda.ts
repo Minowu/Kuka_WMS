@@ -36,7 +36,7 @@ export const getPdaCncStationsApi = async (): Promise<CncMachineStation[]> => {
     stageName: s.stage_name ?? s.stageName ?? `Công đoạn Level ${s.assigned_stage_level ?? 1}`,
     status: s.status,
     callingModel: s.calling_model ?? s.callingModel,
-    callingTaskCode: s.calling_task_code ?? s.callingTaskCode,
+    callingTaskCode: s.calling_mission_code ?? s.calling_task_code ?? s.callingTaskCode,
     currentRack: s.current_rack
       ? {
           rackId: s.current_rack.rack_id ?? s.current_rack.rackId,
@@ -71,7 +71,7 @@ export const getPdaWashingSlotsApi = async (): Promise<WashingSlot[]> => {
 export interface RegisterRawMaterialPayload {
   location_id: number;
   item_id: number;
-  cart_code: string;
+  container_code: string;
   quantity?: number;
   lot_number?: string;
 }
@@ -100,7 +100,7 @@ export const callMaterialToCncApi = async (payload: CallMaterialPayload) => {
 };
 
 export interface CompleteStagePayload {
-  cart_code?: string;
+  container_code?: string;
   location_id?: number;
   notes?: string;
 }
@@ -114,7 +114,7 @@ export const completeMachiningStageApi = async (payload: CompleteStagePayload) =
 };
 
 export interface ReturnEmptyCartPayload {
-  cart_code: string;
+  container_code: string;
 }
 
 export const returnEmptyCartFromWashingApi = async (payload: ReturnEmptyCartPayload) => {
@@ -129,13 +129,19 @@ export const returnEmptyCartFromWashingApi = async (payload: ReturnEmptyCartPayl
 export interface FastArrivePayload {
   station_id?: string;
   location_id?: number;
+  mission_code?: string;
   task_code?: string;
 }
 
 export const simulateFastArriveApi = async (payload: FastArrivePayload) => {
+  const body = {
+    ...payload,
+    mission_code: payload.mission_code || payload.task_code,
+    task_code: payload.task_code || payload.mission_code,
+  };
   const response = await axiosInstance.post(
     '/api/v1/production/pda/fast-arrive',
-    payload
+    body
   );
   return response.data;
 };
