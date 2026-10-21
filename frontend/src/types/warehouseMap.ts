@@ -181,6 +181,9 @@ export interface FullLocationDetail {
   id: number;
   location_code: string;
   location_name?: string | null;
+  location_label?: string | null;
+  location_type?: string | null;
+  container_code?: string | null;
   bin_code?: string | null;
   row: string | null;
   column: string | null;

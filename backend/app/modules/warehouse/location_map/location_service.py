@@ -241,19 +241,26 @@ def list_locations_for_map(db: Session, warehouse_id: int) -> LocationsForMapRes
                     quantity=str(assigned.get("quantity") or 0),
                 )
             )
-        status = loc.status or ("has_stock" if stocks else "empty")
+        active_container = next((s.container_code for s in (loc.stocks or []) if s.is_active and s.container_code), None)
+        status = "has_stock" if (stocks or active_container) else getattr(loc, "status", "empty")
         status = overlay_status_with_assign_cache(status, loc.id, assigned_ids)
-        if stocks or loc.id in assigned_ids:
+        if stocks or active_container or loc.id in assigned_ids:
             location_codes.append(loc.location_code)
+            if loc.location_label and loc.location_label not in location_codes:
+                location_codes.append(loc.location_label)
+            if loc.location_name and loc.location_name not in location_codes:
+                location_codes.append(loc.location_name)
         items.append(
             MapLocationItem(
                 id=loc.id,
                 location_code=loc.location_code,
                 location_name=loc.location_name,
-                bin_code=loc.bin_code,
-                row=loc.row,
-                column=loc.column,
-                level=loc.level,
+                location_label=getattr(loc, "location_label", None),
+                location_type=getattr(loc, "location_type", None),
+                container_code=active_container,
+                row=getattr(loc, "row", None),
+                column=getattr(loc, "column", None),
+                level=getattr(loc, "level", None),
                 map_x=loc.map_x,
                 map_y=loc.map_y,
                 status=status,
@@ -1135,8 +1142,9 @@ def adapt_kuka_floor_map_to_canvas(data: dict) -> MapDataResponse:
 
         func_list = n.get("functionList", [])
         has_func = bool(func_list)
-        is_rack = any(f.get("functionType") == 2 for f in func_list)
-        node_type = 1 if is_rack else 0
+        # Any functional node (workstation 1, rack 2, rest 3, charge 4, docking 10) is renderable station
+        is_rack = any(f.get("functionType") in (1, 2, 3, 4, 10) for f in func_list)
+        node_type = 1 if (is_rack or has_func) else 0
         shelf_turn = 1 if is_rack else 0
         extra = [f.get("functionType") for f in func_list if f.get("functionType") is not None]
 

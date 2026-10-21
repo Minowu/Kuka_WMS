@@ -41,8 +41,8 @@ class Settings(BaseSettings):
 
     # KUKA Fleet Manager (Real KUKA ICS Protocol)
     kuka_base_url: str = "http://192.168.1.71:10870/interfaces/api"
-    kuka_access_token: str = ""
-    kuka_org_id: str = "KUKA011021"
+    kuka_access_token: str = "1726185d4d777843ff5eb65171f11b12f9fb364ef2bd2d7c265e36e3389f18c1"
+    kuka_org_id: str = "TDS_KUKA_ORG"
     kuka_container_model_code: str = "1001"
     kuka_robot_type: str = "LIFT"
     kuka_mission_type: str = "RACK_MOVE"

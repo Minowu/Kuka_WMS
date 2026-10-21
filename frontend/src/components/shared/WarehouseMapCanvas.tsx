@@ -170,6 +170,12 @@ const WarehouseMapCanvas: React.FC<WarehouseMapCanvasProps> = ({
         if (loc.location_code) {
           map.set(loc.location_code, loc);
         }
+        if (loc.location_label) {
+          map.set(loc.location_label, loc);
+        }
+        if (loc.location_name) {
+          map.set(loc.location_name, loc);
+        }
       }
     }
     fullLocationsMapRef.current = map;
@@ -287,18 +293,39 @@ const WarehouseMapCanvas: React.FC<WarehouseMapCanvasProps> = ({
 
     for (const node of nodesRef.current) {
       const { x, y, type } = node;
+      const locDetail =
+        fullLocationsMapRef.current.get(node.content) ||
+        fullLocationsMapRef.current.get(node.name);
 
-      if (type === 0) {
+      const isStation = Boolean(
+        type === 1 ||
+          (locDetail && locDetail.location_type && locDetail.location_type !== 'UNASSIGNED')
+      );
+
+      if (!isStation) {
         // Normal waypoint: small grey circle
         ctx.beginPath();
         ctx.arc(x, y, baseSize * 0.3, 0, Math.PI * 2);
         ctx.fillStyle = NODE_NORMAL_COLOR;
         ctx.fill();
-      } else if (type === 1) {
+      } else {
         const half = baseSize * 0.7;
-        const isSelected = selectedCodesRef.current.has(String(node.content));
-        const isFull = fullCodesRef.current.has(node.content);
-        const locDetail = fullLocationsMapRef.current.get(node.content);
+        const isSelected =
+          selectedCodesRef.current.has(String(node.content)) ||
+          (locDetail && selectedCodesRef.current.has(String(locDetail.location_code)));
+
+        const hasActiveStock = Boolean(
+          (locDetail?.item_stock && locDetail.item_stock.length > 0) ||
+            locDetail?.container_code ||
+            locDetail?.status === 'has_stock'
+        );
+
+        const isFull =
+          fullCodesRef.current.has(node.content) ||
+          fullCodesRef.current.has(node.name) ||
+          (locDetail && fullCodesRef.current.has(locDetail.location_code)) ||
+          hasActiveStock;
+
         const locationStatus = locDetail?.status;
 
         if (isSelected) {
@@ -308,70 +335,49 @@ const WarehouseMapCanvas: React.FC<WarehouseMapCanvasProps> = ({
         } else if (locationStatus === 'in_transit') {
           ctx.fillStyle = SHELF_IN_TRANSIT_COLOR;
         } else if (isFull || locationStatus === 'has_stock') {
-          ctx.fillStyle = SHELF_FULL_COLOR;
+          ctx.fillStyle = SHELF_FULL_COLOR; // Green / Teal (Có hàng)
         } else {
-          ctx.fillStyle = SHELF_EMPTY_COLOR;
+          ctx.fillStyle = SHELF_EMPTY_COLOR; // Light grey (Trống)
         }
         ctx.fillRect(x - half * 1.5, y - half, half * 3, half * 2);
 
-        ctx.strokeStyle = isSelected ? SHELF_SELECTED_STROKE_COLOR : SHELF_STROKE_COLOR;
-        ctx.lineWidth = invScale * (isSelected ? 1.2 : 0.8);
+        ctx.strokeStyle = isSelected ? SHELF_SELECTED_STROKE_COLOR : (isFull ? '#059669' : SHELF_STROKE_COLOR);
+        ctx.lineWidth = invScale * (isSelected ? 1.4 : 1.0);
         ctx.strokeRect(x - half * 1.5, y - half, half * 3, half * 2);
 
-        // Draw item stock text (skip overlay when selected for clearer highlight)
+        // Draw station or stock text
+        const maxTextWidth = half * 2.8;
+        const stationTitle = locDetail?.location_name || node.name || node.content;
+
         if (isFull && !isSelected) {
-          const locDetailForText = fullLocationsMapRef.current.get(node.content);
-          if (locDetailForText && locDetailForText.item_stock && locDetailForText.item_stock.length > 0) {
-            ctx.save();
-            ctx.fillStyle = '#ffffff';
-            ctx.textAlign = 'center';
-            ctx.textBaseline = 'middle';
-            const maxTextWidth = half * 2.8; 
-            // Display only 1 item to make it prominent, show "+N more" if others exist
-            const stock = locDetailForText.item_stock[0];
-            const hasMore = locDetailForText.item_stock.length > 1;
+          ctx.save();
+          ctx.fillStyle = '#ffffff';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.shadowColor = 'rgba(0, 0, 0, 0.45)';
+          ctx.shadowBlur = half * 0.1;
 
-            // Uniform large font size for both lines
-            const fontSize = half * 0.32;
-            const moreFontSize = half * 0.22;
-            
-            const lineHeight = fontSize * 1.5;
-            const moreLineHeight = moreFontSize * 1.5;
-            
-            // Total height is 2 main lines + optional "more" line
-            const totalHeight = lineHeight * 2 + (hasMore ? moreLineHeight : 0);
-            
-            let currentY = y - totalHeight / 2 + lineHeight / 2;
-            
-            // Add subtle shadow for premium look
-            ctx.shadowColor = 'rgba(0, 0, 0, 0.35)';
-            ctx.shadowBlur = half * 0.08;
-            ctx.shadowOffsetY = half * 0.04;
-            
-            ctx.font = `500 ${fontSize}px sans-serif`;
-            
-            // 1. Draw SKU & Lot with a nice bullet separator
-            const textTop = `${stock.sku}  •  ${stock.lot_number || 'N/A'}`;
-            ctx.fillStyle = 'rgba(255, 255, 255, 0.95)';
-            ctx.fillText(textTop, x, currentY, maxTextWidth);
-            
-            // 2. Draw Qty
-            currentY += lineHeight;
-            const qtyText = `Qty: ${formatQuantity(stock.quantity, "0")}`;
-            
-            ctx.fillText(qtyText, x, currentY, maxTextWidth);
-            
-            // 3. Draw More
-            if (hasMore) {
-               currentY += (lineHeight / 2 + moreLineHeight / 2);
-               ctx.font = `italic 400 ${moreFontSize}px sans-serif`;
-               ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
-               ctx.shadowColor = 'transparent';
-               ctx.fillText(`+${locDetailForText.item_stock.length - 1} more...`, x, currentY, maxTextWidth);
-            }
+          const fontSize = half * 0.30;
+          ctx.font = `600 ${fontSize}px sans-serif`;
 
-            ctx.restore();
-          }
+          const stock = locDetail?.item_stock?.[0];
+          const containerLabel = locDetail?.container_code ? `📦 ${locDetail.container_code}` : (stock?.sku || 'CÓ HÀNG');
+          const qtyText = stock ? `Qty: ${formatQuantity(stock.quantity, "0")}` : (stationTitle || 'Đang có phôi');
+
+          ctx.fillText(containerLabel, x, y - fontSize * 0.6, maxTextWidth);
+          ctx.font = `400 ${fontSize * 0.85}px sans-serif`;
+          ctx.fillText(qtyText, x, y + fontSize * 0.8, maxTextWidth);
+          ctx.restore();
+        } else if (!isSelected) {
+          // Empty station: draw subtle station label so user knows which station this is
+          ctx.save();
+          ctx.fillStyle = '#64748b';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          const fontSize = half * 0.32;
+          ctx.font = `500 ${fontSize}px sans-serif`;
+          ctx.fillText(stationTitle, x, y, maxTextWidth);
+          ctx.restore();
         }
       }
     }

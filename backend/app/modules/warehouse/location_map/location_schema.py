@@ -216,6 +216,9 @@ class MapLocationItem(BaseModel):
     id: int
     location_code: str
     location_name: Optional[str] = None
+    location_label: Optional[str] = None
+    location_type: Optional[str] = None
+    container_code: Optional[str] = None
     row: Optional[str] = None
     column: Optional[str] = None
     level: Optional[str] = None
