@@ -72,7 +72,9 @@ class DispatchService:
             logger.info("ICS offline/dev mode — simulated POST %s payload=%s", endpoint_path, payload)
             return {"code": 1000, "simulated": True, "payload": payload}
 
-        url = f"{settings.ics_base_url.rstrip('/')}:7000{endpoint_path}"
+        base = settings.ics_base_url.rstrip("/")
+        endpoint = endpoint_path if endpoint_path.startswith("/") else f"/{endpoint_path}"
+        url = f"{base}{endpoint}"
         try:
             with httpx.Client(timeout=httpx.Timeout(5.0)) as client:
                 response = client.post(url, json=payload)
@@ -120,7 +122,7 @@ class DispatchService:
                 "shelfNumber": cart_code or "",
             }
         ]
-        task.process_code = task.process_code or "move_material"
+        task.process_code = task.process_code or getattr(settings, "cnc_move_material_code", "move_material")
         task.system_code = task.system_code or "MES"
         task.task_order_detail = json.dumps(detail, ensure_ascii=False)
         payload = {
@@ -148,7 +150,7 @@ class DispatchService:
                 "shelfNumber": cart_code or "",
             }
         ]
-        task.process_code = task.process_code or "move_to_wash"
+        task.process_code = task.process_code or getattr(settings, "cnc_move_wash_code", "move_to_wash")
         task.system_code = task.system_code or "MES"
         task.task_order_detail = json.dumps(detail, ensure_ascii=False)
         payload = {
@@ -176,7 +178,7 @@ class DispatchService:
                 "shelfNumber": cart_code or "",
             }
         ]
-        task.process_code = task.process_code or "move_empty_rack"
+        task.process_code = task.process_code or getattr(settings, "cnc_move_empty_code", "move_empty_rack")
         task.system_code = task.system_code or "MES"
         task.task_order_detail = json.dumps(detail, ensure_ascii=False)
         payload = {
@@ -1043,6 +1045,7 @@ class DispatchService:
         2. Maps KUKA status code (`6`: in_progress, `7`: failed, `3`: cancelled, `8`/`9`: completed).
         3. Updates `FleetTask`, `TransportRequest`, and `ItemStock` directly without any legacy Inbound/Outbound tables.
         """
+        logger.info("=== [KUKA FLEET WEBHOOK RECEIVED] === payload=%s", json.dumps(payload, ensure_ascii=False))
         order_id = payload.get("orderId")
         if not order_id:
             raise ValueError("orderId is required")

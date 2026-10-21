@@ -40,9 +40,10 @@ class Settings(BaseSettings):
     refresh_token_expire_minutes: int = 10080
 
     # ICS / KUKA Fleet Manager
-    ics_base_url: str = "Your RCS Server path"
-    inbound_process_code: str = "to_storage"
-    outbound_process_code: str = "out_storage"
+    ics_base_url: str = "http://192.168.1.71:10870/interfaces/api"
+    cnc_move_material_code: str = "move_material"
+    cnc_move_wash_code: str = "move_to_wash"
+    cnc_move_empty_code: str = "move_empty_rack"
 
     # Warehouses using manual (full-form) print templates — JSON array or comma list, e.g. [2]
     manual_warehouse_ids: list[int] = []
