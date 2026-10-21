@@ -4,7 +4,6 @@ import { PlusOutlined, SearchOutlined, MinusCircleOutlined, EditOutlined } from 
 import { getApiErrorMessage } from '@/utils/apiErrorMessage';
 import { useWarehouses } from '@/hooks/useWarehouse';
 import { useGetItems, useCreateItem, useUpdateItem } from '@/hooks/useItem';
-import { useUnits } from '@/hooks/useUnit';
 import { useDebounce } from '@/hooks/useDebounce';
 import Hero from '@/components/shared/Hero';
 import { Item, CreateItemInput, UpdateItemInput } from '@/types/item';
@@ -33,7 +32,6 @@ export default function ItemSettingPage() {
   const items = getItemsResponse?.items || [];
   const createMutation = useCreateItem();
   const updateMutation = useUpdateItem();
-  const { data: units = [], isLoading: isUnitsLoading } = useUnits();
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingItem, setEditingItem] = useState<Item | null>(null);
@@ -59,7 +57,6 @@ export default function ItemSettingPage() {
       : [];
     form.setFieldsValue({
       ...record,
-      base_unit: units.find((u) => u.name === record.base_unit)?.id,
       detailEntries,
     });
     setIsModalOpen(true);
@@ -90,7 +87,6 @@ export default function ItemSettingPage() {
       sku: values.sku.trim(),
       name: values.name.trim(),
       description: values.description?.trim() ?? '',
-      base_unit: Number(values.base_unit),
       standard_quantity_per_cart: Number(values.standard_quantity_per_cart ?? 120),
       warehouse_id: activeWarehouseId,
       details,
@@ -100,7 +96,6 @@ export default function ItemSettingPage() {
       const updateData: UpdateItemInput = {
         name: values.name.trim(),
         description: values.description?.trim() ?? '',
-        base_unit: Number(values.base_unit),
         standard_quantity_per_cart: Number(values.standard_quantity_per_cart ?? 120),
         details,
       };
@@ -146,11 +141,6 @@ export default function ItemSettingPage() {
       title: 'Mô tả',
       dataIndex: 'description',
       key: 'description',
-    },
-    {
-      title: 'Đơn vị',
-      dataIndex: 'base_unit',
-      key: 'base_unit',
     },
     {
       title: 'Tiêu chuẩn / xe',
@@ -271,23 +261,6 @@ export default function ItemSettingPage() {
 
           <Form.Item name="name" label="Tên Item" rules={[{ required: true, message: 'Vui lòng nhập tên!' }]}>
             <Input placeholder="Ví dụ: Thùng Carton" />
-          </Form.Item>
-
-          <Form.Item
-            name="base_unit"
-            label="Đơn vị"
-            rules={[{ required: true, message: 'Vui lòng chọn đơn vị!' }]}
-          >
-            <Select
-              showSearch
-              placeholder="Chọn đơn vị"
-              optionFilterProp="label"
-              loading={isUnitsLoading}
-              options={units.map((unit) => ({
-                value: unit.id,
-                label: unit.name,
-              }))}
-            />
           </Form.Item>
 
           <Form.Item
