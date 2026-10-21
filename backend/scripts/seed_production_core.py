@@ -155,7 +155,7 @@ def seed_production_core() -> None:
             items_by_sku[sku] = item
 
         # 5. Production Routes & Normalized 3NF RouteStepMachine
-        route_a = db.query(ProductionRoute).filter(ProductionRoute.item_id == items_by_sku["MODEL-A"].id, ProductionRoute.is_active.is_(True)).first()
+        route_a = db.query(ProductionRoute).filter(ProductionRoute.route_code == "RT-MODEL-A-V1").first()
         if not route_a:
             route_a = ProductionRoute(
                 route_code="RT-MODEL-A-V1",
@@ -240,7 +240,7 @@ def seed_production_core() -> None:
             Location.is_active.is_(True)
         ).all()
 
-        for idx, (cart_code, sku, loc_code, qty, created_ts) in enumerate(cart_defs):
+        for idx, (container_code, sku, loc_code, qty, created_ts) in enumerate(cart_defs):
             target_loc = locations_by_code.get(loc_code)
             if not target_loc or target_loc.id in occupied_loc_ids:
                 avail = [l for l in raw_candidates if l.id not in occupied_loc_ids]
@@ -250,16 +250,16 @@ def seed_production_core() -> None:
 
             occupied_loc_ids.add(target_loc.id)
 
-            cart = db.query(ItemStock).filter(ItemStock.cart_code == cart_code).first()
+            cart = db.query(ItemStock).filter(ItemStock.container_code == container_code).first()
             if not cart:
                 cart = ItemStock(
-                    cart_code=cart_code,
+                    container_code=container_code,
                     item_id=items_by_sku[sku].id,
                     location_id=target_loc.id,
                     quantity=qty,
                     current_stage_level=0,
                     is_locked=False,
-                    locked_by_task_id=None,
+                    locked_by_mission_code=None,
                     destination_location_id=None,
                     status="available",
                     created_at=created_ts,
@@ -271,7 +271,7 @@ def seed_production_core() -> None:
                 cart.quantity = qty
                 cart.current_stage_level = 0
                 cart.is_locked = False
-                cart.locked_by_task_id = None
+                cart.locked_by_mission_code = None
                 cart.destination_location_id = None
                 cart.status = "available"
                 cart.is_active = True

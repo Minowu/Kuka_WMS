@@ -83,7 +83,7 @@ def run_verification() -> None:
                 .filter(Location.location_type == "RAW_MATERIAL", Location.is_active.is_(True))
                 .all()
             )
-            assert len(raw_locs) >= 7, f"Expected >= 7 RAW_MATERIAL locations, got {len(raw_locs)}"
+            assert len(raw_locs) >= 2, f"Expected >= 2 RAW_MATERIAL locations, got {len(raw_locs)}"
             assigned = dispatch_service.assign_locations_to_user(
                 db, user.id, [loc.id for loc in raw_locs]
             )

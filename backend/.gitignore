@@ -242,3 +242,4 @@ scripts/*
 !scripts/seed_production_core.py
 !scripts/test_dispatch_engine.py
 tests/
+!scripts/test_kuka_fleet_replay.py
