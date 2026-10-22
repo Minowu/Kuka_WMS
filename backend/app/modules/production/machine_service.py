@@ -1,4 +1,3 @@
-from typing import Optional
 from sqlalchemy.orm import Session
 
 from app.modules.production.production_models import Machine, RouteStepMachine
@@ -9,9 +8,13 @@ from app.modules.production.machine_schema import (
     MachineSlotCreate,
     MachineSlotInfo,
 )
-from app.modules.warehouse.item_stock.item_stock_model import ItemStock
+from app.modules.production.location_guard import (
+    ensure_location_has_no_stock,
+    find_map_node,
+    release_location,
+    resolve_warehouse_id,
+)
 from app.modules.warehouse.location_map.location_model import Location
-from app.modules.warehouse.warehouse_zone.warehouse_model import Warehouse
 
 
 def list_available_machines(db: Session) -> list[AvailableMachineResponse]:
@@ -98,12 +101,7 @@ def get_machine(db: Session, machine_id: int) -> AvailableMachineResponse:
 def create_machine(db: Session, payload: MachineCreateRequest) -> AvailableMachineResponse:
     code = payload.machine_code.strip()
 
-    wh_id = payload.warehouse_id
-    if not wh_id:
-        wh = db.query(Warehouse).first()
-        if not wh:
-            raise ValueError("Hệ thống chưa khởi tạo dữ liệu Nhà kho (Warehouse). Vui lòng tạo kho trước.")
-        wh_id = wh.id
+    wh_id = resolve_warehouse_id(db, payload.warehouse_id)
 
     existing = db.query(Machine).filter(Machine.machine_code == code).first()
     if existing:
@@ -131,26 +129,13 @@ def create_machine(db: Session, payload: MachineCreateRequest) -> AvailableMachi
         node_lbl = (s_def.node_label or "").strip()
         loc_name = s_def.location_name or f"{m.machine_name} - Vị trí {pos}"
         
-        loc = None
-        if node_lbl:
-            loc = db.query(Location).filter(
-                Location.warehouse_id == wh_id,
-                (Location.location_label == node_lbl)
-                | (Location.location_name == node_lbl)
-                | (Location.location_code == node_lbl),
-            ).first()
-        if not loc and s_def.location_code:
-            loc = db.query(Location).filter(
-                Location.warehouse_id == wh_id,
-                Location.location_code == s_def.location_code.strip(),
-            ).first()
-            
+        loc = find_map_node(db, wh_id, node_lbl, s_def.location_code)
         if not loc:
             raise ValueError(f"Không tìm thấy node bản đồ '{node_lbl or s_def.location_code}' cho Vị trí {pos} của máy {code}")
-            
+
         if loc.location_type != "UNASSIGNED" and (loc.location_type != "CNC_SLOT" or loc.machine_id != m.id):
             raise ValueError(f"Node {loc.location_label or loc.location_code} đã được gán cho {loc.location_type} ({loc.location_name}). Không thể gán cho máy CNC!")
-            
+        ensure_location_has_no_stock(db, loc, f"gán Vị trí {pos} cho máy {code}")
         loc.machine_id = m.id
         loc.position_index = pos
         loc.location_type = "CNC_SLOT"
@@ -203,49 +188,56 @@ def update_machine(db: Session, machine_id: int, payload: MachineUpdateRequest) 
         m.machine_name = payload.machine_name.strip()
 
     if payload.slots is not None:
+        if not payload.slots:
+            raise ValueError("Máy CNC phải có ít nhất 1 vị trí đỗ.")
+
+        # Chụp trạng thái slot hiện tại TỪ DB (không dùng m.locations vì sẽ bị thay đổi trong vòng lặp)
+        old_locs = db.query(Location).filter(Location.machine_id == m.id).all()
+        old_by_pos = {loc.position_index: loc for loc in old_locs}
+
         positions_requested = {s.position_index: s for s in payload.slots}
+        kept_ids: set[int] = set()
+        used_target_ids: set[int] = set()
+
         for pos, s_def in positions_requested.items():
             if pos < 1 or pos > 3:
                 raise ValueError(f"Vị trí đỗ position_index phải từ 1 đến 3 (nhận được: {pos})")
             node_lbl = (s_def.node_label or "").strip()
             loc_name = s_def.location_name or f"{m.machine_name} - Vị trí {pos}"
-            
-            loc = None
-            if node_lbl:
-                loc = db.query(Location).filter(
-                    Location.warehouse_id == m.warehouse_id,
-                    (Location.location_label == node_lbl) | (Location.location_name == node_lbl),
-                ).first()
-            if not loc and s_def.location_code:
-                loc = db.query(Location).filter(
-                    Location.warehouse_id == m.warehouse_id,
-                    Location.location_code == s_def.location_code.strip(),
-                ).first()
-                
-            if not loc:
-                loc = db.query(Location).filter(Location.machine_id == m.id, Location.position_index == pos).first()
-                
-            if loc:
-                if loc.location_type != "UNASSIGNED" and (loc.location_type != "CNC_SLOT" or loc.machine_id != m.id):
-                    raise ValueError(f"Node {loc.location_label or loc.location_code} đã được gán cho {loc.location_type} ({loc.location_name}).")
-                loc.machine_id = m.id
-                loc.position_index = pos
-                loc.location_type = "CNC_SLOT"
-                loc.location_name = loc_name
-                if node_lbl and not loc.location_label:
-                    loc.location_label = node_lbl
-                if s_def.map_x is not None:
-                    loc.map_x = s_def.map_x
-                if s_def.map_y is not None:
-                    loc.map_y = s_def.map_y
-                loc.is_active = True
 
-        for loc in (m.locations or []):
-            if loc.position_index not in positions_requested:
-                loc.machine_id = None
-                loc.position_index = None
-                loc.location_type = "UNASSIGNED"
-                loc.location_name = loc.location_label or str(loc.id)
+            target = find_map_node(db, m.warehouse_id, node_lbl, s_def.location_code)
+            if not target:
+                # Không gửi node -> giữ nguyên node cũ của POS này
+                target = old_by_pos.get(pos)
+            if not target:
+                raise ValueError(f"Không tìm thấy node bản đồ '{node_lbl or s_def.location_code}' cho Vị trí {pos}.")
+            if target.id in used_target_ids:
+                raise ValueError(f"Node {target.location_label or target.location_code} bị chọn cho nhiều vị trí đỗ cùng lúc.")
+            used_target_ids.add(target.id)
+
+            is_own_slot = target.location_type == "CNC_SLOT" and target.machine_id == m.id
+            if target.location_type != "UNASSIGNED" and not is_own_slot:
+                raise ValueError(f"Node {target.location_label or target.location_code} đã được gán cho {target.location_type} ({target.location_name}).")
+
+            old = old_by_pos.get(pos)
+            if old is not None and old.id != target.id:
+                # Đổi node của POS: node cũ không được còn phôi, node mới không được có hàng
+                ensure_location_has_no_stock(db, old, f"đổi node của Vị trí {pos}")
+            if not is_own_slot:
+                ensure_location_has_no_stock(db, target, f"gán node mới cho Vị trí {pos}")
+
+            target.machine_id = m.id
+            target.position_index = pos
+            target.location_type = "CNC_SLOT"
+            target.location_name = loc_name
+            target.is_active = True
+            kept_ids.add(target.id)
+
+        # Giải phóng mọi node cũ không còn dùng (slot bị bớt HOẶC node cũ của POS vừa đổi)
+        for loc in old_locs:
+            if loc.id not in kept_ids:
+                ensure_location_has_no_stock(db, loc, f"bớt Vị trí {loc.position_index} của máy {m.machine_code}")
+                release_location(loc)
 
     db.commit()
     db.refresh(m)
@@ -287,25 +279,11 @@ def delete_machine(db: Session, machine_id: int) -> bool:
     if not m:
         raise ValueError(f"Không tìm thấy máy CNC với ID {machine_id}")
 
-    slot_ids = [loc.id for loc in (m.locations or [])]
-    if slot_ids:
-        active_stocks = (
-            db.query(ItemStock)
-            .filter(
-                ItemStock.location_id.in_(slot_ids),
-                ItemStock.is_active.is_(True),
-            )
-            .count()
-        )
-        if active_stocks > 0:
-            raise ValueError(f"Không thể xóa máy CNC {m.machine_code} đang có phôi hoặc xe đỗ tại vị trí.")
+    for loc in (m.locations or []):
+        ensure_location_has_no_stock(db, loc, f"xóa máy CNC {m.machine_code}")
 
     for loc in (m.locations or []):
-        loc.machine_id = None
-        loc.position_index = None
-        loc.location_type = "UNASSIGNED"
-        loc.location_name = loc.location_label or str(loc.id)
-        loc.is_active = True
+        release_location(loc)
 
     # Clean up any route step associations before deleting machine
     db.query(RouteStepMachine).filter(RouteStepMachine.machine_id == m.id).delete(synchronize_session=False)
