@@ -30,21 +30,24 @@ import Hero from '@/components/shared/Hero';
 import {
   useStationCatalog,
   useAvailableNodes,
-  useCreateMachine,
-  useUpdateMachine,
-  useDeleteMachine,
   useCreateStationLocation,
   useUpdateStationLocation,
   useDeleteStationLocation,
+} from '@/hooks/useStations';
+import {
+  useCreateMachine,
+  useUpdateMachine,
+  useDeleteMachine,
 } from '@/hooks/useMachines';
 import type {
   StationCatalogItem,
   MachineCatalogGroup,
   AvailableMapNode,
-  SlotConfigInput,
-} from '@/types/machine';
+} from '@/types/station';
+import type { SlotConfigInput } from '@/types/machine';
 
 interface SlotFormItem {
+  id?: number;
   position_index: number;
   location_code: string;
   node_label?: string;
@@ -69,7 +72,7 @@ export default function StationSettingPage() {
   const updateLocationMutation = useUpdateStationLocation();
   const deleteLocationMutation = useDeleteStationLocation();
 
-  // Active Tab: 'raw_material' | 'cnc' | 'washing_buffer'
+  // Active Tab: 'raw_material' | 'cnc' | 'washing' | 'empty_buffer'
   const [activeTab, setActiveTab] = useState<string>('raw_material');
 
   // Modal States
@@ -89,14 +92,15 @@ export default function StationSettingPage() {
   ]);
   const [editSlots, setEditSlots] = useState<SlotFormItem[]>([]);
 
-  // 3. Washing & Buffer
+  // 3. Washing
   const [isWashModalOpen, setIsWashModalOpen] = useState(false);
   const [editingWash, setEditingWash] = useState<StationCatalogItem | null>(null);
   const [washForm] = Form.useForm();
 
-  const [isBufferModalOpen, setIsBufferModalOpen] = useState(false);
-  const [editingBuffer, setEditingBuffer] = useState<StationCatalogItem | null>(null);
-  const [bufferForm] = Form.useForm();
+  // 4. Empty Buffer
+  const [isEmptyBufferModalOpen, setIsEmptyBufferModalOpen] = useState(false);
+  const [editingEmptyBuffer, setEditingEmptyBuffer] = useState<StationCatalogItem | null>(null);
+  const [emptyBufferForm] = Form.useForm();
 
   // Realtime in-memory derivation: Quét toàn bộ các vị trí đã gán hiện có trên toàn xưởng từ catalog
   const assignedNodesMap = useMemo(() => {
@@ -141,8 +145,8 @@ export default function StationSettingPage() {
     });
 
     // 4. Empty Buffers
-    const buffers = catalog?.empty_buffers || catalog?.buffer_slots || [];
-    buffers.forEach((b) => {
+    const emptyBuffers = catalog?.empty_buffers || [];
+    emptyBuffers.forEach((b) => {
       const label = b.node_label || b.location_label;
       if (label) {
         map.set(String(label), {
@@ -199,7 +203,7 @@ export default function StationSettingPage() {
         return {
           value: n.node_label,
           disabled: isDisabled,
-          label: `Node ${n.node_label} (${(n.map_x / 1000).toFixed(1)}m, ${(n.map_y / 1000).toFixed(1)}m) ${badge}`,
+          label: `${n.node_number} ${badge}`,
           node: n,
         };
       });
@@ -245,7 +249,7 @@ export default function StationSettingPage() {
             node_label: values.node_label,
             map_x: selectedNode ? selectedNode.map_x : editingRaw.map_x ?? undefined,
             map_y: selectedNode ? selectedNode.map_y : editingRaw.map_y ?? undefined,
-            },
+          },
         });
         message.success(`Cập nhật ô cấp phôi '${values.location_name}' thành công!`);
       } else {
@@ -334,9 +338,8 @@ export default function StationSettingPage() {
     const reindexed = filtered.map((s, idx) => ({
       ...s,
       position_index: idx + 1,
-      location_code: `${(cncForm.getFieldValue('machine_code') || 'CNC-XX').toUpperCase().trim()}-POS${
-        idx + 1
-      }`,
+      location_code: `${(cncForm.getFieldValue('machine_code') || 'CNC-XX').toUpperCase().trim()}-POS${idx + 1
+        }`,
     }));
     setCreateSlots(reindexed);
   };
@@ -347,11 +350,11 @@ export default function StationSettingPage() {
       prev.map((s, idx) =>
         idx === slotIndex
           ? {
-              ...s,
-              node_label: nodeLabel,
-              map_x: selectedNode?.map_x,
-              map_y: selectedNode?.map_y,
-            }
+            ...s,
+            node_label: nodeLabel,
+            map_x: selectedNode?.map_x,
+            map_y: selectedNode?.map_y,
+          }
           : s
       )
     );
@@ -396,6 +399,7 @@ export default function StationSettingPage() {
     });
 
     const currentSlots: SlotFormItem[] = (m.slots || []).map((s, idx) => ({
+      id: s.id,
       position_index: s.position_index || idx + 1,
       location_code: s.location_code,
       node_label: s.node_label || undefined,
@@ -449,11 +453,11 @@ export default function StationSettingPage() {
       prev.map((s, idx) =>
         idx === slotIndex
           ? {
-              ...s,
-              node_label: nodeLabel,
-              map_x: selectedNode?.map_x,
-              map_y: selectedNode?.map_y,
-            }
+            ...s,
+            node_label: nodeLabel,
+            map_x: selectedNode?.map_x,
+            map_y: selectedNode?.map_y,
+          }
           : s
       )
     );
@@ -464,6 +468,7 @@ export default function StationSettingPage() {
     try {
       const values = await cncEditForm.validateFields();
       const slotsPayload: SlotConfigInput[] = editSlots.map((s) => ({
+        id: s.id,
         position_index: s.position_index,
         location_code: s.location_code,
         node_label: s.node_label,
@@ -539,7 +544,7 @@ export default function StationSettingPage() {
             node_label: values.node_label,
             map_x: selectedNode ? selectedNode.map_x : editingWash.map_x ?? undefined,
             map_y: selectedNode ? selectedNode.map_y : editingWash.map_y ?? undefined,
-            },
+          },
         });
         message.success(`Cập nhật slot tẩy rửa '${editingWash.location_code}' thành công!`);
       } else {
@@ -575,47 +580,47 @@ export default function StationSettingPage() {
     }
   };
 
-  // Buffer Handlers
-  const bufferList = catalog?.empty_buffers || catalog?.buffer_slots || [];
+  // Empty Buffer Handlers
+  const emptyBufferList = catalog?.empty_buffers || [];
 
-  const handleOpenCreateBuffer = () => {
-    setEditingBuffer(null);
-    bufferForm.resetFields();
-    const count = bufferList.length + 1;
-    bufferForm.setFieldsValue({
+  const handleOpenCreateEmptyBuffer = () => {
+    setEditingEmptyBuffer(null);
+    emptyBufferForm.resetFields();
+    const count = emptyBufferList.length + 1;
+    emptyBufferForm.setFieldsValue({
       location_name: `EMPTY-0${count}`,
     });
-    setIsBufferModalOpen(true);
+    setIsEmptyBufferModalOpen(true);
   };
 
-  const handleOpenEditBuffer = (item: StationCatalogItem) => {
-    setEditingBuffer(item);
-    bufferForm.resetFields();
-    bufferForm.setFieldsValue({
+  const handleOpenEditEmptyBuffer = (item: StationCatalogItem) => {
+    setEditingEmptyBuffer(item);
+    emptyBufferForm.resetFields();
+    emptyBufferForm.setFieldsValue({
       location_code: item.location_code,
       location_name: item.location_name || '',
       node_label: item.node_label || undefined,
       is_active: item.is_active,
     });
-    setIsBufferModalOpen(true);
+    setIsEmptyBufferModalOpen(true);
   };
 
-  const handleSubmitBuffer = async () => {
+  const handleSubmitEmptyBuffer = async () => {
     try {
-      const values = await bufferForm.validateFields();
+      const values = await emptyBufferForm.validateFields();
       const selectedNode = availableNodes.find((n) => n.node_label === values.node_label);
 
-      if (editingBuffer) {
+      if (editingEmptyBuffer) {
         await updateLocationMutation.mutateAsync({
-          id: editingBuffer.id,
+          id: editingEmptyBuffer.id,
           data: {
             location_name: values.location_name,
             node_label: values.node_label,
-            map_x: selectedNode ? selectedNode.map_x : editingBuffer.map_x ?? undefined,
-            map_y: selectedNode ? selectedNode.map_y : editingBuffer.map_y ?? undefined,
-            },
+            map_x: selectedNode ? selectedNode.map_x : editingEmptyBuffer.map_x ?? undefined,
+            map_y: selectedNode ? selectedNode.map_y : editingEmptyBuffer.map_y ?? undefined,
+          },
         });
-        message.success(`Cập nhật bãi đệm '${editingBuffer.location_code}' thành công!`);
+        message.success(`Cập nhật bãi đệm '${editingEmptyBuffer.location_code}' thành công!`);
       } else {
         await createLocationMutation.mutateAsync({
           location_code: selectedNode?.node_label || values.node_label,
@@ -624,11 +629,11 @@ export default function StationSettingPage() {
           node_label: values.node_label,
           map_x: selectedNode ? selectedNode.map_x : undefined,
           map_y: selectedNode ? selectedNode.map_y : undefined,
-          position_index: bufferList.length + 1,
+          position_index: emptyBufferList.length + 1,
         });
         message.success(`Gán bãi đệm '${values.location_name}' (Node ${values.node_label}) thành công!`);
       }
-      setIsBufferModalOpen(false);
+      setIsEmptyBufferModalOpen(false);
       handleRefreshAll();
     } catch (err: any) {
       if (err?.response?.data?.detail) {
@@ -639,7 +644,7 @@ export default function StationSettingPage() {
     }
   };
 
-  const handleDeleteBuffer = async (id: number, code: string) => {
+  const handleDeleteEmptyBuffer = async (id: number, code: string) => {
     try {
       await deleteLocationMutation.mutateAsync(id);
       message.success(`Đã xóa bãi đệm '${code}'`);
@@ -920,8 +925,8 @@ export default function StationSettingPage() {
                                 pos === 1
                                   ? 'border-blue-200 bg-blue-50/30'
                                   : pos === 2
-                                  ? 'border-purple-200 bg-purple-50/30'
-                                  : 'border-amber-200 bg-amber-50/30';
+                                    ? 'border-purple-200 bg-purple-50/30'
+                                    : 'border-amber-200 bg-amber-50/30';
 
                               return (
                                 <div key={slot.id || sIdx} className={`border rounded-lg p-2.5 ${bgClass}`}>
@@ -962,261 +967,260 @@ export default function StationSettingPage() {
             ),
           },
           {
-            key: 'washing_buffer',
+            key: 'washing',
             label: (
               <span className="flex items-center gap-2">
                 <ExperimentOutlined className="text-emerald-600 text-base" />
-                <span>Khu Tẩy Rửa & Bãi Đệm ({catalog?.washing_slots?.length || 0} / {bufferList.length})</span>
+                <span>Khu Tẩy Rửa ({catalog?.washing_slots?.length || 0})</span>
               </span>
             ),
             children: (
-              <div className="space-y-6">
+              <div className="space-y-4">
                 <div className="bg-emerald-50/60 border border-emerald-200/80 rounded-xl p-4 flex items-center justify-between">
                   <div className="flex items-center gap-3">
                     <InfoCircleOutlined className="text-emerald-600 text-xl shrink-0" />
                     <div className="text-xs text-emerald-900 leading-relaxed">
-                      <span className="font-bold">Khu Tẩy Rửa & Bãi Đệm Xe Rỗng:</span> Trạm tẩy rửa tiếp nhận xe phôi sau khi hoàn thành công đoạn CNC cuối cùng. Bãi đệm xe rỗng dùng để lưu trữ các rack rỗng sau khi dỡ phôi, sẵn sàng đưa về khu cấp phôi tiếp theo.
+                      <span className="font-bold">Khu Tẩy Rửa:</span> Trạm tẩy rửa tiếp nhận xe phôi sau khi hoàn thành công đoạn CNC cuối cùng. Xe sau khi làm sạch sẽ được dỡ phôi và đưa sang bãi đệm xe rỗng.
                     </div>
                   </div>
+                  <Button
+                    onClick={handleOpenCreateWash}
+                    icon={<PlusOutlined />}
+                    className="!bg-emerald-600 hover:!bg-emerald-700 !border-none !text-white !h-9 !px-4 !rounded-lg font-semibold shrink-0"
+                  >
+                    Thêm Slot Tẩy Rửa
+                  </Button>
                 </div>
 
-                {/* Section A: Khu Tẩy Rửa */}
-                <div className="space-y-3">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <ExperimentOutlined className="text-emerald-600 text-lg" />
-                      <span className="font-bold text-slate-800 text-base">
-                        1. Trạm Tẩy Rửa (Washing Slots — {catalog?.washing_slots?.length || 0} Slots)
-                      </span>
-                    </div>
-                    <Button
-                      onClick={handleOpenCreateWash}
-                      icon={<PlusOutlined />}
-                      className="!bg-emerald-600 hover:!bg-emerald-700 !border-none !text-white !h-8 !px-3 !rounded-lg !text-xs font-semibold"
-                    >
-                      Thêm Slot Tẩy Rửa
-                    </Button>
-                  </div>
-
-                  <Card className="rounded-xl border border-slate-200/80 shadow-sm overflow-hidden">
-                    <Table
-                      dataSource={catalog?.washing_slots || []}
-                      rowKey="id"
-                      pagination={false}
-                      className="[&_.ant-table-thead_th]:!bg-slate-50 [&_.ant-table-thead_th]:!text-slate-600 [&_.ant-table-thead_th]:!font-semibold"
-                      columns={[
-                        {
-                          title: 'Mã Slot',
-                          dataIndex: 'location_code',
-                          key: 'location_code',
-                          width: 140,
-                          render: (text: string) => (
-                            <span className="font-mono font-bold text-emerald-900 bg-emerald-50 px-2.5 py-1 rounded-md border border-emerald-200">
-                              {text}
+                <Card className="rounded-xl border border-slate-200/80 shadow-sm overflow-hidden">
+                  <Table
+                    loading={isLoading}
+                    dataSource={catalog?.washing_slots || []}
+                    rowKey="id"
+                    pagination={false}
+                    className="[&_.ant-table-thead_th]:!bg-slate-50 [&_.ant-table-thead_th]:!text-slate-600 [&_.ant-table-thead_th]:!font-semibold"
+                    columns={[
+                      {
+                        title: 'Mã Slot',
+                        dataIndex: 'location_code',
+                        key: 'location_code',
+                        width: 140,
+                        render: (text: string) => (
+                          <span className="font-mono font-bold text-emerald-900 bg-emerald-50 px-2.5 py-1 rounded-md border border-emerald-200">
+                            {text}
+                          </span>
+                        ),
+                      },
+                      {
+                        title: 'Tên Slot',
+                        dataIndex: 'location_name',
+                        key: 'location_name',
+                        render: (text: string) => <span className="font-medium text-slate-800">{text || '—'}</span>,
+                      },
+                      {
+                        title: 'Node Map Liên Kết',
+                        key: 'node_label',
+                        width: 180,
+                        render: (_: any, record: StationCatalogItem) => (
+                          <Tag color="cyan" className="font-mono !font-bold">
+                            Node {record.node_label || '--'}
+                          </Tag>
+                        ),
+                      },
+                      {
+                        title: 'Tọa Độ Thực Tế (Map X, Y)',
+                        key: 'coords',
+                        width: 220,
+                        render: (_: any, record: StationCatalogItem) => (
+                          <div className="text-xs font-mono text-slate-600 flex items-center gap-1">
+                            <EnvironmentOutlined className="text-slate-400" />
+                            <span>
+                              {record.map_x != null && record.map_y != null
+                                ? `(${record.map_x}, ${record.map_y}) mm`
+                                : 'Chưa gắn tọa độ'}
                             </span>
-                          ),
-                        },
-                        {
-                          title: 'Tên Slot',
-                          dataIndex: 'location_name',
-                          key: 'location_name',
-                          render: (text: string) => <span className="font-medium text-slate-800">{text || '—'}</span>,
-                        },
-                        {
-                          title: 'Node Map Liên Kết',
-                          key: 'node_label',
-                          width: 180,
-                          render: (_: any, record: StationCatalogItem) => (
-                            <Tag color="cyan" className="font-mono !font-bold">
-                              Node {record.node_label || '--'}
+                          </div>
+                        ),
+                      },
+                      {
+                        title: 'Trạng Thái',
+                        dataIndex: 'is_active',
+                        key: 'is_active',
+                        width: 130,
+                        render: (active: boolean) =>
+                          active ? (
+                            <Tag color="success" icon={<CheckCircleOutlined />}>
+                              Hoạt động
+                            </Tag>
+                          ) : (
+                            <Tag color="default" icon={<StopOutlined />}>
+                              Tạm dừng
                             </Tag>
                           ),
-                        },
-                        {
-                          title: 'Tọa Độ Thực Tế (Map X, Y)',
-                          key: 'coords',
-                          width: 220,
-                          render: (_: any, record: StationCatalogItem) => (
-                            <div className="text-xs font-mono text-slate-600 flex items-center gap-1">
-                              <EnvironmentOutlined className="text-slate-400" />
-                              <span>
-                                {record.map_x != null && record.map_y != null
-                                  ? `(${record.map_x}, ${record.map_y}) mm`
-                                  : 'Chưa gắn tọa độ'}
-                              </span>
-                            </div>
-                          ),
-                        },
-                        {
-                          title: 'Trạng Thái',
-                          dataIndex: 'is_active',
-                          key: 'is_active',
-                          width: 130,
-                          render: (active: boolean) =>
-                            active ? (
-                              <Tag color="success" icon={<CheckCircleOutlined />}>
-                                Hoạt động
-                              </Tag>
-                            ) : (
-                              <Tag color="default" icon={<StopOutlined />}>
-                                Tạm dừng
-                              </Tag>
-                            ),
-                        },
-                        {
-                          title: 'Thao Tác',
-                          key: 'actions',
-                          width: 130,
-                          align: 'center',
-                          render: (_: any, record: StationCatalogItem) => (
-                            <Space size="small">
+                      },
+                      {
+                        title: 'Thao Tác',
+                        key: 'actions',
+                        width: 130,
+                        align: 'center',
+                        render: (_: any, record: StationCatalogItem) => (
+                          <Space size="small">
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              icon={<EditOutlined />}
+                              onClick={() => handleOpenEditWash(record)}
+                              className="!h-8 !px-2 text-slate-600 hover:text-emerald-600"
+                            />
+                            <Popconfirm
+                              title="Xóa slot tẩy rửa này?"
+                              okText="Xóa"
+                              cancelText="Hủy"
+                              okButtonProps={{ danger: true }}
+                              onConfirm={() => handleDeleteWash(record.id, record.location_code)}
+                            >
                               <Button
                                 variant="outline"
                                 size="sm"
-                                icon={<EditOutlined />}
-                                onClick={() => handleOpenEditWash(record)}
-                                className="!h-8 !px-2 text-slate-600 hover:text-emerald-600"
+                                icon={<DeleteOutlined className="text-red-500" />}
+                                className="!h-8 !px-2 hover:border-red-400"
                               />
-                              <Popconfirm
-                                title="Xóa slot tẩy rửa này?"
-                                okText="Xóa"
-                                cancelText="Hủy"
-                                okButtonProps={{ danger: true }}
-                                onConfirm={() => handleDeleteWash(record.id, record.location_code)}
-                              >
-                                <Button
-                                  variant="outline"
-                                  size="sm"
-                                  icon={<DeleteOutlined className="text-red-500" />}
-                                  className="!h-8 !px-2 hover:border-red-400"
-                                />
-                              </Popconfirm>
-                            </Space>
-                          ),
-                        },
-                      ]}
-                    />
-                  </Card>
+                            </Popconfirm>
+                          </Space>
+                        ),
+                      },
+                    ]}
+                  />
+                </Card>
+              </div>
+            ),
+          },
+          {
+            key: 'empty_buffer',
+            label: (
+              <span className="flex items-center gap-2">
+                <CarOutlined className="text-blue-600 text-base" />
+                <span>Bãi Đệm Xe Rỗng ({emptyBufferList.length})</span>
+              </span>
+            ),
+            children: (
+              <div className="space-y-4">
+                <div className="bg-blue-50/60 border border-blue-200/80 rounded-xl p-4 flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <InfoCircleOutlined className="text-blue-600 text-xl shrink-0" />
+                    <div className="text-xs text-blue-900 leading-relaxed">
+                      <span className="font-bold">Bãi Đệm Xe Rỗng (Empty Cart Buffer):</span> Vị trí tập kết các xe Rack rỗng (đã dỡ sạch chi tiết). Khi khu Cấp Phôi hoặc các trạm phát sinh nhu cầu, AMR sẽ đến bãi đệm này lấy xe rỗng đi phục vụ.
+                    </div>
+                  </div>
+                  <Button
+                    onClick={handleOpenCreateEmptyBuffer}
+                    icon={<PlusOutlined />}
+                    className="!bg-blue-600 hover:!bg-blue-700 !border-none !text-white !h-9 !px-4 !rounded-lg font-semibold shrink-0"
+                  >
+                    Thêm Bãi Đệm
+                  </Button>
                 </div>
 
-                {/* Section B: Bãi Đệm Xe Rỗng */}
-                <div className="space-y-3 pt-2">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <CarOutlined className="text-blue-600 text-lg" />
-                      <span className="font-bold text-slate-800 text-base">
-                        2. Bãi Đệm Xe Rỗng (Empty Cart Buffers — {bufferList.length} Slots)
-                      </span>
-                    </div>
-                    <Button
-                      onClick={handleOpenCreateBuffer}
-                      icon={<PlusOutlined />}
-                      className="!bg-blue-600 hover:!bg-blue-700 !border-none !text-white !h-8 !px-3 !rounded-lg !text-xs font-semibold"
-                    >
-                      Thêm Bãi Đệm
-                    </Button>
-                  </div>
-
-                  <Card className="rounded-xl border border-slate-200/80 shadow-sm overflow-hidden">
-                    <Table
-                      dataSource={bufferList}
-                      rowKey="id"
-                      pagination={false}
-                      className="[&_.ant-table-thead_th]:!bg-slate-50 [&_.ant-table-thead_th]:!text-slate-600 [&_.ant-table-thead_th]:!font-semibold"
-                      columns={[
-                        {
-                          title: 'Mã Bãi Đệm',
-                          dataIndex: 'location_code',
-                          key: 'location_code',
-                          width: 140,
-                          render: (text: string) => (
-                            <span className="font-mono font-bold text-blue-900 bg-blue-50 px-2.5 py-1 rounded-md border border-blue-200">
-                              {text}
+                <Card className="rounded-xl border border-slate-200/80 shadow-sm overflow-hidden">
+                  <Table
+                    loading={isLoading}
+                    dataSource={emptyBufferList}
+                    rowKey="id"
+                    pagination={false}
+                    className="[&_.ant-table-thead_th]:!bg-slate-50 [&_.ant-table-thead_th]:!text-slate-600 [&_.ant-table-thead_th]:!font-semibold"
+                    columns={[
+                      {
+                        title: 'Mã Bãi Đệm',
+                        dataIndex: 'location_code',
+                        key: 'location_code',
+                        width: 140,
+                        render: (text: string) => (
+                          <span className="font-mono font-bold text-blue-900 bg-blue-50 px-2.5 py-1 rounded-md border border-blue-200">
+                            {text}
+                          </span>
+                        ),
+                      },
+                      {
+                        title: 'Tên Bãi Đệm',
+                        dataIndex: 'location_name',
+                        key: 'location_name',
+                        render: (text: string) => <span className="font-medium text-slate-800">{text || '—'}</span>,
+                      },
+                      {
+                        title: 'Node Map Liên Kết',
+                        key: 'node_label',
+                        width: 180,
+                        render: (_: any, record: StationCatalogItem) => (
+                          <Tag color="cyan" className="font-mono !font-bold">
+                            Node {record.node_label || '--'}
+                          </Tag>
+                        ),
+                      },
+                      {
+                        title: 'Tọa Độ Thực Tế (Map X, Y)',
+                        key: 'coords',
+                        width: 220,
+                        render: (_: any, record: StationCatalogItem) => (
+                          <div className="text-xs font-mono text-slate-600 flex items-center gap-1">
+                            <EnvironmentOutlined className="text-slate-400" />
+                            <span>
+                              {record.map_x != null && record.map_y != null
+                                ? `(${record.map_x}, ${record.map_y}) mm`
+                                : 'Chưa gắn tọa độ'}
                             </span>
-                          ),
-                        },
-                        {
-                          title: 'Tên Bãi Đệm',
-                          dataIndex: 'location_name',
-                          key: 'location_name',
-                          render: (text: string) => <span className="font-medium text-slate-800">{text || '—'}</span>,
-                        },
-                        {
-                          title: 'Node Map Liên Kết',
-                          key: 'node_label',
-                          width: 180,
-                          render: (_: any, record: StationCatalogItem) => (
-                            <Tag color="cyan" className="font-mono !font-bold">
-                              Node {record.node_label || '--'}
+                          </div>
+                        ),
+                      },
+                      {
+                        title: 'Trạng Thái',
+                        dataIndex: 'is_active',
+                        key: 'is_active',
+                        width: 130,
+                        render: (active: boolean) =>
+                          active ? (
+                            <Tag color="success" icon={<CheckCircleOutlined />}>
+                              Hoạt động
+                            </Tag>
+                          ) : (
+                            <Tag color="default" icon={<StopOutlined />}>
+                              Tạm dừng
                             </Tag>
                           ),
-                        },
-                        {
-                          title: 'Tọa Độ Thực Tế (Map X, Y)',
-                          key: 'coords',
-                          width: 220,
-                          render: (_: any, record: StationCatalogItem) => (
-                            <div className="text-xs font-mono text-slate-600 flex items-center gap-1">
-                              <EnvironmentOutlined className="text-slate-400" />
-                              <span>
-                                {record.map_x != null && record.map_y != null
-                                  ? `(${record.map_x}, ${record.map_y}) mm`
-                                  : 'Chưa gắn tọa độ'}
-                              </span>
-                            </div>
-                          ),
-                        },
-                        {
-                          title: 'Trạng Thái',
-                          dataIndex: 'is_active',
-                          key: 'is_active',
-                          width: 130,
-                          render: (active: boolean) =>
-                            active ? (
-                              <Tag color="success" icon={<CheckCircleOutlined />}>
-                                Hoạt động
-                              </Tag>
-                            ) : (
-                              <Tag color="default" icon={<StopOutlined />}>
-                                Tạm dừng
-                              </Tag>
-                            ),
-                        },
-                        {
-                          title: 'Thao Tác',
-                          key: 'actions',
-                          width: 130,
-                          align: 'center',
-                          render: (_: any, record: StationCatalogItem) => (
-                            <Space size="small">
+                      },
+                      {
+                        title: 'Thao Tác',
+                        key: 'actions',
+                        width: 130,
+                        align: 'center',
+                        render: (_: any, record: StationCatalogItem) => (
+                          <Space size="small">
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              icon={<EditOutlined />}
+                              onClick={() => handleOpenEditEmptyBuffer(record)}
+                              className="!h-8 !px-2 text-slate-600 hover:text-blue-600"
+                            />
+                            <Popconfirm
+                              title="Xóa bãi đệm xe rỗng này?"
+                              okText="Xóa"
+                              cancelText="Hủy"
+                              okButtonProps={{ danger: true }}
+                              onConfirm={() => handleDeleteEmptyBuffer(record.id, record.location_code)}
+                            >
                               <Button
                                 variant="outline"
                                 size="sm"
-                                icon={<EditOutlined />}
-                                onClick={() => handleOpenEditBuffer(record)}
-                                className="!h-8 !px-2 text-slate-600 hover:text-blue-600"
+                                icon={<DeleteOutlined className="text-red-500" />}
+                                className="!h-8 !px-2 hover:border-red-400"
                               />
-                              <Popconfirm
-                                title="Xóa bãi đệm xe rỗng này?"
-                                okText="Xóa"
-                                cancelText="Hủy"
-                                okButtonProps={{ danger: true }}
-                                onConfirm={() => handleDeleteBuffer(record.id, record.location_code)}
-                              >
-                                <Button
-                                  variant="outline"
-                                  size="sm"
-                                  icon={<DeleteOutlined className="text-red-500" />}
-                                  className="!h-8 !px-2 hover:border-red-400"
-                                />
-                              </Popconfirm>
-                            </Space>
-                          ),
-                        },
-                      ]}
-                    />
-                  </Card>
-                </div>
+                            </Popconfirm>
+                          </Space>
+                        ),
+                      },
+                    ]}
+                  />
+                </Card>
               </div>
             ),
           },
@@ -1522,20 +1526,20 @@ export default function StationSettingPage() {
       </Modal>
 
       {/* ========================================================================= */}
-      {/* MODAL 3B: THÊM / SỬA BÃI ĐỆM XE RỖNG */}
+      {/* MODAL 4: THÊM / SỬA BÃI ĐỆM XE RỖNG */}
       {/* ========================================================================= */}
       <Modal
-        title={editingBuffer ? `Chỉnh sửa '${editingBuffer.location_code}'` : 'Thêm Bãi Đệm Xe Rỗng'}
-        open={isBufferModalOpen}
-        onCancel={() => setIsBufferModalOpen(false)}
-        onOk={handleSubmitBuffer}
+        title={editingEmptyBuffer ? `Chỉnh sửa '${editingEmptyBuffer.location_code}'` : 'Thêm Bãi Đệm Xe Rỗng'}
+        open={isEmptyBufferModalOpen}
+        onCancel={() => setIsEmptyBufferModalOpen(false)}
+        onOk={handleSubmitEmptyBuffer}
         confirmLoading={createLocationMutation.isPending || updateLocationMutation.isPending}
-        okText={editingBuffer ? 'Lưu thay đổi' : 'Thêm bãi đệm'}
+        okText={editingEmptyBuffer ? 'Lưu thay đổi' : 'Thêm bãi đệm'}
         cancelText="Hủy"
         centered
         width={480}
       >
-        <Form form={bufferForm} layout="vertical" className="mt-4">
+        <Form form={emptyBufferForm} layout="vertical" className="mt-4">
           <Form.Item
             name="node_label"
             label="Chọn Node Bản Đồ KUKA"
@@ -1544,8 +1548,8 @@ export default function StationSettingPage() {
             <Select
               showSearch
               placeholder="Chọn điểm đỗ Node trên Map (chưa gán)"
-              options={getNodeOptions({ currentLocationId: editingBuffer?.id })}
-              disabled={!!editingBuffer}
+              options={getNodeOptions({ currentLocationId: editingEmptyBuffer?.id })}
+              disabled={!!editingEmptyBuffer}
               filterOption={(input, option) =>
                 (option?.label as string || '').toLowerCase().includes(input.toLowerCase())
               }
@@ -1559,8 +1563,6 @@ export default function StationSettingPage() {
           >
             <Input placeholder="Ví dụ: EMPTY-01, Bãi Đệm 1..." />
           </Form.Item>
-
-
         </Form>
       </Modal>
     </div>
