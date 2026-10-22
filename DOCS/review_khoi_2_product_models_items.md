@@ -10,14 +10,14 @@ Tài liệu này đặc tả chi tiết toàn bộ các file tham gia, cấu tr�
 ```mermaid
 sequenceDiagram
     autonumber
-    actor User as Quản Đốc / Kỹ Thuật Viên
-    participant UI as ItemPage.tsx / ItemDetailPage.tsx
-    participant Hook as useItem.ts
-    participant API as api/item.ts
-    participant Router as item_api.py
-    participant Schema as item_schema.py
-    participant Service as item_service.py
-    participant DB as PostgreSQL (item, item_stock, production_route)
+    actor User as "Quản Đốc / Kỹ Thuật Viên"
+    participant UI as "ItemPage / ItemDetailPage"
+    participant Hook as "useItem.ts"
+    participant API as "api/item.ts"
+    participant Router as "item_api.py"
+    participant Schema as "item_schema.py"
+    participant Service as "item_service.py"
+    participant DB as "PostgreSQL (item, item_stock)"
 
     Note over User,DB: LUỒNG 1: TẢI DANH SÁCH MODEL SẢN PHẨM (READ & SEARCH)
     User->>UI: Truy cập menu "Model Sản phẩm" (/items)
@@ -28,7 +28,8 @@ sequenceDiagram
     Service->>DB: Query bảng item (lọc warehouse_id, tìm kiếm SKU/Name, subquery tính quantity)
     DB-->>Service: Danh sách Entity Item + Tồn kho WIP tính toán
     Service->>Schema: Validate & serialize ItemListResponse
-    Schema-->>Router-->>API-->>Hook-->>UI: Dữ liệu Model (SKU, Tên, Tiêu chuẩn/xe, Tồn kho)
+    Schema-->>Router: JSON hợp chuẩn
+    Router-->>UI: Trả về danh sách Model (SKU, Tên, Tiêu chuẩn/xe, Tồn kho)
     UI-->>User: Hiển thị bảng danh mục Model chi tiết
 
     Note over User,DB: LUỒNG 2: XEM CHI TIẾT MODEL & XE GÁ PHÔI HIỆN TẠI (VIEW DETAIL & WIP)
@@ -40,7 +41,8 @@ sequenceDiagram
     Service->>DB: Query Item + JOIN item_stock (các xe gá, vị trí đỗ, stage level)
     DB-->>Service: Dữ liệu Model và danh sách xe gá WIP
     Service->>Schema: Đóng gói ItemDetailResponse
-    Schema-->>Router-->>API-->>Hook-->>UI: Trả về chi tiết
+    Schema-->>Router: JSON hợp chuẩn
+    Router-->>UI: Trả về thông số Model & danh sách xe gá CART-xx
     UI-->>User: Hiển thị thông số Model + Danh sách xe gá CART-xx đang lưu thông trên xưởng
 
     Note over User,DB: LUỒNG 3: TẠO MỚI / CHỈNH SỬA MODEL (CREATE / UPDATE)
@@ -51,7 +53,8 @@ sequenceDiagram
     Router->>Service: item_service.create_item / update_item
     Service->>DB: Kiểm tra trùng SKU, INSERT/UPDATE bảng item
     DB-->>Service: Entity đã lưu thành công (Commit)
-    Service-->>Router-->>API-->>Hook-->>UI: HTTP 201 Created / HTTP 200 OK
+    Service-->>Router: Entity Model
+    Router-->>UI: HTTP 201 Created / HTTP 200 OK
     Hook->>Hook: invalidateQueries(['items', 'item'])
     UI-->>User: Thông báo thành công, tự động refresh bảng
 
@@ -72,7 +75,8 @@ sequenceDiagram
     else Thỏa mãn điều kiện an toàn
         Service->>DB: DELETE FROM item WHERE id = itemId
         DB-->>Service: Xóa thành công (Commit)
-        Service-->>Router-->>API-->>Hook-->>UI: HTTP 204 No Content
+        Service-->>Router: Xóa thành công
+        Router-->>UI: HTTP 204 No Content
         UI-->>User: Thông báo "Đã xóa Model sản phẩm thành công!"
     end
 ```

@@ -4,8 +4,6 @@ from typing import Any, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from app.modules.warehouse.lot_number_utils import apply_lot_display_fields
-
 
 def _price_from_item_details(details: dict | None) -> Decimal:
     details = details or {}
@@ -124,31 +122,14 @@ class ItemStockInDetail(BaseModel):
     id: int
     item_id: int
     location_id: Optional[int] = None
-    unit_id: Optional[int] = None
     container_code: Optional[str] = None
     current_stage_level: int = 0
     location_code: Optional[str] = None
     location_name: Optional[str] = None
-    lot_number_from: Optional[str] = None
-    lot_number_to: Optional[str] = None
-    lot_number: Optional[str] = None
-    expiry_date: Optional[str] = None
     quantity: Decimal
     status: str
 
     model_config = ConfigDict(from_attributes=True)
-
-    @model_validator(mode="after")
-    def set_lot_display(self) -> "ItemStockInDetail":
-        disp_from, disp_to, disp_lot = apply_lot_display_fields(
-            lot_number_from=self.lot_number_from,
-            lot_number_to=self.lot_number_to,
-            lot_number=self.lot_number,
-        )
-        self.lot_number_from = disp_from
-        self.lot_number_to = disp_to
-        self.lot_number = disp_lot
-        return self
 
 
 class ItemDetailResponse(BaseModel):

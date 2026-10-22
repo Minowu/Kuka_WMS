@@ -55,11 +55,13 @@ export type UpdateItemInput = Partial<
 export interface ItemStock {
   id: number
   item_id: number
-  location_id: number
+  location_id?: number | null
+  container_code?: string | null
+  current_stage_level?: number
   location_code?: string | null
   location_name?: string | null
-  lot_number: string | null
-  expiry_date: string | null
+  lot_number?: string | null
+  expiry_date?: string | null
   quantity: number
   status: string
   created_at?: string | null

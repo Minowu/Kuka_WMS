@@ -41,7 +41,6 @@ from app.modules.warehouse.item_stock.item_stock_model import (
     positive_stock_quantity_criterion,
 )
 from app.modules.warehouse.location_map.location_model import Location
-from app.modules.warehouse.lot_number_utils import format_lot_number_display
 from app.modules.warehouse.warehouse_zone.warehouse_model import Warehouse
 
 logger = get_logger("main")
@@ -207,14 +206,13 @@ def get_item_detail(db: Session, item_id: int) -> ItemDetailResponse:
         db.query(
             ItemStock,
             Location.location_code,
-            Location.bin_code,
+            Location.location_name,
         )
         .outerjoin(Location, Location.id == ItemStock.location_id)
         .filter(
             ItemStock.item_id == item.id,
             ItemStock.is_active.is_(True),
             countable_stock_level_criterion(),
-            positive_stock_quantity_criterion(),
         )
         .order_by(ItemStock.id)
         .all()
@@ -225,22 +223,15 @@ def get_item_detail(db: Session, item_id: int) -> ItemDetailResponse:
     for stock, location_code, location_name in stocks:
         if stock.status == "available":
             available_quantity += Decimal(str(stock.quantity or 0))
-        lot_from = getattr(stock, "lot_number_from", None)
-        lot_to = getattr(stock, "lot_number_to", None)
         stock_items.append(
             ItemStockInDetail(
                 id=stock.id,
                 item_id=stock.item_id,
                 location_id=stock.location_id,
-                unit_id=getattr(stock, "unit_id", None),
                 container_code=stock.container_code,
                 current_stage_level=stock.current_stage_level or 0,
                 location_code=location_code,
                 location_name=location_name,
-                lot_number_from=lot_from,
-                lot_number_to=lot_to,
-                lot_number=format_lot_number_display(lot_from, lot_to),
-                expiry_date=getattr(stock, "expiry_date", None),
                 quantity=Decimal(str(stock.quantity or 0)),
                 status=stock.status,
             )

@@ -20,6 +20,7 @@ import {
   message,
   Select,
 } from "@/components/ui";
+import { Tag } from "antd";
 import {
   useDeactivateItem,
   useItemById,
@@ -131,14 +132,40 @@ const TABLE_CLASS =
 
 const locationColumns: ColumnsType<ItemStock> = [
   {
-    title: "Tên vị trí",
+    title: "Mã Xe Gá (WIP)",
+    dataIndex: "container_code",
+    key: "container_code",
+    render: (code: string | null | undefined) =>
+      code ? (
+        <Tag color="cyan" className="font-semibold text-sm">
+          {code}
+        </Tag>
+      ) : (
+        <span className="text-gray-400">—</span>
+      ),
+  },
+  {
+    title: "Vị Trí Đỗ Hiện Tại",
     dataIndex: "location_name",
     key: "location_name",
     render: (name: string | null | undefined, row) =>
-      name || (row.location_id ? `#${row.location_id}` : "—"),
+      name || row.location_code || (row.location_id ? `#${row.location_id}` : "—"),
   },
   {
-    title: "Số lượng",
+    title: "Công Đoạn Hiện Tại",
+    dataIndex: "current_stage_level",
+    key: "current_stage_level",
+    align: "center",
+    render: (level: number | undefined) => {
+      const stage = Number(level ?? 0);
+      if (stage === 0) {
+        return <Tag color="default">CĐ 0: Phôi Thô</Tag>;
+      }
+      return <Tag color="blue">{`CĐ ${stage}: Hoàn Thành B1-${stage}`}</Tag>;
+    },
+  },
+  {
+    title: "Số Lượng Phôi",
     dataIndex: "quantity",
     key: "quantity",
     align: "center",
@@ -149,27 +176,19 @@ const locationColumns: ColumnsType<ItemStock> = [
     ),
   },
   {
-    title: "Số Lot",
-    dataIndex: "lot_number",
-    key: "lot_number",
-    align: "center",
-    render: (lotNumber: string | null) => (
-      <span className="font-semibold text-brand-dark">{lotNumber || "—"}</span>
-    ),
-  },
-  {
-    title: "Hạn sử dụng",
-    dataIndex: "expiry_date",
-    key: "expiry_date",
-    align: "center",
-    render: (date: string | null) => (
-      <span className="font-semibold text-brand-dark">{formatDate(date)}</span>
-    ),
-  },
-  {
-    title: "Trạng thái",
+    title: "Trạng Thái",
     dataIndex: "status",
     key: "status",
+    align: "center",
+    render: (status: string) => {
+      if (status === "available") {
+        return <Tag color="success">Sẵn sàng</Tag>;
+      }
+      if (status === "locked" || status === "in_transit") {
+        return <Tag color="warning">Đang điều phối AGV</Tag>;
+      }
+      return <Tag>{status}</Tag>;
+    },
   },
 ];
 
