@@ -329,7 +329,7 @@ export default function ItemPage() {
   const kpiCards = [
     {
       label: "Tổng Model Sản Phẩm",
-      value: formatKpi(analyze?.total_items || items.length),
+      value: formatKpi(analyze?.total_items || itemList.length),
       color: "#3aa6a6",
     },
   ];
@@ -379,9 +379,8 @@ export default function ItemPage() {
     try {
       const values = await editForm.validateFields();
       await updateMutation.mutateAsync({
-        itemId: editingItem.id,
-        input: {
-          sku: values.sku.trim(),
+        id: editingItem.id,
+        data: {
           name: values.name.trim(),
           description: values.description?.trim() || null,
           standard_quantity_per_cart: Number(values.standard_quantity_per_cart ?? 120),
