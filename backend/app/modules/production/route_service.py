@@ -660,7 +660,6 @@ def get_station_catalog(db: Session) -> StationCatalogResponse:
         washing_slots=wash_slots,
         empty_buffers=buf_slots,
         machines=machine_groups,
-        buffer_slots=buf_slots,
     )
 
 

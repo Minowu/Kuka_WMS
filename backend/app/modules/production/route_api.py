@@ -48,8 +48,10 @@ from app.modules.warehouse.location_map.location_model import Location
 logger = get_logger("main")
 router = APIRouter()
 
+from app.modules.production.station_api import station_router as stations_router
+from app.modules.production.machine_api import machine_router as machines_router
+
 routes_router = APIRouter(tags=["Production - Routes"])
-stations_router = APIRouter(tags=["Production - Stations & Machines"])
 dispatch_router = APIRouter(tags=["Production - Dispatch Engine"])
 pda_router = APIRouter(tags=["Production - PDA Operator"])
 user_locations_router = APIRouter(tags=["Production - User Locations"])
@@ -76,168 +78,10 @@ def list_production_routes(
     return route_service.list_routes(db, item_id=item_id, is_active=is_active)
 
 
-@stations_router.get(
-    "/production/machines",
-    response_model=list[AvailableMachineResponse],
-)
-def list_available_machines(
-    db: DbSession,
-    _user: CurrentUser,
-):
-    """Lấy danh sách các máy CNC hiện có từ bảng Machine (3NF) để cấu hình bước quy trình."""
-    return route_service.list_available_machines(db)
-
-
-@stations_router.post(
-    "/production/machines",
-    response_model=AvailableMachineResponse,
-    status_code=status.HTTP_201_CREATED,
-)
-def create_machine(
-    payload: MachineCreateRequest,
-    db: DbSession,
-    _user: CurrentUser,
-):
-    """Tạo máy CNC mới trên xưởng và tự động khởi tạo 2 vị trí POS1 & POS2."""
-    try:
-        return route_service.create_machine(db, payload)
-    except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
-
-
-@stations_router.get(
-    "/production/machines/{machine_id}",
-    response_model=AvailableMachineResponse,
-)
-def get_machine(
-    machine_id: int,
-    db: DbSession,
-    _user: CurrentUser,
-):
-    """Lấy chi tiết thông tin và danh sách slot đỗ của máy CNC."""
-    try:
-        return route_service.get_machine(db, machine_id)
-    except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e)) from e
-
-
-@stations_router.put(
-    "/production/machines/{machine_id}",
-    response_model=AvailableMachineResponse,
-)
-def update_machine(
-    machine_id: int,
-    payload: MachineUpdateRequest,
-    db: DbSession,
-    _user: CurrentUser,
-):
-    """Cập nhật thông tin máy CNC và danh sách 1..3 slot đỗ."""
-    try:
-        return route_service.update_machine(db, machine_id, payload)
-    except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
-
-
-@stations_router.delete(
-    "/production/machines/{machine_id}",
-    status_code=status.HTTP_204_NO_CONTENT,
-)
-def delete_machine(
-    machine_id: int,
-    db: DbSession,
-    _user: CurrentUser,
-):
-    """Xóa / vô hiệu hóa máy CNC."""
-    try:
-        route_service.delete_machine(db, machine_id)
-        return None
-    except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
-
-
 # =========================================================================
-# 1B. MAP AVAILABLE NODES & SHOP STATIONS CATALOG
+# (Stations & Machines endpoints have been modularized into station_api.py)
 # =========================================================================
 
-@stations_router.get(
-    "/production/map/available-nodes",
-    response_model=list[MapAvailableNodeResponse],
-)
-def get_available_map_nodes(
-    db: DbSession,
-    _user: CurrentUser,
-    only_rack: bool = Query(True, description="Chỉ lấy 16 Node kệ/điểm đỗ vận hành (functionType == 2)"),
-    only_functional: bool = Query(True, description="Chỉ lấy các Node có functionType"),
-):
-    """Lấy danh sách các Node điểm đỗ/kệ từ bản đồ chuẩn xưởng kèm trạng thái gán."""
-    try:
-        return route_service.get_available_map_nodes(
-            db, only_functional=only_functional, rack_only=only_rack
-        )
-    except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
-
-
-@stations_router.get(
-    "/production/stations/catalog",
-    response_model=StationCatalogResponse,
-)
-def get_station_catalog(
-    db: DbSession,
-    _user: CurrentUser,
-):
-    """Lấy danh mục hợp nhất toàn bộ trạm xưởng (Nguyên liệu, Tẩy rửa, Bãi đệm, Máy CNC 1..3 slots)."""
-    return route_service.get_station_catalog(db)
-
-
-# Generic Station Locations (Raw Material, Washing, Buffer)
-@stations_router.post(
-    "/production/stations/locations",
-    response_model=StationCatalogItem,
-    status_code=status.HTTP_201_CREATED,
-)
-def create_station_location(
-    payload: StationSlotCreateRequest,
-    db: DbSession,
-    _user: CurrentUser,
-):
-    loc_type = payload.location_type or "RAW_MATERIAL"
-    try:
-        return route_service.create_station_slot(db, loc_type, payload)
-    except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
-
-
-@stations_router.put(
-    "/production/stations/locations/{location_id}",
-    response_model=StationCatalogItem,
-)
-def update_station_location(
-    location_id: int,
-    payload: StationSlotUpdateRequest,
-    db: DbSession,
-    _user: CurrentUser,
-):
-    try:
-        return route_service.update_station_slot(db, location_id, payload)
-    except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
-
-
-@stations_router.delete(
-    "/production/stations/locations/{location_id}",
-    status_code=status.HTTP_204_NO_CONTENT,
-)
-def delete_station_location(
-    location_id: int,
-    db: DbSession,
-    _user: CurrentUser,
-):
-    try:
-        route_service.delete_station_slot(db, location_id)
-        return None
-    except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
 
 
 @routes_router.get(
@@ -873,6 +717,7 @@ def update_user_locations(
 # Include all modular sub-routers into root production router
 router.include_router(routes_router)
 router.include_router(stations_router)
+router.include_router(machines_router)
 router.include_router(dispatch_router)
 router.include_router(pda_router)
 router.include_router(user_locations_router)

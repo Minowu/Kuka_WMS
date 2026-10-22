@@ -81,118 +81,25 @@ class ProductionRouteDetailResponse(ProductionRouteResponse):
 
 
 # =========================================================================
-# 2. CNC MACHINE & WORKSHOP LOCATION SCHEMAS (3NF)
+# 2. CNC MACHINE & WORKSHOP LOCATION SCHEMAS (TÁCH THÀNH MODULE RIÊNG)
 # =========================================================================
 
-class MachineSlotCreate(BaseModel):
-    position_index: int = Field(..., ge=1, le=3, description="Vị trí đỗ: 1 (POS1), 2 (POS2), 3 (POS3)")
-    location_code: Optional[str] = Field(None, max_length=50)
-    location_name: Optional[str] = Field(None, max_length=100)
-    node_label: Optional[str] = Field(None, max_length=50)
-    map_x: Optional[int] = None
-    map_y: Optional[int] = None
+from app.modules.production.machine_schema import (
+    MachineSlotCreate,
+    MachineSlotInfo,
+    AvailableMachineResponse,
+    MachineCreateRequest,
+    MachineUpdateRequest,
+)
+from app.modules.production.station_schema import (
+    StationCatalogItem,
+    MachineCatalogGroup,
+    StationCatalogResponse,
+    MapAvailableNodeResponse,
+    StationSlotCreateRequest,
+    StationSlotUpdateRequest,
+)
 
-
-class MachineSlotInfo(BaseModel):
-    id: int
-    location_code: str
-    location_name: Optional[str] = None
-    position_index: Optional[int] = None
-    node_label: Optional[str] = None
-    map_x: Optional[int] = None
-    map_y: Optional[int] = None
-    is_active: bool = True
-
-    model_config = ConfigDict(from_attributes=True)
-
-
-class AvailableMachineResponse(BaseModel):
-    id: Optional[int] = None
-    machine_code: str
-    machine_name: Optional[str] = None
-    warehouse_id: Optional[int] = None
-    is_active: bool = True
-    location_count: int = 0
-    positions: list[str] = Field(default_factory=list)
-    slots: list[MachineSlotInfo] = Field(default_factory=list)
-
-    model_config = ConfigDict(from_attributes=True)
-
-
-class MachineCreateRequest(BaseModel):
-    machine_code: str = Field(..., min_length=1, max_length=50, description="Mã máy CNC (VD: CNC-05)")
-    machine_name: Optional[str] = Field(None, max_length=100, description="Tên hiển thị máy (VD: Máy Phay CNC 05)")
-    warehouse_id: Optional[int] = None
-    slots: Optional[list[MachineSlotCreate]] = Field(None, description="Danh sách 1..3 slot đỗ phôi (POS1, POS2, POS3)")
-
-
-class MachineUpdateRequest(BaseModel):
-    machine_name: Optional[str] = Field(None, max_length=100)
-    is_active: Optional[bool] = None
-    slots: Optional[list[MachineSlotCreate]] = Field(None, description="Cấu hình danh sách 1..3 slot đỗ phôi (POS1, POS2, POS3)")
-
-
-class StationCatalogItem(BaseModel):
-    id: int
-    location_code: str
-    location_label: Optional[str] = None
-    location_name: Optional[str] = None
-    location_type: Optional[str] = None
-    machine_code: Optional[str] = None
-    position_index: Optional[int] = None
-    node_label: Optional[str] = None
-    map_x: Optional[int] = None
-    map_y: Optional[int] = None
-    is_active: bool = True
-
-    model_config = ConfigDict(from_attributes=True)
-
-
-class MachineCatalogGroup(BaseModel):
-    id: int
-    machine_code: str
-    machine_name: Optional[str] = None
-    is_active: bool = True
-    slots: list[StationCatalogItem] = Field(default_factory=list)
-
-    model_config = ConfigDict(from_attributes=True)
-
-
-class StationCatalogResponse(BaseModel):
-    raw_materials: list[StationCatalogItem] = Field(default_factory=list)
-    washing_slots: list[StationCatalogItem] = Field(default_factory=list)
-    empty_buffers: list[StationCatalogItem] = Field(default_factory=list)
-    machines: list[MachineCatalogGroup] = Field(default_factory=list)
-    buffer_slots: list[StationCatalogItem] = Field(default_factory=list)
-
-
-class MapAvailableNodeResponse(BaseModel):
-    node_number: int
-    node_label: str
-    map_x: int
-    map_y: int
-    function_type: Optional[int] = None
-    is_assigned: bool = False
-    assigned_to: Optional[str] = None
-
-
-class StationSlotCreateRequest(BaseModel):
-    location_code: Optional[str] = Field(None, max_length=100)
-    location_name: Optional[str] = Field(None, max_length=100)
-    location_type: Optional[str] = Field(default="RAW_MATERIAL", max_length=30)
-    position_index: Optional[int] = Field(None, ge=1)
-    node_label: Optional[str] = Field(None, max_length=50)
-    map_x: Optional[int] = None
-    map_y: Optional[int] = None
-
-
-class StationSlotUpdateRequest(BaseModel):
-    location_name: Optional[str] = Field(None, max_length=100)
-    position_index: Optional[int] = Field(None, ge=1)
-    node_label: Optional[str] = Field(None, max_length=50)
-    map_x: Optional[int] = None
-    map_y: Optional[int] = None
-    is_active: Optional[bool] = None
 
 
 # =========================================================================
