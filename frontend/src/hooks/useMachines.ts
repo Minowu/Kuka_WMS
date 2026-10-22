@@ -4,21 +4,17 @@ import {
   createMachineApi,
   updateMachineApi,
   deleteMachineApi,
-  getStationCatalogApi,
-  getAvailableMapNodesApi,
-  createStationLocationApi,
-  updateStationLocationApi,
-  deleteStationLocationApi,
   getUserLocationsApi,
   updateUserLocationsApi,
 } from '@/api/machine';
 import type {
   MachineCreateInput,
   MachineUpdateInput,
-  StationLocationCreateInput,
-  StationLocationUpdateInput,
 } from '@/types/machine';
 
+/**
+ * Hooks quản trị Máy CNC thuần túy
+ */
 export const useMachines = () => {
   return useQuery({
     queryKey: ['machines'],
@@ -64,59 +60,9 @@ export const useDeleteMachine = () => {
   });
 };
 
-export const useStationCatalog = () => {
-  return useQuery({
-    queryKey: ['stationCatalog'],
-    queryFn: getStationCatalogApi,
-    staleTime: 0,
-  });
-};
-
-export const useAvailableNodes = () => {
-  return useQuery({
-    queryKey: ['availableMapNodes'],
-    queryFn: getAvailableMapNodesApi,
-    staleTime: 0,
-  });
-};
-
-export const useCreateStationLocation = () => {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: (data: StationLocationCreateInput) => createStationLocationApi(data),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['stationCatalog'] });
-      queryClient.invalidateQueries({ queryKey: ['machines'] });
-      queryClient.invalidateQueries({ queryKey: ['availableMapNodes'] });
-    },
-  });
-};
-
-export const useUpdateStationLocation = () => {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: ({ id, data }: { id: number; data: StationLocationUpdateInput }) =>
-      updateStationLocationApi(id, data),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['stationCatalog'] });
-      queryClient.invalidateQueries({ queryKey: ['machines'] });
-      queryClient.invalidateQueries({ queryKey: ['availableMapNodes'] });
-    },
-  });
-};
-
-export const useDeleteStationLocation = () => {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: (id: number) => deleteStationLocationApi(id),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['stationCatalog'] });
-      queryClient.invalidateQueries({ queryKey: ['machines'] });
-      queryClient.invalidateQueries({ queryKey: ['availableMapNodes'] });
-    },
-  });
-};
-
+/**
+ * Hooks phân quyền vị trí thao tác cho User / PDA Operator
+ */
 export const useUserLocations = (userId?: number) => {
   return useQuery({
     queryKey: ['userLocations', userId],

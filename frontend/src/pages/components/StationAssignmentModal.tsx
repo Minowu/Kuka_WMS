@@ -18,12 +18,10 @@ import {
   CheckSquareOutlined,
 } from '@ant-design/icons';
 import type { User } from '@/types/auth';
-import {
-  useStationCatalog,
-  useUpdateUserLocations,
-} from '@/hooks/useMachines';
+import { useStationCatalog } from '@/hooks/useStations';
+import { useUpdateUserLocations } from '@/hooks/useMachines';
 import { getUserLocationsApi } from '@/api/machine';
-import type { StationCatalogItem, MachineCatalogGroup } from '@/types/machine';
+import type { StationCatalogItem, MachineCatalogGroup } from '@/types/station';
 
 interface StationAssignmentModalProps {
   open: boolean;
