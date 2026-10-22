@@ -46,7 +46,14 @@ from app.modules.warehouse.item_stock.item_stock_model import ItemStock
 from app.modules.warehouse.location_map.location_model import Location
 
 logger = get_logger("main")
-router = APIRouter(tags=["Production_Routing"])
+router = APIRouter()
+
+routes_router = APIRouter(tags=["Production - Routes"])
+stations_router = APIRouter(tags=["Production - Stations & Machines"])
+dispatch_router = APIRouter(tags=["Production - Dispatch Engine"])
+pda_router = APIRouter(tags=["Production - PDA Operator"])
+user_locations_router = APIRouter(tags=["Production - User Locations"])
+fleet_router = APIRouter(tags=["Production - Fleet Webhook"])
 
 DbSession = Annotated[Session, Depends(get_db)]
 CurrentUser = Annotated[User, Depends(get_current_user)]
@@ -56,7 +63,7 @@ CurrentUser = Annotated[User, Depends(get_current_user)]
 # 1. PRODUCTION ROUTES & MACHINES (3NF)
 # =========================================================================
 
-@router.get(
+@routes_router.get(
     "/production/routes",
     response_model=list[ProductionRouteResponse],
 )
@@ -69,7 +76,7 @@ def list_production_routes(
     return route_service.list_routes(db, item_id=item_id, is_active=is_active)
 
 
-@router.get(
+@stations_router.get(
     "/production/machines",
     response_model=list[AvailableMachineResponse],
 )
@@ -81,7 +88,7 @@ def list_available_machines(
     return route_service.list_available_machines(db)
 
 
-@router.post(
+@stations_router.post(
     "/production/machines",
     response_model=AvailableMachineResponse,
     status_code=status.HTTP_201_CREATED,
@@ -98,7 +105,7 @@ def create_machine(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
 
 
-@router.get(
+@stations_router.get(
     "/production/machines/{machine_id}",
     response_model=AvailableMachineResponse,
 )
@@ -114,7 +121,7 @@ def get_machine(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e)) from e
 
 
-@router.put(
+@stations_router.put(
     "/production/machines/{machine_id}",
     response_model=AvailableMachineResponse,
 )
@@ -131,7 +138,7 @@ def update_machine(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
 
 
-@router.delete(
+@stations_router.delete(
     "/production/machines/{machine_id}",
     status_code=status.HTTP_204_NO_CONTENT,
 )
@@ -152,7 +159,7 @@ def delete_machine(
 # 1B. MAP AVAILABLE NODES & SHOP STATIONS CATALOG
 # =========================================================================
 
-@router.get(
+@stations_router.get(
     "/production/map/available-nodes",
     response_model=list[MapAvailableNodeResponse],
 )
@@ -171,7 +178,7 @@ def get_available_map_nodes(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
 
 
-@router.get(
+@stations_router.get(
     "/production/stations/catalog",
     response_model=StationCatalogResponse,
 )
@@ -184,7 +191,7 @@ def get_station_catalog(
 
 
 # Generic Station Locations (Raw Material, Washing, Buffer)
-@router.post(
+@stations_router.post(
     "/production/stations/locations",
     response_model=StationCatalogItem,
     status_code=status.HTTP_201_CREATED,
@@ -201,7 +208,7 @@ def create_station_location(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
 
 
-@router.put(
+@stations_router.put(
     "/production/stations/locations/{location_id}",
     response_model=StationCatalogItem,
 )
@@ -217,7 +224,7 @@ def update_station_location(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
 
 
-@router.delete(
+@stations_router.delete(
     "/production/stations/locations/{location_id}",
     status_code=status.HTTP_204_NO_CONTENT,
 )
@@ -233,7 +240,7 @@ def delete_station_location(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
 
 
-@router.get(
+@routes_router.get(
     "/production/routes/{route_id}",
     response_model=ProductionRouteDetailResponse,
 )
@@ -248,7 +255,7 @@ def get_production_route(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e)) from e
 
 
-@router.post(
+@routes_router.post(
     "/production/routes",
     response_model=ProductionRouteDetailResponse,
     status_code=status.HTTP_201_CREATED,
@@ -264,7 +271,7 @@ def create_production_route(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
 
 
-@router.put(
+@routes_router.put(
     "/production/routes/{route_id}",
     response_model=ProductionRouteDetailResponse,
 )
@@ -280,11 +287,11 @@ def update_production_route(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
 
 
-@router.patch(
+@routes_router.patch(
     "/production/routes/{route_id}/activate",
     response_model=ProductionRouteDetailResponse,
 )
-@router.post(
+@routes_router.post(
     "/production/routes/{route_id}/activate",
     response_model=ProductionRouteDetailResponse,
 )
@@ -299,7 +306,7 @@ def activate_production_route(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e)) from e
 
 
-@router.delete(
+@routes_router.delete(
     "/production/routes/{route_id}",
     status_code=status.HTTP_204_NO_CONTENT,
 )
@@ -318,7 +325,7 @@ def delete_production_route(
 # 2. RAW MATERIAL RACK QR REGISTRATION & OPERATOR DISPATCH ACTIONS
 # =========================================================================
 
-@router.post(
+@dispatch_router.post(
     "/production/racks/register-raw-material",
     response_model=RackRegistrationResponse,
     status_code=status.HTTP_200_OK,
@@ -349,7 +356,7 @@ def register_rack_at_raw_material(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
 
 
-@router.post(
+@dispatch_router.post(
     "/production/dispatch/call-material",
     status_code=status.HTTP_200_OK,
 )
@@ -381,7 +388,7 @@ def call_material(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
 
 
-@router.post(
+@dispatch_router.post(
     "/production/dispatch/complete-stage",
     status_code=status.HTTP_200_OK,
 )
@@ -403,11 +410,11 @@ def complete_machining_stage(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
 
 
-@router.post(
+@dispatch_router.post(
     "/production/dispatch/return-empty-cart-from-washing",
     status_code=status.HTTP_200_OK,
 )
-@router.post(
+@dispatch_router.post(
     "/production/dispatch/release-empty-cart",
     status_code=status.HTTP_200_OK,
     include_in_schema=False,
@@ -440,8 +447,9 @@ def return_empty_cart_from_washing(
 # 3. KUKA FLEET MANAGER (RCS / ICS) WEBHOOK CALLBACK (/receive-status)
 # =========================================================================
 
-@router.post("/receive-status", status_code=status.HTTP_200_OK)
-@router.post("/production/fleet/receive-status", status_code=status.HTTP_200_OK)
+@fleet_router.post("/receive-status", status_code=status.HTTP_200_OK)
+@fleet_router.post(
+    "/production/fleet/receive-status", status_code=status.HTTP_200_OK)
 def receive_task_status(payload: dict[str, Any], db: DbSession) -> dict[str, Any]:
     """
     Webhook tiếp nhận trạng thái từ KUKA Fleet Manager (/api/v1/receive-status).
@@ -459,7 +467,7 @@ def receive_task_status(payload: dict[str, Any], db: DbSession) -> dict[str, Any
 # 4. PDA CALLER CLIENT APIS (RAW MATERIAL, CNC LINE, WASHING STATION)
 # =========================================================================
 
-@router.get(
+@pda_router.get(
     "/production/pda/models",
     response_model=list[PdaModelItem],
 )
@@ -485,7 +493,7 @@ def get_pda_models(
     ]
 
 
-@router.get(
+@pda_router.get(
     "/production/pda/raw-materials",
     response_model=list[PdaRawMaterialSlot],
 )
@@ -529,7 +537,7 @@ def get_pda_raw_materials(
     return result
 
 
-@router.get(
+@pda_router.get(
     "/production/pda/cnc-stations",
     response_model=list[PdaCncStation],
 )
@@ -675,7 +683,7 @@ def get_pda_cnc_stations(
     return result
 
 
-@router.get(
+@pda_router.get(
     "/production/pda/washing-slots",
     response_model=list[PdaWashingSlot],
 )
@@ -752,7 +760,7 @@ def get_pda_washing_slots(
     return result
 
 
-@router.post(
+@pda_router.post(
     "/production/pda/fast-arrive",
     status_code=status.HTTP_200_OK,
 )
@@ -825,7 +833,7 @@ def pda_fast_arrive(
 # 5. USER LOCATIONS ASSIGNMENT (ADMIN)
 # =========================================================================
 
-@router.get(
+@user_locations_router.get(
     "/production/users/{user_id}/locations",
     response_model=list[int],
 )
@@ -841,7 +849,7 @@ def get_user_locations(
     ]
 
 
-@router.put(
+@user_locations_router.put(
     "/production/users/{user_id}/locations",
     response_model=list[int],
 )
@@ -861,3 +869,11 @@ def update_user_locations(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
 
 
+
+# Include all modular sub-routers into root production router
+router.include_router(routes_router)
+router.include_router(stations_router)
+router.include_router(dispatch_router)
+router.include_router(pda_router)
+router.include_router(user_locations_router)
+router.include_router(fleet_router)
