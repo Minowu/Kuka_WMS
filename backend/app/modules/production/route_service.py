@@ -740,7 +740,7 @@ def update_station_slot(
     if payload.position_index is not None:
         loc.position_index = payload.position_index
     if payload.node_label is not None:
-        loc.location_name = payload.node_label or loc.location_name.strip()
+        loc.location_label = payload.node_label.strip()
     if payload.map_x is not None:
         loc.map_x = payload.map_x
     if payload.map_y is not None:
@@ -756,7 +756,8 @@ def update_station_slot(
         location_name=loc.location_name,
         location_type=loc.location_type,
         position_index=loc.position_index,
-        node_label=loc.location_name,
+        location_label=loc.location_label,
+        node_label=loc.location_label or loc.location_name,
         map_x=loc.map_x,
         map_y=loc.map_y,
         is_active=loc.is_active,
