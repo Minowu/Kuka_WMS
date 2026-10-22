@@ -61,4 +61,3 @@ class StationSlotUpdateRequest(BaseModel):
     node_label: Optional[str] = Field(None, max_length=50)
     map_x: Optional[int] = None
     map_y: Optional[int] = None
-    is_active: Optional[bool] = None

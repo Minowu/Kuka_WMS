@@ -10,7 +10,7 @@ import {
   Space,
   Table,
 } from '@/components/ui';
-import { Tag, Tabs, Badge, Switch, Popconfirm, Tooltip } from 'antd';
+import { Tag, Tabs, Badge, Popconfirm, Tooltip } from 'antd';
 import {
   PlusOutlined,
   EditOutlined,
@@ -231,7 +231,6 @@ export default function StationSettingPage() {
       location_code: item.location_code,
       location_name: item.location_name || '',
       node_label: item.node_label || undefined,
-      is_active: item.is_active,
     });
     setIsRawModalOpen(true);
   };
@@ -526,7 +525,6 @@ export default function StationSettingPage() {
       location_code: item.location_code,
       location_name: item.location_name || '',
       node_label: item.node_label || undefined,
-      is_active: item.is_active,
     });
     setIsWashModalOpen(true);
   };
@@ -600,7 +598,6 @@ export default function StationSettingPage() {
       location_code: item.location_code,
       location_name: item.location_name || '',
       node_label: item.node_label || undefined,
-      is_active: item.is_active,
     });
     setIsEmptyBufferModalOpen(true);
   };
@@ -776,22 +773,6 @@ export default function StationSettingPage() {
                             </span>
                           </div>
                         ),
-                      },
-                      {
-                        title: 'Trạng Thái',
-                        dataIndex: 'is_active',
-                        key: 'is_active',
-                        width: 130,
-                        render: (active: boolean) =>
-                          active ? (
-                            <Tag color="success" icon={<CheckCircleOutlined />}>
-                              Hoạt động
-                            </Tag>
-                          ) : (
-                            <Tag color="default" icon={<StopOutlined />}>
-                              Tạm dừng
-                            </Tag>
-                          ),
                       },
                       {
                         title: 'Thao Tác',
@@ -1043,22 +1024,6 @@ export default function StationSettingPage() {
                         ),
                       },
                       {
-                        title: 'Trạng Thái',
-                        dataIndex: 'is_active',
-                        key: 'is_active',
-                        width: 130,
-                        render: (active: boolean) =>
-                          active ? (
-                            <Tag color="success" icon={<CheckCircleOutlined />}>
-                              Hoạt động
-                            </Tag>
-                          ) : (
-                            <Tag color="default" icon={<StopOutlined />}>
-                              Tạm dừng
-                            </Tag>
-                          ),
-                      },
-                      {
                         title: 'Thao Tác',
                         key: 'actions',
                         width: 130,
@@ -1170,22 +1135,6 @@ export default function StationSettingPage() {
                             </span>
                           </div>
                         ),
-                      },
-                      {
-                        title: 'Trạng Thái',
-                        dataIndex: 'is_active',
-                        key: 'is_active',
-                        width: 130,
-                        render: (active: boolean) =>
-                          active ? (
-                            <Tag color="success" icon={<CheckCircleOutlined />}>
-                              Hoạt động
-                            </Tag>
-                          ) : (
-                            <Tag color="default" icon={<StopOutlined />}>
-                              Tạm dừng
-                            </Tag>
-                          ),
                       },
                       {
                         title: 'Thao Tác',

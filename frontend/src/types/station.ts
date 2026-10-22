@@ -59,5 +59,4 @@ export interface StationLocationUpdateInput {
   map_x?: number;
   map_y?: number;
   position_index?: number;
-  is_active?: boolean;
 }
