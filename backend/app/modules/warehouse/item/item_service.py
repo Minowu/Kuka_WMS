@@ -337,6 +337,14 @@ def delete_item(db: Session, item_id: int) -> bool:
         .first()
     ):
         raise ValueError("Không thể xóa Model: đang có xe gá phôi tồn tại trong kho hoặc trạm máy.")
+
+    from app.modules.production.production_models import ProductionRoute
+    route = db.query(ProductionRoute).filter(ProductionRoute.item_id == item_id).first()
+    if route:
+        raise ValueError(
+            f"Không thể xóa Model: đang được liên kết với quy trình gia công '{route.route_name}' ({route.route_code}). "
+            "Vui lòng xóa hoặc hủy quy trình trước."
+        )
     try:
         db.delete(item)
         db.commit()
