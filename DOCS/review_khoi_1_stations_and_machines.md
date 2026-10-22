@@ -330,11 +330,12 @@ Các trạm độc lập gồm: Ô Cấp Phôi (`RAW_MATERIAL`), Slot Tẩy Rử
 | `position_index` | `INTEGER` | `YES` | | Vị trí đỗ: `1` (POS1), `2` (POS2), `3` (POS3) |
 | `map_x` | `INTEGER` | `YES` | | Tọa độ X bản đồ (đơn vị: mm) |
 | `map_y` | `INTEGER` | `YES` | | Tọa độ Y bản đồ (đơn vị: mm) |
-| `is_active` | `BOOLEAN` | `NO` | Default: `True` | Bật/tắt vị trí |
+| `is_active` | `BOOLEAN` | `NO` | Default: `True` | Cờ bảo lưu WMS / Mặc định True trong phân xưởng (Xem ADR-001) |
 
 > [!IMPORTANT]
 > **Cam Kết Vàng Về Kiến Trúc**:
-> Cột `default_stage_level` đã bị **XÓA BỎ VĨNH VIỄN** khỏi cả hai bảng `machine` và `location`. Công đoạn Level mấy hoàn toàn do bảng `route_step` trong Quy trình Route quy định.
+> 1. Cột `default_stage_level` đã bị **XÓA BỎ VĨNH VIỄN** khỏi cả hai bảng `machine` và `location`. Công đoạn Level mấy hoàn toàn do bảng `route_step` trong Quy trình Route quy định.
+> 2. **Quyết định kiến trúc ADR-001**: Toàn bộ logic và hiển thị `is_active` đã được **LOẠI BỎ KHỎI KHỐI 1 (Production)** để tránh bẫy kẹt phôi WIP và phá vỡ cơ chế đệm kép. Chi tiết xem tại [DOCS/ADR_001_deprecate_is_active_in_production_stations.md](file:///D:/KuKA/KUKA_WMS/DOCS/ADR_001_deprecate_is_active_in_production_stations.md).
 
 ---
 
