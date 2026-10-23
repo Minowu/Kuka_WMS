@@ -111,8 +111,21 @@ export const RawMaterialWizard: React.FC<RawMaterialWizardProps> = ({
             </h2>
           </div>
 
-          <div className="grid grid-cols-2 gap-2 flex-1">
-            {positions.map((pos) => {
+          {positions.length === 0 ? (
+            <div className="flex flex-col items-center justify-center p-8 text-center my-auto bg-slate-900/60 border border-slate-800 rounded-2xl">
+              <div className="w-14 h-14 rounded-full bg-slate-800/80 border border-slate-700 flex items-center justify-center text-2xl mb-3 shadow-inner">
+                🔒
+              </div>
+              <div className="text-white font-bold text-base mb-1.5">
+                Chưa Được Phân Vị Trí Cấp Phôi
+              </div>
+              <div className="text-slate-400 text-xs leading-relaxed max-w-xs">
+                Tài khoản của bạn chưa được gán vị trí nào tại Khu Nguyên Liệu. Vui lòng liên hệ Quản đốc xưởng để được phân quyền.
+              </div>
+            </div>
+          ) : (
+            <div className="grid grid-cols-2 gap-2 flex-1">
+              {positions.map((pos) => {
               const isOccupied = pos.hasRack;
               return (
                 <button
@@ -149,6 +162,7 @@ export const RawMaterialWizard: React.FC<RawMaterialWizardProps> = ({
               );
             })}
           </div>
+        )}
         </div>
       )}
 

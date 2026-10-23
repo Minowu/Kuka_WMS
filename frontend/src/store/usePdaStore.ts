@@ -62,33 +62,11 @@ export const usePdaStore = create<PdaState>((set, get) => ({
         getPdaWashingSlotsApi(),
       ]);
 
-      let finalRaw = rawMaterials;
-      let finalCnc = cncStations;
-      let finalWash = washingSlots;
-
-      // Lọc danh sách máy/ô hiển thị đúng theo các vị trí được phân quyền của tài khoản đăng nhập
-      const user = useAuthStore.getState().user;
-      const isAdmin = !!user?.access?.is_admin || (user?.roles || []).some((r) => r.name === 'admin');
-
-      if (user && !isAdmin) {
-        try {
-          const assignedIds = await getUserLocationsApi(user.id);
-          if (assignedIds && assignedIds.length > 0) {
-            const assignedSet = new Set(assignedIds);
-            finalRaw = finalRaw.filter((p) => p.locationId && assignedSet.has(p.locationId));
-            finalCnc = finalCnc.filter((s) => s.locationId && assignedSet.has(s.locationId));
-            finalWash = finalWash.filter((w) => w.locationId && assignedSet.has(w.locationId));
-          }
-        } catch {
-          // Fallback gracefully if location API is unreachable
-        }
-      }
-
       set({
         models,
-        positions: finalRaw,
-        cncStations: finalCnc,
-        washingSlots: finalWash,
+        positions: rawMaterials,
+        cncStations,
+        washingSlots,
         loading: false,
         initialized: true,
       });

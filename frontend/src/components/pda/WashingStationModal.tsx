@@ -39,7 +39,20 @@ export const WashingStationModal: React.FC<WashingStationModalProps> = ({
 
       {/* 4 Slot cố định */}
       <div className="flex flex-col gap-2.5 flex-1 overflow-y-auto pr-0.5">
-        {slots.map((slot) => {
+        {slots.length === 0 ? (
+          <div className="flex flex-col items-center justify-center p-8 text-center my-auto bg-slate-900/60 border border-slate-800 rounded-2xl">
+            <div className="w-14 h-14 rounded-full bg-slate-800/80 border border-slate-700 flex items-center justify-center text-2xl mb-3 shadow-inner">
+              🔒
+            </div>
+            <div className="text-white font-bold text-base mb-1.5">
+              Chưa Được Phân Công Slot Tẩy Rửa
+            </div>
+            <div className="text-slate-400 text-xs leading-relaxed max-w-xs">
+              Tài khoản của bạn chưa được gán vị trí ô đỗ nào tại Khu Tẩy Rửa. Vui lòng liên hệ Quản đốc xưởng để được phân quyền.
+            </div>
+          </div>
+        ) : (
+          slots.map((slot) => {
           const isOccupied = slot.status === 'OCCUPIED';
           const rack = slot.currentRack;
 
@@ -103,7 +116,7 @@ export const WashingStationModal: React.FC<WashingStationModalProps> = ({
               )}
             </div>
           );
-        })}
+        }))}
       </div>
     </div>
   );

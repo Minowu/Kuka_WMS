@@ -65,7 +65,20 @@ export const CncLineModal: React.FC<CncLineModalProps> = ({
     <div className="flex flex-col flex-1 p-3">
       {/* Danh sách trạm CNC */}
       <div className="flex flex-col gap-3 flex-1 overflow-y-auto pr-0.5">
-        {stations.map((st) => {
+        {stations.length === 0 ? (
+          <div className="flex flex-col items-center justify-center p-8 text-center my-auto bg-slate-900/60 border border-slate-800 rounded-2xl">
+            <div className="w-14 h-14 rounded-full bg-slate-800/80 border border-slate-700 flex items-center justify-center text-2xl mb-3 shadow-inner">
+              🔒
+            </div>
+            <div className="text-white font-bold text-base mb-1.5">
+              Chưa Được Phân Công Máy CNC
+            </div>
+            <div className="text-slate-400 text-xs leading-relaxed max-w-xs">
+              Tài khoản của bạn chưa được gán máy CNC nào. Vui lòng liên hệ Quản đốc xưởng để được phân quyền máy phụ trách.
+            </div>
+          </div>
+        ) : (
+          stations.map((st) => {
           const isEmpty = st.status === 'EMPTY';
           const isCalling = st.status === 'CALLING';
           const isOccupied = st.status === 'OCCUPIED';
@@ -188,7 +201,7 @@ export const CncLineModal: React.FC<CncLineModalProps> = ({
               )}
             </div>
           );
-        })}
+        }))}
       </div>
     </div>
   );
