@@ -83,8 +83,9 @@ class DispatchService:
         url = f"{base}{endpoint}"
 
         if not _ics_configured():
-            logger.info("KUKA offline/dev mode — simulated POST %s payload=%s", endpoint_path, payload)
-            simulated_resp = {"code": 0, "message": "success", "simulated": True}
+            error_msg = f"KUKA Fleet API chưa được cấu hình hoặc offline — không thể điều xe {api_name}"
+            logger.error(error_msg)
+            err_resp = {"code": -1, "message": error_msg, "success": False}
             if db:
                 call_log = FleetApiCall(
                     api_name=api_name,
@@ -92,13 +93,14 @@ class DispatchService:
                     mission_code=mission_code,
                     container_code=container_code,
                     request_body=payload,
-                    http_status=200,
-                    response_body=simulated_resp,
-                    success=True,
+                    http_status=503,
+                    response_body=err_resp,
+                    error=error_msg,
+                    success=False,
                 )
                 db.add(call_log)
                 db.flush()
-            return simulated_resp
+            return err_resp
 
         timeout_sec = float(getattr(settings, "kuka_http_timeout_seconds", 5.0))
         http_status = None
