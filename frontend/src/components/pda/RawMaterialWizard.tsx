@@ -37,15 +37,6 @@ export const RawMaterialWizard: React.FC<RawMaterialWizardProps> = ({
     setCurrentStep(3);
   };
 
-  // Sinh ngẫu nhiên mã QR Rack để test
-  const handleGenerateRandomQr = () => {
-    if ('vibrate' in navigator) navigator.vibrate?.(30);
-    const randomNum = Math.floor(1000 + Math.random() * 9000);
-    const newId = `RCK-${selectedPosition || 'VT'}-${randomNum}`;
-    setRackId(newId);
-    showToast(`Đã nạp mã: ${newId}`, 'info');
-  };
-
   // Quét QR qua Camera
   const handleCameraScanSuccess = (text: string) => {
     setIsScanningCamera(false);
@@ -250,19 +241,12 @@ export const RawMaterialWizard: React.FC<RawMaterialWizardProps> = ({
             />
           </div>
 
-          <div className="grid grid-cols-2 gap-2 mb-4">
+          <div className="mb-4">
             <button
               onClick={() => setIsScanningCamera(true)}
-              className="min-h-[48px] bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-xl font-bold text-xs active:scale-95"
+              className="w-full min-h-[48px] bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-xl font-bold text-xs active:scale-95 flex items-center justify-center gap-2"
             >
-              Quét Camera
-            </button>
-
-            <button
-              onClick={handleGenerateRandomQr}
-              className="min-h-[48px] bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 rounded-xl font-bold text-xs active:scale-95"
-            >
-              Sinh Mã Test
+              📷 Quét Camera QR Khay Phôi
             </button>
           </div>
 

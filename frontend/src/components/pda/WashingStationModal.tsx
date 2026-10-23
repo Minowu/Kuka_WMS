@@ -4,14 +4,12 @@ import type { WashingSlot } from '@/types/pda';
 interface WashingStationModalProps {
   slots: WashingSlot[];
   onReleaseSlot: (slotId: number) => void;
-  onSimulateArrive?: (slotId: number) => void;
   showToast: (msg: string, type?: 'success' | 'info' | 'warning' | 'kuka') => void;
 }
 
 export const WashingStationModal: React.FC<WashingStationModalProps> = ({
   slots,
   onReleaseSlot,
-  onSimulateArrive,
   showToast,
 }) => {
   const handleRelease = (slot: WashingSlot) => {
@@ -98,14 +96,9 @@ export const WashingStationModal: React.FC<WashingStationModalProps> = ({
               {!isOccupied && (
                 <div className="flex items-center justify-between pt-1">
                   <span className="text-[11px] text-slate-500">
-                    Slot sẵn sàng nhận xe từ CNC
+                    Slot trống • Sẵn sàng nhận xe từ CNC
                   </span>
-                  <button
-                    onClick={() => onSimulateArrive?.(slot.id)}
-                    className="text-[11px] text-slate-400 hover:text-slate-200 px-2 py-1 bg-slate-800 rounded font-mono active:scale-95 cursor-pointer"
-                  >
-                    Mô phỏng xe đến
-                  </button>
+                  
                 </div>
               )}
             </div>

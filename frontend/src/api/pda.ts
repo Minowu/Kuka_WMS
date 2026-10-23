@@ -124,24 +124,3 @@ export const returnEmptyCartFromWashingApi = async (payload: ReturnEmptyCartPayl
   );
   return response.data;
 };
-
-// 3. Fast-Arrive Simulation
-export interface FastArrivePayload {
-  station_id?: string;
-  location_id?: number;
-  mission_code?: string;
-  task_code?: string;
-}
-
-export const simulateFastArriveApi = async (payload: FastArrivePayload) => {
-  const body = {
-    ...payload,
-    mission_code: payload.mission_code || payload.task_code,
-    task_code: payload.task_code || payload.mission_code,
-  };
-  const response = await axiosInstance.post(
-    '/api/v1/production/pda/fast-arrive',
-    body
-  );
-  return response.data;
-};

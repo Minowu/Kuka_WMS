@@ -6,7 +6,6 @@ interface CncLineModalProps {
   models?: PartModel[];
   onCallMaterial: (stationId: string) => void;
   onUpdateLevel: (stationId: string) => void;
-  onFastArrive?: (stationId: string) => void;
   showToast: (msg: string, type?: 'success' | 'info' | 'warning' | 'kuka') => void;
 }
 
@@ -14,7 +13,6 @@ export const CncLineModal: React.FC<CncLineModalProps> = ({
   stations,
   onCallMaterial,
   onUpdateLevel,
-  onFastArrive,
   showToast: _showToast,
 }) => {
 
@@ -144,12 +142,10 @@ export const CncLineModal: React.FC<CncLineModalProps> = ({
                       {st.callingModel || 'Phôi tiêu chuẩn'}
                     </div>
                   </div>
-                  <button
-                    onClick={() => onFastArrive?.(st.id)}
-                    className="w-full min-h-[46px] bg-slate-800 hover:bg-slate-700 text-amber-300 border border-amber-500/30 font-bold text-xs rounded-xl active:scale-[0.98] transition-all cursor-pointer"
-                  >
-                    Mô phỏng: AMR Đã Cập Bến
-                  </button>
+                  <div className="w-full min-h-[46px] bg-amber-500/10 border border-amber-500/30 text-amber-300 font-semibold text-xs rounded-xl flex items-center justify-center gap-2 px-3 py-2">
+                    <span className="inline-block w-2 h-2 rounded-full bg-amber-400 animate-ping" />
+                    <span>AMR đang vận chuyển phôi đến trạm...</span>
+                  </div>
                 </div>
               )}
 

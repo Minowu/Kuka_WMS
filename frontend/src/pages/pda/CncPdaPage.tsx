@@ -8,7 +8,6 @@ export const CncPdaPage: React.FC = () => {
   const models = usePdaStore((s) => s.models);
   const callMaterialToCnc = usePdaStore((s) => s.callMaterialToCnc);
   const updateCncStageLevel = usePdaStore((s) => s.updateCncStageLevel);
-  const fastArriveCnc = usePdaStore((s) => s.fastArriveCnc);
   const showToast = usePdaStore((s) => s.showToast);
   const fetchFloorState = usePdaStore((s) => s.fetchFloorState);
 
@@ -16,7 +15,7 @@ export const CncPdaPage: React.FC = () => {
     fetchFloorState();
     const interval = setInterval(() => {
       fetchFloorState();
-    }, 4000);
+    }, 60000);
     return () => clearInterval(interval);
   }, [fetchFloorState]);
 
@@ -30,7 +29,6 @@ export const CncPdaPage: React.FC = () => {
         models={models}
         onCallMaterial={callMaterialToCnc}
         onUpdateLevel={updateCncStageLevel}
-        onFastArrive={fastArriveCnc}
         showToast={showToast}
       />
     </PdaLayoutWrapper>

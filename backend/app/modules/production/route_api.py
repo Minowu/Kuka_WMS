@@ -25,7 +25,6 @@ from app.modules.production.route_schema import (
     MapAvailableNodeResponse,
     PdaCncStation,
     PdaCncStationRack,
-    PdaFastArriveRequest,
     PdaModelItem,
     PdaRawMaterialSlot,
     PdaWashingSlot,
@@ -663,76 +662,6 @@ def get_pda_washing_slots(
     return result
 
 
-@pda_router.post(
-    "/production/pda/fast-arrive",
-    status_code=status.HTTP_200_OK,
-)
-def pda_fast_arrive(
-    body: PdaFastArriveRequest,
-    db: DbSession,
-    _user: CurrentUser,
-):
-    """
-    Simulation helper endpoint cho PDA:
-    Bắn tín hiệu hoàn tất hạ kệ (COMPLETED) chuẩn KUKA Fleet cho task AMR đang di chuyển tới vị trí này.
-    """
-    task = None
-    target_code = body.mission_code
-    if target_code:
-        task = db.query(FleetTask).filter(FleetTask.mission_code == target_code).first()
-    elif body.station_id:
-        loc = db.query(Location).filter(Location.location_code == body.station_id).first()
-        if loc:
-            task = (
-                db.query(FleetTask)
-                .filter(
-                    FleetTask.dropoff_location_id == loc.id,
-                    FleetTask.status.in_(["created", "pending_submit", "sent", "dispatched", "in_progress"]),
-                )
-                .order_by(FleetTask.id.desc())
-                .first()
-            )
-    elif body.location_id:
-        task = (
-            db.query(FleetTask)
-            .filter(
-                FleetTask.dropoff_location_id == body.location_id,
-                FleetTask.status.in_(["created", "pending_submit", "sent", "dispatched", "in_progress"]),
-            )
-            .order_by(FleetTask.id.desc())
-            .first()
-        )
-
-    if not task:
-        task = (
-            db.query(FleetTask)
-            .filter(FleetTask.status.in_(["created", "pending_submit", "sent", "dispatched", "in_progress"]))
-            .order_by(FleetTask.id.desc())
-            .first()
-        )
-
-    if not task:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Không tìm thấy task AMR nào đang di chuyển tới vị trí này",
-        )
-
-    dispatch_service.receive_task_status(db, {
-        "missionCode": task.mission_code,
-        "missionStatus": "COMPLETED",
-        "robotId": task.robot_id or "1515",
-        "containerCode": task.container_code or "",
-    })
-    return {
-        "success": True,
-        "mission_code": task.mission_code,
-        "mission_code": task.mission_code,
-        "status": "completed",
-        "dropoff_location_id": task.dropoff_location_id,
-    }
-
-
-# =========================================================================
 # 5. USER LOCATIONS ASSIGNMENT (ADMIN)
 # =========================================================================
 

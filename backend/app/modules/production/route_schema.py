@@ -210,9 +210,3 @@ class PdaWashingSlot(BaseModel):
     name: str
     status: str
     current_rack: Optional[PdaWashingSlotRack] = None
-
-
-class PdaFastArriveRequest(BaseModel):
-    station_id: Optional[str] = None
-    location_id: Optional[int] = None
-    mission_code: Optional[str] = None
