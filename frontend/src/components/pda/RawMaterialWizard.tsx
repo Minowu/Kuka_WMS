@@ -22,8 +22,16 @@ export const RawMaterialWizard: React.FC<RawMaterialWizardProps> = ({
   const [rackId, setRackId] = useState<string>('');
   const [isScanningCamera, setIsScanningCamera] = useState<boolean>(false);
 
-  // Bước 1: 1-Chạm Chọn Vị Trí -> Chuyển ngay Bước 2
+  // Bước 1: 1-Chạm Chọn Vị Trí -> Chuyển ngay Bước 2 (Chỉ khi vị trí TRỐNG)
   const handleSelectPosition = (pos: RawMaterialPosition) => {
+    if (pos.hasRack) {
+      if ('vibrate' in navigator) navigator.vibrate?.([50, 50, 50]);
+      showToast(
+        `Vị trí [${pos.name || pos.id}] hiện đang có khay phôi [${pos.currentRackId || 'Có hàng'}], không thể cấp thêm!`,
+        'warning'
+      );
+      return;
+    }
     if ('vibrate' in navigator) navigator.vibrate?.(30);
     setSelectedPosition(pos.id);
     setSelectedPositionName(pos.name || pos.id);
@@ -133,10 +141,10 @@ export const RawMaterialWizard: React.FC<RawMaterialWizardProps> = ({
                 <button
                   key={pos.id}
                   onClick={() => handleSelectPosition(pos)}
-                  className={`min-h-[58px] p-3 rounded-xl border flex flex-col justify-center items-start text-left transition-all active:scale-[0.98] ${
+                  className={`min-h-[58px] p-3 rounded-xl border flex flex-col justify-center items-start text-left transition-all ${
                     isOccupied
-                      ? 'bg-amber-950/20 border-amber-600/40 text-amber-200'
-                      : 'bg-slate-800/90 border-slate-700 hover:border-[#FF5800] text-white'
+                      ? 'bg-amber-950/20 border-amber-600/40 text-amber-200/90 cursor-not-allowed opacity-90'
+                      : 'bg-slate-800/90 border-slate-700 hover:border-[#FF5800] text-white active:scale-[0.98] cursor-pointer'
                   }`}
                 >
                   <div className="flex items-center justify-between w-full">

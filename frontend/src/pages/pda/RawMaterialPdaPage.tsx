@@ -14,7 +14,7 @@ export const RawMaterialPdaPage: React.FC = () => {
     fetchFloorState();
     const interval = setInterval(() => {
       fetchFloorState();
-    }, 60000);
+    }, 4000);
     return () => clearInterval(interval);
   }, [fetchFloorState]);
 
