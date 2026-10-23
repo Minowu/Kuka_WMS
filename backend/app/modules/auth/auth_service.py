@@ -17,10 +17,8 @@ from app.core.security import (
 from app.modules.auth.auth_access import build_user_access_summary, user_to_response
 from app.modules.auth.auth_model import User, Role, Permission
 from app.modules.auth.auth_schema import (
-    MODULE_NAMES,
     LoginRequest,
     LoginResponse,
-    ModuleName,
     TokenResponse,
     UserCreate,
     UserListResponse,
@@ -124,26 +122,6 @@ def _assign_admin_access(db: Session, user: User) -> None:
     user.warehouses = []
 
 
-def _assign_module_access(
-    db: Session,
-    user: User,
-    *,
-    warehouse_ids: list[int],
-    modules: list[ModuleName],
-) -> None:
-    if warehouse_ids:
-        user.warehouses = _get_warehouses_by_ids(db, warehouse_ids)
-    else:
-        user.warehouses = db.query(Warehouse).all()
-
-    valid_modules = [m for m in modules if m in MODULE_NAMES and db.query(Role).filter(Role.name == m).first()]
-    if valid_modules:
-        user.roles = _get_roles_by_names(db, valid_modules)
-    else:
-        op_role = db.query(Role).filter(Role.name == "operator").first()
-        user.roles = [op_role] if op_role else []
-
-
 def _is_admin_request(
     *,
     is_admin: Optional[bool],
@@ -165,32 +143,18 @@ def _apply_access_on_create(db: Session, user: User, body: UserCreate) -> None:
         return
     if body.role_ids:
         user.roles = _get_roles_by_ids(db, body.role_ids)
-        if body.warehouse_ids:
-            user.warehouses = _get_warehouses_by_ids(db, body.warehouse_ids)
-        else:
-            user.warehouses = db.query(Warehouse).all()
-        return
-    _assign_module_access(
-        db,
-        user,
-        warehouse_ids=body.warehouse_ids,
-        modules=body.modules,
-    )
+    else:
+        cnc_role = db.query(Role).filter(Role.name == "operator_cnc").first()
+        user.roles = [cnc_role] if cnc_role else []
+    user.warehouses = db.query(Warehouse).all()
 
 
 def _apply_access_on_update(db: Session, user: User, body: UserUpdate) -> None:
     data = body.model_dump(exclude_unset=True)
     role_ids = data.get("role_ids")
-    warehouse_ids = data.get("warehouse_ids")
-    modules = data.get("modules")
     is_admin = data.get("is_admin")
 
-    access_touched = (
-        "role_ids" in data
-        or "warehouse_ids" in data
-        or "modules" in data
-        or "is_admin" in data
-    )
+    access_touched = "role_ids" in data or "is_admin" in data
     if not access_touched:
         return
 
@@ -198,20 +162,8 @@ def _apply_access_on_update(db: Session, user: User, body: UserUpdate) -> None:
         _assign_admin_access(db, user)
         return
 
-    # Non-admin: replace roles (removes admin + '*') and assign module roles
-    if role_ids:
+    if role_ids is not None:
         user.roles = _get_roles_by_ids(db, role_ids)
-        if warehouse_ids:
-            user.warehouses = _get_warehouses_by_ids(db, warehouse_ids)
-        else:
-            user.warehouses = db.query(Warehouse).all()
-        return
-    _assign_module_access(
-        db,
-        user,
-        warehouse_ids=warehouse_ids or [],
-        modules=modules or [],
-    )
 
 
 def login(db: Session, body: LoginRequest) -> LoginResponse:
@@ -386,5 +338,7 @@ def delete_user(db: Session, user_id: int) -> bool:
     if not user:
         return False
     user.is_active = False
+    from app.modules.production.production_models import UserLocation
+    db.query(UserLocation).filter(UserLocation.user_id == user_id).delete(synchronize_session=False)
     db.commit()
     return True

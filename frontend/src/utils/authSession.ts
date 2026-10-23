@@ -22,6 +22,7 @@ export function getHomePathFromUser(user: User | null): string {
   const uname = (user.username || '').toLowerCase();
 
   if (
+    roleNames.some((r) => r.includes('raw')) ||
     roleNames.includes('raw_material') ||
     roleNames.includes('nguyenlieu') ||
     uname.includes('raw') ||
@@ -31,12 +32,20 @@ export function getHomePathFromUser(user: User | null): string {
   }
 
   if (
+    roleNames.some((r) => r.includes('wash')) ||
     roleNames.includes('washing') ||
     roleNames.includes('tayrua') ||
     uname.includes('wash') ||
     uname.includes('tayrua')
   ) {
     return '/pda/washing';
+  }
+
+  if (
+    roleNames.some((r) => r.includes('cnc')) ||
+    uname.includes('cnc')
+  ) {
+    return '/pda/cnc';
   }
 
   // Mặc định tài khoản đứng máy gia công CNC

@@ -5,7 +5,7 @@ from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 
 ModuleName = str
 MODULE_NAMES: tuple[str, ...] = (
-    "inbound", "outbound", "stocktake", "operator", "operator_raw", "operator_cnc", "operator_washing"
+    "operator_raw", "operator_cnc", "operator_washing"
 )
 
 
@@ -29,7 +29,7 @@ class UserAccessSummary(BaseModel):
 
     - ``warehouse_scope=all``: admin may access every warehouse (list in ``warehouses``).
     - ``warehouse_scope=assigned``: staff limited to ``warehouses``.
-    - ``modules``: tablet features (inbound/outbound/stocktake). Print QR is implicit on tablet.
+    - ``modules``: cac phan he san xuat (operator_raw/operator_cnc/operator_washing).
     """
 
     is_admin: bool
@@ -56,8 +56,6 @@ class UserCreate(BaseModel):
     password_confirm: str = Field(..., min_length=8, max_length=128)
     role_ids: list[int] = Field(default_factory=list)
     is_admin: bool = False
-    warehouse_ids: list[int] = Field(default_factory=list)
-    modules: list[ModuleName] = Field(default_factory=list)
     location_ids: list[int] = Field(default_factory=list)
 
     @field_validator("password_confirm")
@@ -66,18 +64,6 @@ class UserCreate(BaseModel):
         if "password" in info.data and v != info.data["password"]:
             raise ValueError("Passwords do not match")
         return v
-
-    @field_validator("modules")
-    @classmethod
-    def unique_modules(cls, v: list[ModuleName]) -> list[ModuleName]:
-        # Preserve order, drop duplicates
-        seen: set[str] = set()
-        result: list[ModuleName] = []
-        for m in v:
-            if m not in seen:
-                seen.add(m)
-                result.append(m)
-        return result
 
 
 class UserSignupResponse(BaseModel):
@@ -97,8 +83,6 @@ class UserUpdate(BaseModel):
     password_confirm: Optional[str] = Field(None, min_length=8, max_length=128)
     role_ids: Optional[list[int]] = None
     is_admin: Optional[bool] = None
-    warehouse_ids: Optional[list[int]] = None
-    modules: Optional[list[ModuleName]] = None
     location_ids: Optional[list[int]] = None
 
     @field_validator("password", "password_confirm", mode="before")
@@ -117,19 +101,6 @@ class UserUpdate(BaseModel):
         if pwd is not None and v != pwd:
             raise ValueError("Passwords do not match")
         return v
-
-    @field_validator("modules")
-    @classmethod
-    def unique_modules(cls, v: Optional[list[ModuleName]]) -> Optional[list[ModuleName]]:
-        if v is None:
-            return None
-        seen: set[str] = set()
-        result: list[ModuleName] = []
-        for m in v:
-            if m not in seen:
-                seen.add(m)
-                result.append(m)
-        return result
 
 
 class UserResponse(BaseModel):

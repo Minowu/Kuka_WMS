@@ -21,7 +21,6 @@ import {
   useDeleteUser,
 } from "@/hooks/useAuth";
 import {
-  ROLE_OPTIONS,
   type CreateUserInput,
   type UpdateUserInput,
   type User,
@@ -57,7 +56,7 @@ function getRoleTag(user: User) {
   if (roleNames.includes("operator_washing")) {
     return <Tag color="green" className="font-semibold px-2 py-0.5">Khu Tẩy Rửa</Tag>;
   }
-  return <Tag color="orange" className="font-semibold px-2 py-0.5">Công Nhân (Operator)</Tag>;
+  return <Tag color="default" className="font-semibold px-2 py-0.5">Chưa phân vai trò</Tag>;
 }
 
 export default function UserSettingPage() {
@@ -86,7 +85,7 @@ export default function UserSettingPage() {
 
   const handleOpenEdit = (record: User) => {
     setEditingUser(record);
-    const roleId = record.roles?.[0]?.id ?? 1;
+    const roleId = record.roles?.[0]?.id ?? 4;
     form.setFieldsValue({
       username: record.username,
       email: record.email,
@@ -328,7 +327,6 @@ export default function UserSettingPage() {
                 { value: 4, label: "⚙️ Operator CNC (Khu Máy CNC)" },
                 { value: 3, label: "📦 Operator Cấp Phôi (Khu Nguyên Liệu)" },
                 { value: 5, label: "🧼 Operator Tẩy Rửa (Khu Tẩy Rửa)" },
-                { value: 1, label: "👷 Operator Vận Hành Chung" },
               ]}
             />
           </Form.Item>
