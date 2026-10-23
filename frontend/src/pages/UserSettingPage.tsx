@@ -98,10 +98,10 @@ export default function UserSettingPage() {
 
   const handleDelete = (id: number) => {
     Modal.confirm({
-      title: "Xác nhận xóa",
-      content: "Bạn có chắc chắn muốn xóa người dùng này không?",
+      title: "Xác nhận xóa vĩnh viễn",
+      content: "Bạn có chắc chắn muốn xóa vĩnh viễn tài khoản người dùng này khỏi hệ thống không? Thao tác này không thể hoàn tác.",
       centered: true,
-      okText: "Xóa",
+      okText: "Xóa vĩnh viễn",
       okType: "danger",
       cancelText: "Hủy",
       onOk: () => {

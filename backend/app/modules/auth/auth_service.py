@@ -15,7 +15,7 @@ from app.core.security import (
     verify_password,
 )
 from app.modules.auth.auth_access import build_user_access_summary, user_to_response
-from app.modules.auth.auth_model import User, Role, Permission
+from app.modules.auth.auth_model import User, Role, Permission, UserRole, UserWarehouse
 from app.modules.auth.auth_schema import (
     LoginRequest,
     LoginResponse,
@@ -31,13 +31,10 @@ from app.modules.warehouse.warehouse_zone.warehouse_model import Warehouse
 
 
 def _user_query(db: Session, *, include_inactive: bool = False):
-    q = db.query(User).options(
+    return db.query(User).options(
         selectinload(User.roles).selectinload(Role.permissions),
         selectinload(User.warehouses),
     )
-    if not include_inactive:
-        q = q.filter(User.is_active.is_(True))
-    return q
 
 
 def _get_active_user_by_username(db: Session, username: str) -> Optional[User]:
@@ -242,7 +239,7 @@ def refresh_access_token(db: Session, refresh_token: str) -> Optional[str]:
         return None
 
     user = db.query(User).filter(User.username == username).first()
-    if not user or not user.is_active:
+    if not user:
         return None
 
     return create_access_token(
@@ -256,8 +253,6 @@ def authenticate_user(db: Session, username: str, password: str) -> Optional[Use
     if not user:
         return None
     if not verify_password(password, user.hashed_password):
-        return None
-    if not user.is_active:
         return None
     return user
 
@@ -300,7 +295,7 @@ def update_user(db: Session, user_id: int, body: UserUpdate) -> Optional[User]:
         .filter(User.id == user_id)
         .first()
     )
-    if not user or not user.is_active:
+    if not user:
         return None
     data = body.model_dump(exclude_unset=True)
     data.pop("password_confirm", None)
@@ -330,15 +325,24 @@ def update_user(db: Session, user_id: int, body: UserUpdate) -> Optional[User]:
 
 
 def delete_user(db: Session, user_id: int) -> bool:
-    user = (
-        db.query(User)
-        .filter(User.id == user_id, User.is_active.is_(True))
-        .first()
-    )
+    user = db.query(User).filter(User.id == user_id).first()
     if not user:
         return False
-    user.is_active = False
-    from app.modules.production.production_models import UserLocation
+    from app.modules.production.production_models import (
+        UserLocation,
+        TransportRequest,
+        ProductionRecord,
+    )
+    # 1. Nullify references in history records to preserve audit trail
+    db.query(TransportRequest).filter(TransportRequest.created_by == user_id).update(
+        {"created_by": None}, synchronize_session=False
+    )
+    db.query(ProductionRecord).filter(ProductionRecord.operator_id == user_id).update(
+        {"operator_id": None}, synchronize_session=False
+    )
+    # 2. Delete external relationships
     db.query(UserLocation).filter(UserLocation.user_id == user_id).delete(synchronize_session=False)
+    # 3. Hard delete user permanently from database
+    db.delete(user)
     db.commit()
     return True
