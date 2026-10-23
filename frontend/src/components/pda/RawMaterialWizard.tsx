@@ -17,14 +17,16 @@ export const RawMaterialWizard: React.FC<RawMaterialWizardProps> = ({
 }) => {
   const [currentStep, setCurrentStep] = useState<1 | 2 | 3>(1);
   const [selectedPosition, setSelectedPosition] = useState<string>('');
+  const [selectedPositionName, setSelectedPositionName] = useState<string>('');
   const [selectedModel, setSelectedModel] = useState<string>('');
   const [rackId, setRackId] = useState<string>('');
   const [isScanningCamera, setIsScanningCamera] = useState<boolean>(false);
 
   // Bước 1: 1-Chạm Chọn Vị Trí -> Chuyển ngay Bước 2
-  const handleSelectPosition = (posId: string) => {
+  const handleSelectPosition = (pos: RawMaterialPosition) => {
     if ('vibrate' in navigator) navigator.vibrate?.(30);
-    setSelectedPosition(posId);
+    setSelectedPosition(pos.id);
+    setSelectedPositionName(pos.name || pos.id);
     setCurrentStep(2);
   };
 
@@ -32,8 +34,7 @@ export const RawMaterialWizard: React.FC<RawMaterialWizardProps> = ({
   const handleSelectModel = (modelId: string) => {
     if ('vibrate' in navigator) navigator.vibrate?.(30);
     setSelectedModel(modelId);
-    const randomSuffix = Math.floor(1000 + Math.random() * 9000);
-    setRackId(`RCK-${selectedPosition}-${randomSuffix}`);
+    setRackId('');
     setCurrentStep(3);
   };
 
@@ -62,6 +63,7 @@ export const RawMaterialWizard: React.FC<RawMaterialWizardProps> = ({
 
     // Tự động quay về Bước 1
     setSelectedPosition('');
+    setSelectedPositionName('');
     setSelectedModel('');
     setRackId('');
     setCurrentStep(1);
@@ -130,7 +132,7 @@ export const RawMaterialWizard: React.FC<RawMaterialWizardProps> = ({
               return (
                 <button
                   key={pos.id}
-                  onClick={() => handleSelectPosition(pos.id)}
+                  onClick={() => handleSelectPosition(pos)}
                   className={`min-h-[58px] p-3 rounded-xl border flex flex-col justify-center items-start text-left transition-all active:scale-[0.98] ${
                     isOccupied
                       ? 'bg-amber-950/20 border-amber-600/40 text-amber-200'
@@ -139,7 +141,7 @@ export const RawMaterialWizard: React.FC<RawMaterialWizardProps> = ({
                 >
                   <div className="flex items-center justify-between w-full">
                     <span className="text-xl font-bold font-mono text-white">
-                      {pos.id}
+                      {pos.name || pos.id}
                     </span>
                     <span
                       className={`text-[10px] px-2 py-0.5 rounded font-bold uppercase ${
@@ -177,7 +179,7 @@ export const RawMaterialWizard: React.FC<RawMaterialWizardProps> = ({
               ← Chọn lại Vị trí
             </button>
             <div className="text-xs font-mono font-bold text-slate-300 bg-slate-800 px-2 py-1 rounded">
-              Vị trí: {selectedPosition}
+              Vị trí: {selectedPositionName || selectedPosition}
             </div>
           </div>
 
@@ -225,14 +227,14 @@ export const RawMaterialWizard: React.FC<RawMaterialWizardProps> = ({
               ← Chọn lại Model
             </button>
             <div className="text-xs font-mono font-bold text-slate-300 bg-slate-800 px-2 py-1 rounded">
-              {selectedPosition}
+              {selectedPositionName || selectedPosition}
             </div>
           </div>
 
           <div className="bg-slate-800 rounded-xl p-3 border border-slate-700 mb-3 space-y-1.5 text-xs">
             <div className="flex justify-between">
               <span className="text-slate-400">Vị trí cấp:</span>
-              <span className="font-bold font-mono text-white">{selectedPosition}</span>
+              <span className="font-bold font-mono text-white">{selectedPositionName || selectedPosition}</span>
             </div>
             <div className="flex justify-between">
               <span className="text-slate-400">Model đã chọn:</span>
