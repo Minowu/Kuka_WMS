@@ -352,13 +352,14 @@ class DispatchCore:
 
         cart.current_stage_level = completed_stage
 
+        machine_code = loc.machine.machine_code if loc.machine else None
         record = ProductionRecord(
             container_id=cart.id,
             container_code=cart.container_code,
             item_id=cart.item_id,
             stage_level=completed_stage,
             location_id=cart.location_id,
-            machine_id=loc.machine_id,
+            machine_code=machine_code,
             operator_id=operator_id,
             notes=notes,
         )
