@@ -157,9 +157,7 @@ export const usePdaStore = create<PdaState>((set, get) => ({
 
     try {
       await callMaterialToCncApi({
-        station_id: stationId,
-        target_location_id: station.locationId,
-        sku: selectedModel,
+        destination_location_id: station.locationId,
       });
       showToast(`Đã gửi lệnh điều AMR chở phôi tới [${stationId}]`, 'kuka');
       await fetchFloorState();

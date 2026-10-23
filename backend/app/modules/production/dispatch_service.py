@@ -920,14 +920,12 @@ class DispatchService:
         priority: int = 10,
     ) -> TransportRequest:
         """
-        Operator at a CNC station requests a cart of `item_id`:
-        - Automatically infers `required_stage_level` from the CNC machine's step in `ProductionRoute`
-          when `required_stage_level` is not explicitly provided (e.g. Stage 1 machine -> Level 0,
-          Stage 2 machine -> Level 1, Stage 3 machine -> Level 2).
-        - If the requested `destination_location_id` (e.g. POS1) is occupied, automatically checks if the
-          sibling slot (POS2) of the same CNC machine is free and routes there.
-        - If a matching cart is available, locks the cart and creates a `FleetTask`.
-        - If no cart is available yet, places the request into `TransportQueue` (`WAITING_CART`).
+        Công nhân tại máy CNC bấm gọi phôi (1-Chạm).
+        - Tự động tra cứu Model và Stage Level từ RouteStepMachine trong ProductionRoute của máy CNC.
+        - Kiểm tra an toàn vị trí (_is_location_free).
+        - Tìm khay phôi thỏa mãn (FIFO cho Level 0, Euclidean Distance cho Level > 0).
+        - Nếu có phôi: Khóa khay và điều AMR (FleetTask).
+        - Nếu hết phôi: Đưa vào hàng đợi TransportQueue (WAITING_CART).
         """
         dest_loc = (
             db.query(Location)

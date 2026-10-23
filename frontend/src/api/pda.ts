@@ -86,8 +86,6 @@ export const registerRawMaterialApi = async (payload: RegisterRawMaterialPayload
 
 export interface CallMaterialPayload {
   destination_location_id: number;
-  item_id?: number;
-  required_stage_level?: number;
   priority?: number;
 }
 

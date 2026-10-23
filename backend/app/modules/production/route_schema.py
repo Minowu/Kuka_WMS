@@ -130,14 +130,8 @@ class RackRegistrationResponse(BaseModel):
 
 
 class CallMaterialRequest(BaseModel):
-    destination_location_id: int = Field(..., gt=0, description="ID vị trí máy CNC đang gọi phôi")
-    item_id: Optional[int] = Field(default=None, gt=0, description="ID Model sản phẩm cần gọi (tự suy ra từ Route của máy nếu để trống)")
-    required_stage_level: Optional[int] = Field(
-        default=None,
-        ge=0,
-        description="Stage level cần gọi (nếu để trống sẽ tự suy ra từ bước công đoạn của máy CNC trong Route)",
-    )
-    priority: int = Field(default=1, ge=1)
+    destination_location_id: int = Field(..., gt=0, description="ID vị trí slot máy CNC đang gọi phôi")
+    priority: int = Field(default=10, ge=1, description="Độ ưu tiên điều xe AMR")
 
 
 class CompleteStageRequest(BaseModel):

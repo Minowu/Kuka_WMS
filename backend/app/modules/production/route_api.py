@@ -240,8 +240,6 @@ def call_material(
         req = dispatch_service.call_material_to_cnc(
             db=db,
             destination_location_id=body.destination_location_id,
-            item_id=body.item_id,
-            required_stage_level=body.required_stage_level,
             created_by=user.id,
             priority=body.priority,
         )
@@ -250,7 +248,6 @@ def call_material(
             "request_code": req.request_code,
             "status": req.status,
             "container_id": req.container_id,
-
             "destination_location_id": req.destination_location_id,
             "required_stage_level": req.required_stage_level,
         }
