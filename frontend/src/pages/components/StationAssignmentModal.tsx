@@ -404,10 +404,7 @@ export default function StationAssignmentModal({
                       >
                         <Checkbox
                           checked={isSelected}
-                          onChange={(e) => {
-                            e.stopPropagation();
-                            toggleLocation(slot.id);
-                          }}
+                          className="pointer-events-none"
                         />
                         <div className="min-w-0 flex-1">
                           <div className="font-mono font-bold text-slate-800">{slot.location_code}</div>
@@ -473,10 +470,7 @@ export default function StationAssignmentModal({
                       >
                         <Checkbox
                           checked={isSelected}
-                          onChange={(e) => {
-                            e.stopPropagation();
-                            toggleLocation(slot.id);
-                          }}
+                          className="pointer-events-none"
                         />
                         <div className="min-w-0 flex-1">
                           <div className="font-mono font-bold text-slate-800">{slot.location_code}</div>
@@ -554,10 +548,7 @@ export default function StationAssignmentModal({
                             <Checkbox
                               checked={allSelected}
                               indeterminate={partiallySelected}
-                              onChange={(e) => {
-                                e.stopPropagation();
-                                toggleMachine(machineSlots);
-                              }}
+                              className="pointer-events-none"
                             />
                             <div>
                               <div className="flex items-center gap-1.5">
