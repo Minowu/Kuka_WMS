@@ -25,6 +25,7 @@ from app.modules.production.route_schema import (
     MapAvailableNodeResponse,
     PdaCncStation,
     PdaCncStationRack,
+    PdaCncSupportedModel,
     PdaModelItem,
     PdaRawMaterialSlot,
     PdaWashingSlot,
@@ -240,6 +241,7 @@ def call_material(
         req = dispatch_service.call_material_to_cnc(
             db=db,
             destination_location_id=body.destination_location_id,
+            item_id=body.item_id,
             created_by=user.id,
             priority=body.priority,
         )
@@ -523,7 +525,12 @@ def get_pda_cnc_stations(
                 .first()
             )
             if incoming_task:
-                status_str = "CALLING"
+                # Nếu robot đã nhận lệnh và bắt đầu di chuyển (in_progress, dispatched) -> CALLING (AMR đang tới)
+                # Nếu mới gửi sang Fleet hoặc đang xếp hàng -> QUEUED (Chờ điều phối / Chờ AMR trống)
+                if incoming_task.status in ("in_progress", "dispatched"):
+                    status_str = "CALLING"
+                else:
+                    status_str = "QUEUED"
                 calling_mission_code = incoming_task.mission_code
                 calling_model = (
                     incoming_task.request.item.name
@@ -542,7 +549,7 @@ def get_pda_cnc_stations(
                     .first()
                 )
                 if waiting_req:
-                    status_str = "CALLING"
+                    status_str = "QUEUED"
                     calling_model = (
                         waiting_req.item.name if waiting_req.item else "Phôi tiêu chuẩn"
                     )
@@ -553,6 +560,38 @@ def get_pda_cnc_stations(
                     calling_model = None
                     calling_mission_code = None
                     current_rack = None
+
+        # ADR-002: Lấy danh sách các Model & Công đoạn mà máy này hỗ trợ theo 3NF RouteStepMachine
+        supported_models = []
+        if loc.machine_id:
+            from app.modules.production.production_models import RouteStepMachine, RouteStep, ProductionRoute
+            from app.modules.warehouse.item.item_model import Item
+            step_links = (
+                db.query(RouteStepMachine)
+                .join(RouteStep, RouteStepMachine.route_step_id == RouteStep.id)
+                .join(ProductionRoute, RouteStep.route_id == ProductionRoute.id)
+                .join(Item, ProductionRoute.item_id == Item.id)
+                .filter(
+                    RouteStepMachine.machine_id == loc.machine_id,
+                    ProductionRoute.is_active == True,
+                )
+                .order_by(Item.sku.asc(), RouteStep.stage_level.asc())
+                .all()
+            )
+            for link in step_links:
+                st = link.route_step
+                it = st.route.item
+                in_lvl = max(st.stage_level - 1, 0)
+                supported_models.append(
+                    PdaCncSupportedModel(
+                        item_id=it.id,
+                        model_code=it.sku,
+                        model_name=it.name,
+                        stage_level=st.stage_level,
+                        stage_name=st.step_name or f"Level {st.stage_level}",
+                        input_stage_level=in_lvl,
+                    )
+                )
 
         result.append(
             PdaCncStation(
@@ -567,6 +606,7 @@ def get_pda_cnc_stations(
                 calling_model=calling_model,
                 calling_mission_code=calling_mission_code,
                 current_rack=current_rack,
+                supported_models=supported_models,
             )
         )
     return result

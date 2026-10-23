@@ -36,7 +36,7 @@ interface PdaState {
   supplyRawMaterial: (data: { positionId: string; modelId: string; rackId: string }) => Promise<void>;
 
   // Luồng CNC
-  callMaterialToCnc: (stationId: string, modelId?: string) => Promise<void>;
+  callMaterialToCnc: (stationId: string, itemId: number) => Promise<void>;
   updateCncStageLevel: (stationId: string) => Promise<void>;
 
   // Luồng Tẩy Rửa
@@ -127,20 +127,24 @@ export const usePdaStore = create<PdaState>((set, get) => ({
     }
   },
 
-  // 2. Gọi phôi đến trạm CNC (1 chạm trực tiếp theo Route đã cấu hình)
-  callMaterialToCnc: async (stationId, modelId) => {
+  // 2. Gọi phôi đến trạm CNC (ADR-002: Gọi phôi kèm Model ID đã chọn)
+  callMaterialToCnc: async (stationId, itemId) => {
     const { cncStations, models, showToast, fetchFloorState } = get();
     const station = cncStations.find((s) => s.id === stationId);
-    const model = modelId
-      ? models.find((m) => String(m.id) === String(modelId) || m.code === modelId)
-      : (models.length > 0 ? models[0] : null);
 
     if (!station || !station.locationId) {
       showToast('Trạm CNC không hợp lệ hoặc chưa liên kết tọa độ!', 'warning');
       return;
     }
 
-    const selectedModel = model ? model.code : '';
+    if (!itemId) {
+      showToast('Vui lòng chọn Model sản phẩm cần gọi!', 'warning');
+      return;
+    }
+
+    const supported = station.supportedModels?.find((m) => m.itemId === itemId);
+    const model = models.find((m) => Number(m.id) === itemId || Number(m.itemId) === itemId);
+    const modelLabel = supported ? `${supported.modelCode} (${supported.modelName})` : (model?.name || `Model #${itemId}`);
 
     // Optimistic UI update
     set((state) => ({
@@ -149,7 +153,7 @@ export const usePdaStore = create<PdaState>((set, get) => ({
           ? {
               ...st,
               status: 'CALLING',
-              callingModel: model ? model.name : 'Phôi theo Route',
+              callingModel: modelLabel,
             }
           : st
       ),
@@ -158,8 +162,9 @@ export const usePdaStore = create<PdaState>((set, get) => ({
     try {
       await callMaterialToCncApi({
         destination_location_id: station.locationId,
+        item_id: itemId,
       });
-      showToast(`Đã gửi lệnh điều AMR chở phôi tới [${stationId}]`, 'kuka');
+      showToast(`Đã điều AMR chở [${modelLabel}] tới [${station.name}]`, 'kuka');
       await fetchFloorState();
     } catch (err: any) {
       const errorMsg = err?.response?.data?.detail || err?.message || 'Lỗi gọi phôi';

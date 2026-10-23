@@ -119,3 +119,19 @@ File tài liệu này đóng vai trò là bảng theo dõi tiến độ thi côn
 
 ### Lưu ý cho các kỹ sư tiếp theo:
 * Mọi thay đổi về gán máy trong quy trình sản xuất trên Web Admin sẽ tự động phản ánh ngay lập tức trên màn hình PDA của công nhân mà không cần cấu hình thêm ở tầng trung gian.
+
+---
+
+## 5. CẬP NHẬT TRẠNG THÁI REAL-TIME TỪ KUKA FLEET (QUEUED vs CALLING)
+
+### Thực tế xưởng:
+Khi công nhân bấm **GỌI PHÔI**, hệ thống gửi nhiệm vụ tới KUKA Fleet hoặc xếp vào hàng đợi WMS. Trong xưởng có thể có nhiều lệnh đang chờ trước đó, robot chưa thực sự bắt đầu di chuyển tới máy này.
+Nếu hiển thị ngay *"AMR ĐANG TỚI"* sẽ gây nhầm lẫn cho công nhân.
+
+### Giải pháp phân tách trạng thái:
+1. **`QUEUED` (Đang Chờ AMR / Đang Chờ Điều Phối)**:
+   - Áp dụng khi: `TransportRequest.status == 'queued_for_cart'` hoặc `FleetTask.status in ('created', 'pending_submit', 'sent')`.
+   - Giao diện PDA: Thẻ màu vàng hổ phách (*Amber Badge*), thông báo: *"Đã tiếp nhận yêu cầu, đang xếp hàng chờ AMR..."*.
+2. **`CALLING` (AMR Đang Chở Tới / Đang Thực Hiện)**:
+   - Áp dụng khi: KUKA Fleet tiếp nhận thực thi nhiệm vụ (`FleetTask.status in ('dispatched', 'in_progress')` tương ứng webhook `MOVE_BEGIN`, `UP_CONTAINER`).
+   - Giao diện PDA: Thẻ màu xanh dương xung nhịp (*Blue Pulse Badge*), thông báo: *"AMR đã nhận nhiệm vụ và đang chở phôi tới máy!"*.

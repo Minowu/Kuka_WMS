@@ -37,6 +37,14 @@ export const getPdaCncStationsApi = async (): Promise<CncMachineStation[]> => {
     status: s.status,
     callingModel: s.calling_model ?? s.callingModel,
     callingTaskCode: s.calling_mission_code ?? s.calling_task_code ?? s.callingTaskCode,
+    supportedModels: (s.supported_models || s.supportedModels || []).map((m: any) => ({
+      itemId: m.item_id ?? m.itemId,
+      modelCode: m.model_code ?? m.modelCode,
+      modelName: m.model_name ?? m.modelName,
+      stageLevel: m.stage_level ?? m.stageLevel,
+      stageName: m.stage_name ?? m.stageName,
+      inputStageLevel: m.input_stage_level ?? m.inputStageLevel,
+    })),
     currentRack: s.current_rack
       ? {
           rackId: s.current_rack.rack_id ?? s.current_rack.rackId,
@@ -86,6 +94,7 @@ export const registerRawMaterialApi = async (payload: RegisterRawMaterialPayload
 
 export interface CallMaterialPayload {
   destination_location_id: number;
+  item_id: number;
   priority?: number;
 }
 

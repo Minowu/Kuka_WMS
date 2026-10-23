@@ -18,6 +18,15 @@ export interface PartModel {
   standardQuantityPerCart?: number;
 }
 
+export interface CncSupportedModel {
+  itemId: number;
+  modelCode: string;
+  modelName: string;
+  stageLevel: number;
+  stageName: string;
+  inputStageLevel: number;
+}
+
 export interface CncMachineStation {
   id: string; // 'CNC-01-POS1' -> 'CNC-04-POS2'
   locationId?: number;
@@ -26,9 +35,10 @@ export interface CncMachineStation {
   name: string;
   assignedStageLevel: number; // Cấp độ công đoạn ĐƯỢC CHỈ ĐỊNH cho máy này
   stageName: string; // Tên công đoạn: 'Phay Thô', 'Phay Tinh', 'Khoan Tappi & Hoàn Tất'
-  status: 'EMPTY' | 'CALLING' | 'OCCUPIED';
+  status: 'EMPTY' | 'QUEUED' | 'CALLING' | 'OCCUPIED';
   callingModel?: string;
   callingTaskCode?: string;
+  supportedModels?: CncSupportedModel[];
   currentRack?: {
     rackId: string;
     model: string;

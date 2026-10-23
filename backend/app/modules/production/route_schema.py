@@ -131,6 +131,7 @@ class RackRegistrationResponse(BaseModel):
 
 class CallMaterialRequest(BaseModel):
     destination_location_id: int = Field(..., gt=0, description="ID vị trí slot máy CNC đang gọi phôi")
+    item_id: int = Field(..., gt=0, description="ID Model sản phẩm công nhân chọn gọi tới máy")
     priority: int = Field(default=10, ge=1, description="Độ ưu tiên điều xe AMR")
 
 
@@ -176,6 +177,17 @@ class PdaCncStationRack(BaseModel):
     started_at: Optional[str] = None
 
 
+class PdaCncSupportedModel(BaseModel):
+    model_config = ConfigDict(protected_namespaces=())
+
+    item_id: int
+    model_code: str
+    model_name: str
+    stage_level: int
+    stage_name: str
+    input_stage_level: int
+
+
 class PdaCncStation(BaseModel):
     id: str
     location_id: int
@@ -188,6 +200,7 @@ class PdaCncStation(BaseModel):
     calling_model: Optional[str] = None
     calling_mission_code: Optional[str] = None
     current_rack: Optional[PdaCncStationRack] = None
+    supported_models: list[PdaCncSupportedModel] = []
 
 
 class PdaWashingSlotRack(BaseModel):

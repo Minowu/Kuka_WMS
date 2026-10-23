@@ -243,30 +243,15 @@ class DispatchCore:
                 f"Vị trí '{dest_loc.location_code}' hiện đang có xe hoặc đã có AMR đặt chỗ. Vui lòng chọn vị trí trống."
             )
 
+        # ADR-002: Kiểm tra và xác thực item_id
         if item_id is None:
-            m_id = dest_loc.machine_id
-            step_link = None
-            if m_id:
-                step_link = (
-                    db.query(RouteStepMachine)
-                    .join(RouteStep, RouteStepMachine.route_step_id == RouteStep.id)
-                    .join(ProductionRoute, RouteStep.route_id == ProductionRoute.id)
-                    .filter(
-                        RouteStepMachine.machine_id == m_id,
-                        ProductionRoute.is_active.is_(True),
-                    )
-                    .first()
-                )
-            if step_link and step_link.route_step and step_link.route_step.route:
-                item_id = step_link.route_step.route.item_id
-            else:
-                raise ValueError(
-                    f"Máy tại vị trí '{dest_loc.location_code}' chưa được cấu hình trong Quy trình sản xuất (Production Route). "
-                    "Vui lòng vào trang Quản trị để gán Route cho máy trước khi gọi phôi."
-                )
+            raise ValueError(
+                f"Vui lòng chọn Model sản phẩm cần gọi đến vị trí '{dest_loc.location_code}'."
+            )
 
+        # Xác thực máy này có được cấu hình gia công cho item_id trong ProductionRoute hay không
+        input_lvl, _, _ = self.selector.get_stage_info_for_machine(db, dest_loc, item_id)
         if required_stage_level is None:
-            input_lvl, _, _ = self.selector.get_stage_info_for_machine(db, dest_loc, item_id)
             required_stage_level = input_lvl
 
         req_code = f"REQ-{uuid.uuid4().hex[:8].upper()}"

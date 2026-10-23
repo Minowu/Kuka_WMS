@@ -485,7 +485,6 @@ export default function ProductionRoutePage() {
                           {...field}
                           name={[field.name, 'allowed_machines']}
                           label="Máy CNC thực hiện"
-                          rules={[{ required: true, message: 'Vui lòng chọn ít nhất 1 máy CNC!' }]}
                           className="!mb-1"
                         >
                           <Select
@@ -566,11 +565,10 @@ function RouteDetailTimeline({ routeId }: { routeId: number }) {
         {steps.map((s, idx) => (
           <React.Fragment key={s.id || idx}>
             <div
-              className={`p-3 rounded-lg border shadow-sm ${
-                s.is_final_cnc_step
+              className={`p-3 rounded-lg border shadow-sm ${s.is_final_cnc_step
                   ? 'bg-amber-50/90 border-amber-300'
                   : 'bg-white border-blue-200'
-              }`}
+                }`}
             >
               <div className="flex items-center gap-2 mb-1">
                 <Tag color={s.is_final_cnc_step ? 'orange' : 'blue'} className="!mr-0 font-medium">
