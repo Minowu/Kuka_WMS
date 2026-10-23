@@ -48,6 +48,12 @@ def get_warehouse_by_id(db: Session, warehouse_id: int) -> Optional[Warehouse]:
 
 
 def create_warehouse(db: Session, body: WarehouseCreate) -> Warehouse:
+    existing_count = db.query(Warehouse).count()
+    if existing_count >= 1:
+        raise ValueError(
+            "Hệ thống KUKA WMS đang vận hành theo mô hình 1 Nhà máy/Xưởng tập trung. "
+            "Không thể tạo thêm kho mới! Bạn chỉ có thể chỉnh sửa thông tin xưởng hiện có."
+        )
     if db.query(Warehouse).filter(Warehouse.code == body.code).first():
         raise ValueError("Warehouse code already exists")
     warehouse = Warehouse(
@@ -98,6 +104,8 @@ def update_warehouse(
 
 
 def delete_warehouse(db: Session, warehouse_id: int) -> bool:
+    if db.query(Warehouse).count() <= 1:
+        raise ValueError("Không thể xóa kho duy nhất của hệ thống!")
     warehouse = get_warehouse_by_id(db, warehouse_id)
     if not warehouse:
         return False
