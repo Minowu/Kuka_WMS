@@ -19,7 +19,6 @@ import type {
   WarehouseLocation,
 } from '@/types/warehouseLocation';
 import { ApiErrorResponse } from '@/types/apiError';
-import { getMockStockedLocatorCodes } from '@/utils/mockMapInventory';
 
 export const warehouseLocationsQueryKey = (warehouseId: number) =>
   ['warehouse_locations', warehouseId] as const;
@@ -122,21 +121,8 @@ export const useStockedLocationIds = (warehouseId: number) => {
         ids.add(row.location_id);
       }
     }
-
-    const locations = locationsQuery.data ?? [];
-    if (locations.length > 0) {
-      const mockLocators = getMockStockedLocatorCodes(
-        locations.map((location) => location.location_code),
-      );
-      for (const location of locations) {
-        if (mockLocators.has(location.location_code) && !ids.has(location.id)) {
-          ids.add(location.id);
-        }
-      }
-    }
-
     return ids;
-  }, [stockQuery.data, locationsQuery.data]);
+  }, [stockQuery.data]);
 
   return {
     ...stockQuery,

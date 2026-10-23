@@ -23,11 +23,6 @@ import {
   STATION_PICK_TOTAL_KEY,
   type StationPickConfirm,
 } from "@/utils/sortingStationPickRows";
-import {
-  OUTBOUND_STATION_FE_SIM_ENABLED,
-  buildOutboundStationFeSimulation,
-  mergeWithOutboundStationFeSimulation,
-} from "@/utils/outboundStationFeSimulation";
 
 export function useSortingWaveMapContext(
   warehouseId: number,
@@ -63,33 +58,8 @@ export function useSortingWaveMapContext(
   );
   const fillStations = sortingFillsData?.stations ?? [];
 
-  const feSimulation = useMemo(() => {
-    if (!OUTBOUND_STATION_FE_SIM_ENABLED || warehouseId <= 0 || !wave) return null;
-    return buildOutboundStationFeSimulation({
-      locationByCode,
-      outboundStationIds,
-      sortingStationIds,
-      incompleteVehicles,
-    });
-  }, [
-    warehouseId,
-    wave,
-    locationByCode,
-    outboundStationIds,
-    sortingStationIds,
-    incompleteVehicles,
-  ]);
 
-  const mergedFillStations = useMemo(() => {
-    if (!feSimulation) return fillStations;
-    const byCode = new Map(
-      fillStations.map((station) => [station.location_code, station]),
-    );
-    for (const simStation of feSimulation.fillStations) {
-      byCode.set(simStation.location_code, simStation);
-    }
-    return [...byCode.values()];
-  }, [fillStations, feSimulation]);
+  const mergedFillStations = fillStations;
 
   const [confirmedPicksByStation, setConfirmedPicksByStation] = useState<
     Record<string, StationPickConfirm>
@@ -120,12 +90,8 @@ export function useSortingWaveMapContext(
       mergedFillStations,
       locationByCode,
     );
-    const withSimulation = mergeWithOutboundStationFeSimulation(
-      base,
-      feSimulation,
-    );
     const withSortingFallback = ensureSortingStationLabels(
-      withSimulation,
+      base,
       sortingStationCodes,
       locationByCode,
     );
@@ -139,7 +105,6 @@ export function useSortingWaveMapContext(
     incompleteVehicles,
     mergedFillStations,
     sortingFillsData?.assignment_labels,
-    feSimulation,
     confirmedPicksByStation,
     locationByCode,
     sortingStationCodes,
@@ -274,7 +239,6 @@ export function useSortingWaveMapContext(
   return {
     waveStationIds,
     stationOverlayLabels,
-    feSimulation,
     stationAssignment,
     selectedStationCode,
     selectedStationLocationId,

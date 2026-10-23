@@ -1,6 +1,5 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
-import { DEFAULT_READ_NOTIFICATION_IDS } from '@/data/mockNotifications'
 
 interface NotificationState {
   readIds: string[]
@@ -12,7 +11,7 @@ interface NotificationState {
 export const useNotificationStore = create<NotificationState>()(
   persist(
     (set, get) => ({
-      readIds: DEFAULT_READ_NOTIFICATION_IDS,
+      readIds: [],
       markAsRead: (id) =>
         set((state) =>
           state.readIds.includes(id)
