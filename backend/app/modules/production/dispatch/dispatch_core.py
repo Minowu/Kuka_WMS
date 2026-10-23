@@ -152,13 +152,18 @@ class DispatchCore:
 
         qty = quantity if (quantity is not None and quantity > 0) else (item.standard_quantity_per_cart or 120)
 
-        self.fleet_client.fleet_insert_rack(location.location_code, clean_container_code)
-
         cart = db.query(ItemStock).filter(ItemStock.container_code == clean_container_code).first()
         now = datetime.now(timezone.utc)
         if cart:
             if cart.is_locked:
                 raise ValueError(f"Rack '{clean_container_code}' đang bị khóa bởi tác vụ vận chuyển '{cart.locked_by_mission_code}'.")
+            if cart.is_active and cart.location_id and cart.location_id != location.id:
+                curr_loc = db.query(Location).filter(Location.id == cart.location_id).first()
+                loc_name = curr_loc.location_code if curr_loc else f"ID={cart.location_id}"
+                raise ValueError(
+                    f"Rack '{clean_container_code}' hiện đang hoạt động tại vị trí '{loc_name}'. "
+                    f"Cần hoàn thành chu trình trước khi đăng ký lại ở Phôi Thô."
+                )
             cart.item_id = item.id
             cart.location_id = location.id
             cart.destination_location_id = None
@@ -185,6 +190,9 @@ class DispatchCore:
             )
             db.add(cart)
 
+        # Chỉ thông báo cho KUKA Fleet sau khi toàn bộ điều kiện Database đã hợp lệ 100%
+        self.fleet_client.fleet_insert_rack(location.location_code, clean_container_code)
+
         db.flush()
 
         resolved = self.queue_service.try_resolve_waiting_cart_queue(
@@ -197,6 +205,7 @@ class DispatchCore:
 
         return {
             "success": True,
+            "container_id": cart.id,
             "container_code": clean_container_code,
             "item_id": item.id,
             "item_name": item.name,
