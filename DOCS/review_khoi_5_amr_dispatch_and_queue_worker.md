@@ -18,13 +18,19 @@ sequenceDiagram
     participant KUKA as "KUKA Fleet Manager (RCS / ICS)"
     participant Celery as "Celery Worker (production_celery_task.py)"
 
-    Note over Worker,KUKA: LUỒNG 1: CÔNG NHÂN GỌI PHÔI 1-CHẠM TẠI MÁY CNC (PULL MODEL)
-    Worker->>PDA: Bấm nút [GỌI PHÔI (ĐIỀU AMR ĐẾN)] tại máy CNC-01 (POS1)
-    PDA->>RouteAPI: POST /api/v1/production/dispatch/call-material { destination_location_id: 189 }
+    Note over Worker,KUKA: LUỒNG 1: CÔNG NHÂN GỌI PHÔI TẠI MÁY CNC (PULL MODEL - CHỌN MODEL / CONTEXT-AWARE)
+    Worker->>PDA: Bấm nút [GỌI PHÔI] tại máy CNC-01 (POS1)
+    alt Máy được gán từ 2 Model trở lên (ADR-002)
+        PDA-->>Worker: Mở popup chọn Model phôi cần gia công ca này
+        Worker->>PDA: Chọn Model (VD: MODEL-A, item_id: 88)
+    else Máy chuyên dụng (chỉ có 1 Model duy nhất)
+        PDA->>PDA: Tự động chọn Model duy nhất đó (1-chạm)
+    end
+    PDA->>RouteAPI: POST /api/v1/production/dispatch/call-material { destination_location_id: 189, item_id: 88 }
     RouteAPI->>RouteAPI: _ensure_user_can_access_location (Xác thực quyền BOLA)
-    RouteAPI->>Dispatch: call_material_to_cnc(dest_location_id=189)
+    RouteAPI->>Dispatch: call_material_to_cnc(dest_location_id=189, item_id=88)
     Dispatch->>DB: Kiểm tra an toàn vị trí _is_location_free(189)
-    Dispatch->>DB: Tự suy Model & Step Level yêu cầu từ RouteStepMachine (VD: OP1 cần phôi Level 0)
+    Dispatch->>DB: Xác thực máy được phép chạy item_id theo RouteStepMachine & lấy required_stage_level (ADR-002)
     Dispatch->>DB: Tìm khay phôi thỏa mãn: find_fifo_available_cart (FIFO + Euclidean Distance)
     
     alt Có khay phôi sẵn sàng tại Kho Thô / Trạm trước

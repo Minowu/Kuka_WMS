@@ -81,10 +81,16 @@ sequenceDiagram
     Store-->>PDA: Render giao diện (TRỐNG, AMR ĐANG TỚI, ĐANG GIA CÔNG)
 
     rect rgb(235, 245, 255)
-    Note over CNC,AMR: THAO TÁC 1: GỌI PHÔI (Thao tác 1-chạm, không cần chọn Model)
+    Note over CNC,AMR: THAO TÁC 1: GỌI PHÔI (Context-Aware: Chọn Model nếu máy đa năng / 1-chạm nếu máy đơn model - Xem ADR-002)
     CNC->>PDA: Bấm "GỌI PHÔI (ĐIỀU AMR ĐẾN)" tại POS1
-    PDA->>BE: POST /call-material {destination_location_id: 101}
-    BE->>Dispatch: Kiểm tra Route của máy CNC -> Tự suy Model & Level yêu cầu
+    alt Máy được gán >= 2 Model (ADR-002)
+        PDA-->>CNC: Hiển thị popup chọn Model (VD: Model A hoặc Model B)
+        CNC->>PDA: Chọn Model (item_id: 88)
+    else Máy chỉ có 1 Model duy nhất
+        PDA->>PDA: Tự động chọn Model duy nhất đó
+    end
+    PDA->>BE: POST /call-material {destination_location_id: 101, item_id: 88}
+    BE->>Dispatch: Xác thực máy thuộc Route của item_id -> Lấy required_stage_level
     Dispatch->>AMR: Tìm khay phù hợp & tạo lệnh điều xe AMR chạy tới POS1
     BE-->>PDA: Thành công -> Slot chuyển ngay sang "AMR ĐANG TỚI"
     end
