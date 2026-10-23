@@ -11,17 +11,12 @@ import {
   ShopOutlined,
   AppstoreOutlined,
   BoxPlotOutlined,
-  ImportOutlined,
-  ExportOutlined,
-  AuditOutlined,
   BellOutlined,
   SettingOutlined,
   ClusterOutlined,
   RightOutlined,
   UserOutlined,
   HomeOutlined,
-  QrcodeOutlined,
-  UnorderedListOutlined,
   BranchesOutlined,
 } from "@ant-design/icons";
 
@@ -248,95 +243,52 @@ export default function Sidebar() {
       </div>
 
       <nav className="flex flex-col gap-1 flex-1 overflow-y-auto mt-6 px-3 overflow-x-hidden">
-        {isAdmin ? (
-          <>
-            <SidebarLink
-              to="/report"
-              icon={<BarChartOutlined className="text-lg" />}
-              label="Báo cáo"
-              collapsed={collapsed}
-            />
+        <SidebarLink
+          to="/report"
+          icon={<BarChartOutlined className="text-lg" />}
+          label="Báo cáo"
+          collapsed={collapsed}
+        />
 
-            <SidebarGroup
-              label="Sản xuất & Điều phối"
-              icon={<ShopOutlined className="text-lg" />}
-              items={[
-                {
-                  to: "/dashboard",
-                  icon: <AppstoreOutlined />,
-                  label: "Tổng quan xưởng",
-                },
-                { to: "/items", icon: <BoxPlotOutlined />, label: "Model Sản phẩm" },
-                {
-                  to: "/production/routes",
-                  icon: <BranchesOutlined />,
-                  label: "Quy trình Route",
-                },
-                { to: "/production/stations", icon: <ClusterOutlined />, label: "Cấu hình Trạm" },
-              ]}
-              collapsed={collapsed}
-            />
-            <SidebarLink
-              to="/notification"
-              icon={<BellOutlined className="text-lg" />}
-              label="Thông báo"
-              collapsed={collapsed}
-              badge={unsolvedCount}
-            />
-            <SidebarGroup
-              label="Cài đặt hệ thống"
-              icon={<SettingOutlined className="text-lg" />}
-              items={[
-                {
-                  to: "/setting/users",
-                  icon: <UserOutlined />,
-                  label: "Tài khoản & Trạm",
-                },
-                { to: "/setting/warehouse", icon: <HomeOutlined />, label: "Phân xưởng" },
-              ]}
-              collapsed={collapsed}
-            />
-          </>
-        ) : (
-          <>
-            <SidebarLink
-              to="/overview"
-              icon={<AppstoreOutlined className="text-lg" />}
-              label="Tổng quan"
-              collapsed={collapsed}
-            />
-            <SidebarLink
-              to="/import"
-              icon={<ImportOutlined className="text-lg" />}
-              label="Nhập kho"
-              collapsed={collapsed}
-            />
-            <SidebarLink
-              to="/export"
-              icon={<ExportOutlined className="text-lg" />}
-              label="Xuất kho"
-              collapsed={collapsed}
-            />
-            <SidebarLink
-              to="/inventory"
-              icon={<AuditOutlined className="text-lg" />}
-              label="Kiểm kê"
-              collapsed={collapsed}
-            />
-            <SidebarLink
-              to="/qrtablet"
-              icon={<QrcodeOutlined className="text-lg" />}
-              label="Giao diện PDA"
-              collapsed={collapsed}
-            />
-            <SidebarLink
-              to="/print-qr"
-              icon={<QrcodeOutlined className="text-lg" />}
-              label="In mã QR"
-              collapsed={collapsed}
-            />
-          </>
-        )}
+        <SidebarGroup
+          label="Sản xuất & Điều phối"
+          icon={<ShopOutlined className="text-lg" />}
+          items={[
+            {
+              to: "/dashboard",
+              icon: <AppstoreOutlined />,
+              label: "Tổng quan xưởng",
+            },
+            { to: "/items", icon: <BoxPlotOutlined />, label: "Model Sản phẩm" },
+            {
+              to: "/production/routes",
+              icon: <BranchesOutlined />,
+              label: "Quy trình Route",
+            },
+            { to: "/production/stations", icon: <ClusterOutlined />, label: "Cấu hình Trạm" },
+          ]}
+          collapsed={collapsed}
+        />
+        <SidebarLink
+          to="/notification"
+          icon={<BellOutlined className="text-lg" />}
+          label="Thông báo"
+          collapsed={collapsed}
+          badge={unsolvedCount}
+        />
+        <SidebarGroup
+          label="Cài đặt hệ thống"
+          icon={<SettingOutlined className="text-lg" />}
+          items={[
+            {
+              to: "/setting/users",
+              icon: <UserOutlined />,
+              label: "Tài khoản & Trạm",
+            },
+            { to: "/setting/warehouse", icon: <HomeOutlined />, label: "Phân xưởng" },
+          ]}
+          collapsed={collapsed}
+        />
       </nav>
 
       <div
