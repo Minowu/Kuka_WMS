@@ -721,34 +721,23 @@ class DispatchService:
             )
 
         machine_id = location.machine_id
-        machine_code = location.machine_code
 
         # 1. Match via normalized 3NF RouteStepMachine links
-        if steps and (machine_id or machine_code):
+        if steps and machine_id:
             for idx, step in enumerate(steps):
-                matched = False
-                for link in step.allowed_machine_links or []:
-                    if machine_id and link.machine_id == machine_id:
-                        matched = True
-                        break
-                    if machine_code and link.machine and link.machine.machine_code == machine_code:
-                        matched = True
-                        break
+                matched = any(
+                    link.machine_id == machine_id
+                    for link in (step.allowed_machine_links or [])
+                )
                 if matched:
                     input_lvl = max(step.stage_level - 1, 0)
                     is_final = bool(step.is_final_cnc_step) or (idx == len(steps) - 1)
                     return (input_lvl, step.stage_level, is_final)
 
-        # 2. Fallback by machine_code naming or first step
-        if machine_code == "CNC-03":
-            return (1, 2, False)
-        if machine_code == "CNC-04":
-            return (2, 3, True)
-        if steps:
-            first_step = steps[0]
-            is_final = bool(first_step.is_final_cnc_step) or len(steps) == 1
-            return (max(first_step.stage_level - 1, 0), first_step.stage_level, is_final)
-        return (0, 1, False)
+        raise ValueError(
+            f"Máy CNC tại vị trí '{location.location_code}' chưa được cấu hình trong bất kỳ công đoạn nào "
+            f"của Quy trình sản xuất (Model ID={item_id}). Vui lòng gán Route cho máy trước khi vận hành."
+        )
 
     def find_fifo_available_cart(
         self,
@@ -943,7 +932,6 @@ class DispatchService:
 
         if item_id is None:
             m_id = dest_loc.machine_id
-            m_code = dest_loc.machine_code
             step_link = None
             if m_id:
                 step_link = (
@@ -956,28 +944,13 @@ class DispatchService:
                     )
                     .first()
                 )
-            if not step_link and m_code:
-                step_link = (
-                    db.query(RouteStepMachine)
-                    .join(Machine, RouteStepMachine.machine_id == Machine.id)
-                    .join(RouteStep, RouteStepMachine.route_step_id == RouteStep.id)
-                    .join(ProductionRoute, RouteStep.route_id == ProductionRoute.id)
-                    .filter(
-                        Machine.machine_code == m_code,
-                        ProductionRoute.is_active.is_(True),
-                    )
-                    .first()
-                )
             if step_link and step_link.route_step and step_link.route_step.route:
                 item_id = step_link.route_step.route.item_id
             else:
-                first_item = db.query(Item).filter(Item.is_active.is_(True)).first()
-                if first_item:
-                    item_id = first_item.id
-                else:
-                    raise ValueError(
-                        f"Không thể xác định Model sản phẩm cho vị trí '{dest_loc.location_code}'. Vui lòng cấu hình Route cho máy."
-                    )
+                raise ValueError(
+                    f"Máy tại vị trí '{dest_loc.location_code}' chưa được cấu hình trong Quy trình sản xuất (Production Route). "
+                    "Vui lòng vào trang Quản trị để gán Route cho máy trước khi gọi phôi."
+                )
 
         if required_stage_level is None:
             input_lvl, _, _ = self.get_stage_info_for_machine(db, dest_loc, item_id)
@@ -986,7 +959,7 @@ class DispatchService:
         req_code = f"REQ-{uuid.uuid4().hex[:8].upper()}"
         transport_req = TransportRequest(
             request_code=req_code,
-            request_type="CALL_MATERIAL",
+            request_type="CALL_CNC",
             item_id=item_id,
             destination_location_id=dest_loc.id,
             required_stage_level=required_stage_level,
