@@ -86,6 +86,18 @@ class KukaFleetClient:
                 response.raise_for_status()
                 resp_data = response.json()
             logger.info("KUKA Fleet POST %s [%s] response: %s", endpoint_path, api_name, resp_data)
+
+            # Kiểm tra quy chuẩn phản hồi của KUKA Fleet Manager (code: 0/200 và success: True)
+            fleet_success = resp_data.get("success") is True and str(resp_data.get("code", "")) in ("0", "200")
+            fleet_code = str(resp_data.get("code", ""))
+            fleet_msg = resp_data.get("message")
+
+            # Ngoại lệ hợp lệ riêng: Với containerIn, nếu container đã tồn tại trong Fleet (code 100502: Container has entered)
+            # thì coi như idempotent thành công vì container đã sẵn sàng ở Fleet.
+            if not fleet_success and api_name == "containerIn" and fleet_code == "100502":
+                logger.info("Fleet containerIn idempotent: Container %s already exists in Fleet (100502)", container_code)
+                fleet_success = True
+
             if db:
                 call_log = FleetApiCall(
                     api_name=api_name,
@@ -95,10 +107,17 @@ class KukaFleetClient:
                     request_body=payload,
                     http_status=http_status,
                     response_body=resp_data,
-                    success=True,
+                    success=fleet_success,
+                    error=fleet_msg if not fleet_success else None,
                 )
                 db.add(call_log)
                 db.flush()
+
+            if not fleet_success:
+                err_text = f"KUKA Fleet từ chối [{api_name}] (code={fleet_code}): {fleet_msg}"
+                logger.warning(err_text)
+                raise IcsError(err_text, retryable=False)
+
             return resp_data
         except httpx.HTTPStatusError as e:
             http_status = e.response.status_code
@@ -472,9 +491,24 @@ class KukaFleetClient:
             task.sent_at = datetime.now(timezone.utc)
             db.flush()
         except IcsError as e:
-            logger.warning("Could not submit task %s to Fleet immediately: %s", task.mission_code, e)
-            task.status = "pending_submit"
+            logger.warning("Could not submit task %s to Fleet: %s", task.mission_code, e)
             task.submit_attempts += 1
             task.error_message = str(e)
+
+            # Nếu lỗi không thể retry (ví dụ Fleet từ chối do không có container, sai node, vị trí sai):
+            # Đánh dấu FAILED và giải phóng khóa cart / khôi phục TransportRequest ngay lập tức!
+            if not getattr(e, "retryable", True):
+                task.status = "failed"
+                if task.container:
+                    task.container.is_locked = False
+                    task.container.locked_by_mission_code = None
+                    task.container.destination_location_id = None
+                if task.request:
+                    task.request.status = "failed"
+                    task.request.error_message = str(e)
+            else:
+                # Lỗi mạng tạm thời (connection timeout, server 500) -> giữ pending_submit để worker thử lại
+                task.status = "pending_submit"
+
             db.flush()
         return task

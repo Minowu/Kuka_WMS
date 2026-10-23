@@ -190,8 +190,14 @@ class DispatchCore:
             )
             db.add(cart)
 
-        # Chỉ thông báo cho KUKA Fleet sau khi toàn bộ điều kiện Database đã hợp lệ 100%
-        self.fleet_client.fleet_insert_rack(location.location_code, clean_container_code)
+        # Gọi KUKA Fleet để khai báo containerIn tại vị trí
+        # Nếu Fleet từ chối, exception IcsError sẽ được ném ra -> rollback toàn bộ thay đổi DB
+        try:
+            self.fleet_client.fleet_insert_rack(location.location_code, clean_container_code)
+        except Exception as e:
+            db.rollback()
+            logger.error("Khai báo xe phôi '%s' vào vị trí '%s' thất bại trên KUKA Fleet: %s", clean_container_code, location.location_code, e)
+            raise ValueError(f"KUKA Fleet từ chối tiếp nhận xe phôi: {e}") from e
 
         db.flush()
 
