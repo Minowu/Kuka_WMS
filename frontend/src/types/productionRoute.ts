@@ -58,7 +58,6 @@ export interface AvailableMachine {
   id?: number;
   machine_code: string;
   machine_name?: string;
-  default_stage_level?: number;
   location_count: number;
   positions: string[];
 }

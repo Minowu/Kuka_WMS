@@ -147,7 +147,9 @@ def activate_production_route(
     try:
         return route_service.activate_route(db, route_id)
     except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e)) from e
+        msg = str(e)
+        code = status.HTTP_404_NOT_FOUND if "Không tìm thấy" in msg else status.HTTP_400_BAD_REQUEST
+        raise HTTPException(status_code=code, detail=msg) from e
 
 
 @routes_router.delete(
@@ -162,7 +164,9 @@ def delete_production_route(
     try:
         route_service.delete_route(db, route_id)
     except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e)) from e
+        msg = str(e)
+        code = status.HTTP_404_NOT_FOUND if "Không tìm thấy" in msg else status.HTTP_400_BAD_REQUEST
+        raise HTTPException(status_code=code, detail=msg) from e
 
 
 # =========================================================================

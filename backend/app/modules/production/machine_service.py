@@ -279,14 +279,32 @@ def delete_machine(db: Session, machine_id: int) -> bool:
     if not m:
         raise ValueError(f"Không tìm thấy máy CNC với ID {machine_id}")
 
-    for loc in (m.locations or []):
+    # Guard: Kiểm tra máy có đang được gán trong bất kỳ công đoạn nào của ProductionRoute không
+    step_machine = (
+        db.query(RouteStepMachine)
+        .filter(RouteStepMachine.machine_id == m.id)
+        .first()
+    )
+    if step_machine:
+        step = step_machine.route_step
+        route = step.route if step else None
+        route_desc = (
+            f"'{route.route_name}' ({route.route_code})"
+            if route
+            else (f"ID={step.route_id}" if step else "N/A")
+        )
+        step_name = step.step_name if step else f"bước #{step_machine.route_step_id}"
+        raise ValueError(
+            f"Không thể xóa máy CNC '{m.machine_code}' vì đang được gán cho công đoạn "
+            f"'{step_name}' trong quy trình {route_desc}. Vui lòng gỡ máy khỏi quy trình trước khi xóa."
+        )
+
+    locations_to_release = list(m.locations or [])
+    for loc in locations_to_release:
         ensure_location_has_no_stock(db, loc, f"xóa máy CNC {m.machine_code}")
 
-    for loc in (m.locations or []):
+    for loc in locations_to_release:
         release_location(loc)
-
-    # Clean up any route step associations before deleting machine
-    db.query(RouteStepMachine).filter(RouteStepMachine.machine_id == m.id).delete(synchronize_session=False)
 
     db.delete(m)
     db.commit()
