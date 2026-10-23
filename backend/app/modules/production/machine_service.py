@@ -237,7 +237,7 @@ def update_machine(db: Session, machine_id: int, payload: MachineUpdateRequest) 
         for loc in old_locs:
             if loc.id not in kept_ids:
                 ensure_location_has_no_stock(db, loc, f"bớt Vị trí {loc.position_index} của máy {m.machine_code}")
-                release_location(loc)
+                release_location(loc, db)
 
     db.commit()
     db.refresh(m)
@@ -304,7 +304,7 @@ def delete_machine(db: Session, machine_id: int) -> bool:
         ensure_location_has_no_stock(db, loc, f"xóa máy CNC {m.machine_code}")
 
     for loc in locations_to_release:
-        release_location(loc)
+        release_location(loc, db)
 
     db.delete(m)
     db.commit()

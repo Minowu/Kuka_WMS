@@ -174,7 +174,7 @@ def update_station_slot(
             target.location_name = loc.location_name
             target.position_index = loc.position_index
             target.is_active = loc.is_active
-            release_location(loc)
+            release_location(loc, db)
             loc = target
 
 
@@ -206,7 +206,7 @@ def delete_station_slot(db: Session, location_id: int) -> bool:
         raise ValueError(f"Không tìm thấy vị trí với ID {location_id}")
 
     ensure_location_has_no_stock(db, loc, "giải phóng vị trí")
-    release_location(loc)
+    release_location(loc, db)
     db.commit()
     return True
 

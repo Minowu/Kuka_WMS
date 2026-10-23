@@ -83,8 +83,11 @@ def ensure_location_has_no_stock(db: Session, loc: Location, action: str) -> Non
         )
 
 
-def release_location(loc: Location) -> None:
+def release_location(loc: Location, db: Optional[Session] = None) -> None:
     """Trả node về trạng thái tự do (không xóa bản ghi vì đây là node vật lý của bản đồ)."""
+    if db is not None:
+        from app.modules.production.production_models import UserLocation
+        db.query(UserLocation).filter(UserLocation.location_id == loc.id).delete(synchronize_session=False)
     loc.location_type = "UNASSIGNED"
     loc.location_name = loc.location_label or loc.location_code or str(loc.id)
     loc.machine_id = None

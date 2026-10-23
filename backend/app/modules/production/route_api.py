@@ -173,6 +173,27 @@ def delete_production_route(
 # 2. RAW MATERIAL RACK QR REGISTRATION & OPERATOR DISPATCH ACTIONS
 # =========================================================================
 
+def _ensure_user_can_access_location(
+    db: Session,
+    user: User,
+    location_id: int,
+    action_desc: str,
+) -> None:
+    is_admin = bool(any(r.name == "admin" for r in (user.roles or [])))
+    if is_admin:
+        return
+    assigned = (
+        db.query(UserLocation)
+        .filter(UserLocation.user_id == user.id, UserLocation.location_id == location_id)
+        .first()
+    )
+    if not assigned:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Bạn không có quyền thực hiện thao tác '{action_desc}' tại trạm/vị trí này (ID={location_id}).",
+        )
+
+
 @dispatch_router.post(
     "/production/racks/register-raw-material",
     response_model=RackRegistrationResponse,
@@ -190,6 +211,7 @@ def register_rack_at_raw_material(
     3. Tự động kiểm tra `TransportQueue` (`WAITING_CART`): nếu có máy CNC đang chờ phôi của Model này
        thì lập tức điều xe AMR đi lấy rack vừa quét.
     """
+    _ensure_user_can_access_location(db, user, body.location_id, "cấp phôi nguyên liệu")
     try:
         return dispatch_service.register_rack_at_raw_material(
             db=db,
@@ -214,6 +236,7 @@ def call_material(
     user: CurrentUser,
 ):
     """Công nhân tại máy CNC bấm gọi phôi theo Model sản phẩm."""
+    _ensure_user_can_access_location(db, user, body.destination_location_id, "gọi phôi tới máy")
     try:
         req = dispatch_service.call_material_to_cnc(
             db=db,
@@ -246,6 +269,7 @@ def complete_machining_stage(
     user: CurrentUser,
 ):
     """Công nhân tại máy CNC xác nhận hoàn thành công đoạn gia công trên Rack."""
+    _ensure_user_can_access_location(db, user, body.location_id, "báo hoàn thành công đoạn")
     try:
         return dispatch_service.complete_machining_stage(
             db=db,
@@ -273,6 +297,15 @@ def return_empty_cart_from_washing(
     user: CurrentUser,
 ):
     """Trả rack rỗng từ trạm Tẩy rửa về bãi xe rỗng (EMPTY_CART_BUFFER)."""
+    is_admin = bool(any(r.name == "admin" for r in (user.roles or [])))
+    if not is_admin:
+        cart = (
+            db.query(ItemStock)
+            .filter(ItemStock.container_code == body.container_code.strip(), ItemStock.is_active.is_(True))
+            .first()
+        )
+        if cart and cart.location_id:
+            _ensure_user_can_access_location(db, user, cart.location_id, "trả xe rỗng từ khu rửa")
     try:
         req = dispatch_service.complete_washing_and_return_empty_cart(
             db=db,
@@ -347,15 +380,25 @@ def get_pda_models(
 )
 def get_pda_raw_materials(
     db: DbSession,
-    _user: CurrentUser,
+    user: CurrentUser,
 ):
     """Lấy trạng thái các vị trí tại Khu Nguyên Liệu (RAW-01..07) cho PDA."""
+    is_admin = bool(any(r.name == "admin" for r in (user.roles or [])))
+    user_loc_ids = [
+        ul.location_id
+        for ul in db.query(UserLocation).filter(UserLocation.user_id == user.id).all()
+    ]
+    query = db.query(Location).filter(
+        Location.location_type == "RAW_MATERIAL",
+        Location.is_active == True,
+    )
+    if not is_admin:
+        if not user_loc_ids:
+            return []
+        query = query.filter(Location.id.in_(user_loc_ids))
+
     locations = (
-        db.query(Location)
-        .filter(
-            Location.location_type == "RAW_MATERIAL",
-            Location.is_active == True,
-        )
+        query
         .order_by(Location.position_index.asc().nullslast(), Location.location_code.asc())
         .all()
     )
@@ -406,7 +449,9 @@ def get_pda_cnc_stations(
         Location.is_active == True,
     )
     is_admin = bool(any(r.name == "admin" for r in (user.roles or [])))
-    if not is_admin and user_loc_ids:
+    if not is_admin:
+        if not user_loc_ids:
+            return []
         query = query.filter(Location.id.in_(user_loc_ids))
 
     locations = (
@@ -537,15 +582,25 @@ def get_pda_cnc_stations(
 )
 def get_pda_washing_slots(
     db: DbSession,
-    _user: CurrentUser,
+    user: CurrentUser,
 ):
     """Lấy danh sách 4 slot Khu Tẩy Rửa cho PDA."""
+    is_admin = bool(any(r.name == "admin" for r in (user.roles or [])))
+    user_loc_ids = [
+        ul.location_id
+        for ul in db.query(UserLocation).filter(UserLocation.user_id == user.id).all()
+    ]
+    query = db.query(Location).filter(
+        Location.location_type == "WASHING_SLOT",
+        Location.is_active == True,
+    )
+    if not is_admin:
+        if not user_loc_ids:
+            return []
+        query = query.filter(Location.id.in_(user_loc_ids))
+
     slots = (
-        db.query(Location)
-        .filter(
-            Location.location_type == "WASHING_SLOT",
-            Location.is_active == True,
-        )
+        query
         .order_by(Location.position_index.asc().nullslast(), Location.location_code.asc())
         .all()
     )
