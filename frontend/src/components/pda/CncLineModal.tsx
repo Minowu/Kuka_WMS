@@ -18,6 +18,7 @@ export const CncLineModal: React.FC<CncLineModalProps> = ({
 }) => {
   // Modal chọn Model khi trạm hỗ trợ >= 2 Model
   const [selectedStationForModal, setSelectedStationForModal] = useState<CncMachineStation | null>(null);
+  const [updatingStationId, setUpdatingStationId] = useState<string | null>(null);
 
   const getLevelLabel = (level: number) => {
     switch (level) {
@@ -114,7 +115,7 @@ export const CncLineModal: React.FC<CncLineModalProps> = ({
             const isCalling = st.status === 'CALLING';
             const isOccupied = st.status === 'OCCUPIED';
             const rack = st.currentRack;
-            const isFinalStep = st.assignedStageLevel >= 3;
+            const isFinalStep = Boolean(st.isFinalStep);
             const supported = st.supportedModels || [];
 
             return (
@@ -157,7 +158,12 @@ export const CncLineModal: React.FC<CncLineModalProps> = ({
                       AMR ĐANG CHỞ TỚI
                     </span>
                   )}
-                  {isOccupied && (
+                  {isOccupied && rack?.isCompleted ? (
+                    <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-purple-500/20 text-purple-300 border border-purple-500/30 flex items-center gap-1">
+                      <span className="w-1.5 h-1.5 rounded-full bg-purple-400 animate-pulse" />
+                      ĐÃ BÁO XONG - CHỜ AMR
+                    </span>
+                  ) : isOccupied && (
                     <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
                       ĐANG GIA CÔNG
                     </span>
@@ -260,21 +266,56 @@ export const CncLineModal: React.FC<CncLineModalProps> = ({
                       </div>
                     </div>
 
-                    <button
-                      onClick={() => {
-                        if ('vibrate' in navigator) navigator.vibrate?.(60);
-                        onUpdateLevel(st.id);
-                      }}
-                      className={`w-full min-h-[54px] text-white rounded-xl font-bold text-sm tracking-wide active:scale-[0.98] transition-all cursor-pointer ${
-                        isFinalStep
-                          ? 'bg-[#FF5800] hover:bg-[#e04e00]'
-                          : 'bg-[#10B981] hover:bg-[#059669]'
-                      }`}
-                    >
-                      {isFinalStep
-                        ? `BÁO XONG: CẬP NHẬT LEVEL ${st.assignedStageLevel} (CHUYỂN TẨY RỬA)`
-                        : `BÁO XONG: CẬP NHẬT LEVEL ${st.assignedStageLevel}`}
-                    </button>
+                    {rack.isCompleted ? (
+                      <div className="w-full min-h-[52px] bg-purple-950/40 border border-purple-500/40 text-purple-200 font-semibold text-xs rounded-xl flex flex-col items-center justify-center p-2.5 space-y-1 shadow-inner">
+                        <div className="flex items-center gap-2 font-bold text-sm text-purple-300">
+                          <span className="inline-block w-2.5 h-2.5 rounded-full bg-purple-400 animate-ping" />
+                          <span>ĐÃ BÁO HOÀN THÀNH LEVEL {rack.level}</span>
+                        </div>
+                        <div className="text-[11px] text-purple-300/80">
+                          {isFinalStep
+                            ? 'Lệnh điều xe đã tạo: Đang chờ AMR đến lấy khay chuyển sang Khu Tẩy Rửa'
+                            : 'Đang chờ AMR vận chuyển khay sang công đoạn tiếp theo'}
+                          {rack.lockedByMission && (
+                            <span className="block font-mono text-[10px] text-purple-400 mt-0.5">
+                              Mission: {rack.lockedByMission}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    ) : (
+                      <button
+                        disabled={updatingStationId === st.id}
+                        onClick={async () => {
+                          if (updatingStationId === st.id) return;
+                          if ('vibrate' in navigator) navigator.vibrate?.(60);
+                          setUpdatingStationId(st.id);
+                          try {
+                            await onUpdateLevel(st.id);
+                          } finally {
+                            setUpdatingStationId(null);
+                          }
+                        }}
+                        className={`w-full min-h-[54px] text-white rounded-xl font-bold text-sm tracking-wide transition-all ${
+                          updatingStationId === st.id
+                            ? 'bg-slate-700 cursor-not-allowed opacity-80'
+                            : isFinalStep
+                            ? 'bg-[#FF5800] hover:bg-[#e04e00] active:scale-[0.98] cursor-pointer'
+                            : 'bg-[#10B981] hover:bg-[#059669] active:scale-[0.98] cursor-pointer'
+                        }`}
+                      >
+                        {updatingStationId === st.id ? (
+                          <div className="flex items-center justify-center gap-2">
+                            <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                            <span>ĐANG CẬP NHẬT...</span>
+                          </div>
+                        ) : isFinalStep ? (
+                          `BÁO XONG: CẬP NHẬT LEVEL ${st.assignedStageLevel} (CHUYỂN TẨY RỬA)`
+                        ) : (
+                          `BÁO XONG: CẬP NHẬT LEVEL ${st.assignedStageLevel}`
+                        )}
+                      </button>
+                    )}
                   </div>
                 )}
               </div>

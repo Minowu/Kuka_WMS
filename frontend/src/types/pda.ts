@@ -34,7 +34,8 @@ export interface CncMachineStation {
   positionIndex?: number; // 1 hoặc 2
   name: string;
   assignedStageLevel: number; // Cấp độ công đoạn ĐƯỢC CHỈ ĐỊNH cho máy này
-  stageName: string; // Tên công đoạn: 'Phay Thô', 'Phay Tinh', 'Khoan Tappi & Hoàn Tất'
+  stageName: string; // Tên công đoạn từ quy trình công nghệ
+  isFinalStep?: boolean; // True nếu đây là công đoạn CNC cuối cùng chuyển Tẩy Rửa
   status: 'EMPTY' | 'QUEUED' | 'CALLING' | 'OCCUPIED';
   callingModel?: string;
   callingTaskCode?: string;
@@ -44,6 +45,9 @@ export interface CncMachineStation {
     model: string;
     level: number; // Cấp độ hiện tại của phôi trên xe
     startedAt?: string;
+    isCompleted?: boolean;
+    isLocked?: boolean;
+    lockedByMission?: string | null;
   } | null;
 }
 

@@ -34,6 +34,7 @@ export const getPdaCncStationsApi = async (): Promise<CncMachineStation[]> => {
     name: s.name,
     assignedStageLevel: s.assigned_stage_level ?? s.assignedStageLevel ?? 1,
     stageName: s.stage_name ?? s.stageName ?? `Công đoạn Level ${s.assigned_stage_level ?? 1}`,
+    isFinalStep: s.is_final_step ?? s.isFinalStep ?? false,
     status: s.status,
     callingModel: s.calling_model ?? s.callingModel,
     callingTaskCode: s.calling_mission_code ?? s.calling_task_code ?? s.callingTaskCode,
@@ -51,6 +52,9 @@ export const getPdaCncStationsApi = async (): Promise<CncMachineStation[]> => {
           model: s.current_rack.model,
           level: s.current_rack.level,
           startedAt: s.current_rack.started_at ?? s.current_rack.startedAt,
+          isCompleted: Boolean(s.current_rack.is_completed ?? s.current_rack.isCompleted),
+          isLocked: Boolean(s.current_rack.is_locked ?? s.current_rack.isLocked),
+          lockedByMission: s.current_rack.locked_by_mission ?? s.current_rack.lockedByMission ?? null,
         }
       : s.currentRack ?? null,
   }));

@@ -185,7 +185,7 @@ export const usePdaStore = create<PdaState>((set, get) => ({
 
     const currentLevel = station.currentRack?.level ?? 0;
     const targetLevel = currentLevel + 1;
-    const isFinalStage = targetLevel >= 3 || station.assignedStageLevel >= 3;
+    const isFinalStage = Boolean(station.isFinalStep);
     const rackCode = station.currentRack?.rackId;
 
     if (!rackCode) {
