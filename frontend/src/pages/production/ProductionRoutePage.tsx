@@ -426,98 +426,128 @@ export default function ProductionRoutePage() {
             <Switch checkedChildren="KÍCH HOẠT" unCheckedChildren="TẮT" />
           </Form.Item>
 
-          <Divider orientation="left" className="!text-sm !font-bold text-slate-700">
+          <Divider className="!text-sm !font-bold text-slate-700">
             CÁC BƯỚC CÔNG ĐOẠN GIA CÔNG (TUẦN TỰ)
           </Divider>
 
-          <Form.List name="steps">
-            {(fields, { add, remove }) => (
-              <div className="space-y-4">
-                {fields.map((field, index) => {
-                  const isLast = index === fields.length - 1;
-                  return (
-                    <Card
-                      key={field.key}
-                      size="small"
-                      className="bg-slate-50 border-slate-200 rounded-lg shadow-sm"
-                      title={
-                        <div className="flex items-center justify-between text-xs font-semibold text-slate-700">
-                          <div className="flex items-center gap-2">
-                            <Tag color="orange" className="font-mono font-bold !text-xs px-2 py-0.5">
-                              BƯỚC {index + 1}
-                            </Tag>
-                            {isLast ? (
-                              <Tag color="green" className="font-medium !text-xs">
-                                🏁 Bước cuối ➔ Tự điều AMR sang Tẩy Rửa
-                              </Tag>
-                            ) : (
-                              <Tag color="blue" className="font-medium !text-xs">
-                                ➔ Hoàn tất chuyển sang Bước {index + 2}
-                              </Tag>
-                            )}
-                          </div>
-                          {fields.length > 1 && (
-                            <Button
-                              type="text"
-                              danger
-                              size="small"
-                              icon={<DeleteOutlined />}
-                              onClick={() => remove(field.name)}
-                            >
-                              Xóa bước
-                            </Button>
-                          )}
-                        </div>
-                      }
-                    >
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <Form.Item
-                          {...field}
-                          name={[field.name, 'step_name']}
-                          label="Tên công đoạn gia công"
-                          rules={[{ required: true, message: 'Vui lòng nhập tên công đoạn!' }]}
-                          className="!mb-1"
-                        >
-                          <Input placeholder="Ví dụ: Tiện thô, Phay rãnh, Khoan taro, Tiện tinh..." />
-                        </Form.Item>
+          {/* Theo dõi thay đổi của steps để disable máy đã được chọn ở bước khác */}
+          <Form.Item noStyle dependencies={[['steps']]}>
+            {() => {
+              const currentSteps = form.getFieldValue('steps') || [];
+              const machineUsage = new Map<string, number>();
+              currentSteps.forEach((st: any, idx: number) => {
+                if (Array.isArray(st?.allowed_machines)) {
+                  st.allowed_machines.forEach((code: string) => {
+                    if (code) machineUsage.set(code.toUpperCase(), idx + 1);
+                  });
+                }
+              });
 
-                        <Form.Item
-                          {...field}
-                          name={[field.name, 'allowed_machines']}
-                          label="Máy CNC thực hiện"
-                          className="!mb-1"
-                        >
-                          <Select
-                            mode="multiple"
-                            placeholder="Chọn các máy CNC thực hiện"
-                            options={machines.map((m) => ({
-                              label: `${m.machine_code} (${m.machine_name || 'Máy CNC'})`,
-                              value: m.machine_code,
-                            }))}
-                          />
-                        </Form.Item>
-                      </div>
-                    </Card>
-                  );
-                })}
+              return (
+                <Form.List name="steps">
+                  {(fields, { add, remove }) => (
+                    <div className="space-y-4">
+                      {fields.map((field, index) => {
+                        const isLast = index === fields.length - 1;
+                        const currentStepNum = index + 1;
 
-                <Button
-                  type="dashed"
-                  onClick={() =>
-                    add({
-                      step_name: '',
-                      allowed_machines: [],
-                    })
-                  }
-                  block
-                  icon={<PlusOutlined />}
-                  className="h-10 text-amber-600 border-amber-300 hover:border-amber-500 font-medium"
-                >
-                  + Thêm bước công đoạn tiếp theo
-                </Button>
-              </div>
-            )}
-          </Form.List>
+                        const stepMachineOptions = machines.map((m) => {
+                          const code = m.machine_code.toUpperCase();
+                          const usedAtStep = machineUsage.get(code);
+                          const isAssignedElsewhere = usedAtStep !== undefined && usedAtStep !== currentStepNum;
+
+                          return {
+                            label: isAssignedElsewhere
+                              ? `${m.machine_code} (Đã gán ở Bước ${usedAtStep})`
+                              : `${m.machine_code} (${m.machine_name || 'Máy CNC'})`,
+                            value: m.machine_code,
+                            disabled: isAssignedElsewhere,
+                          };
+                        });
+
+                        return (
+                          <Card
+                            key={field.key}
+                            size="small"
+                            className="bg-slate-50 border-slate-200 rounded-lg shadow-sm"
+                            title={
+                              <div className="flex items-center justify-between text-xs font-semibold text-slate-700">
+                                <div className="flex items-center gap-2">
+                                  <Tag color="orange" className="font-mono font-bold !text-xs px-2 py-0.5">
+                                    BƯỚC {index + 1}
+                                  </Tag>
+                                  {isLast ? (
+                                    <Tag color="green" className="font-medium !text-xs">
+                                      🏁 Bước cuối ➔ Tự điều AMR sang Tẩy Rửa
+                                    </Tag>
+                                  ) : (
+                                    <Tag color="blue" className="font-medium !text-xs">
+                                      ➔ Hoàn tất chuyển sang Bước {index + 2}
+                                    </Tag>
+                                  )}
+                                </div>
+                                {fields.length > 1 && (
+                                  <Button
+                                    type="text"
+                                    danger
+                                    size="small"
+                                    icon={<DeleteOutlined />}
+                                    onClick={() => remove(field.name)}
+                                  >
+                                    Xóa bước
+                                  </Button>
+                                )}
+                              </div>
+                            }
+                          >
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                              <Form.Item
+                                {...field}
+                                name={[field.name, 'step_name']}
+                                label="Tên công đoạn gia công"
+                                rules={[{ required: true, message: 'Vui lòng nhập tên công đoạn!' }]}
+                                className="!mb-1"
+                              >
+                                <Input placeholder="Ví dụ: Tiện thô, Phay rãnh, Khoan taro, Tiện tinh..." />
+                              </Form.Item>
+
+                              <Form.Item
+                                {...field}
+                                name={[field.name, 'allowed_machines']}
+                                label="Máy CNC thực hiện"
+                                className="!mb-1"
+                              >
+                                <Select
+                                  mode="multiple"
+                                  placeholder="Chọn các máy CNC thực hiện"
+                                  options={stepMachineOptions}
+                                />
+                              </Form.Item>
+                            </div>
+                          </Card>
+                        );
+                      })}
+
+                      <Button
+                        type="dashed"
+                        onClick={() =>
+                          add({
+                            step_name: '',
+                            allowed_machines: [],
+                          })
+                        }
+                        block
+                        icon={<PlusOutlined />}
+                        className="h-10 text-amber-600 border-amber-300 hover:border-amber-500 font-medium"
+                      >
+                        + Thêm bước công đoạn tiếp theo
+                      </Button>
+                    </div>
+                  )}
+                </Form.List>
+              );
+            }}
+          </Form.Item>
         </Form>
       </Modal>
     </div>
@@ -566,8 +596,8 @@ function RouteDetailTimeline({ routeId }: { routeId: number }) {
           <React.Fragment key={s.id || idx}>
             <div
               className={`p-3 rounded-lg border shadow-sm ${s.is_final_cnc_step
-                  ? 'bg-amber-50/90 border-amber-300'
-                  : 'bg-white border-blue-200'
+                ? 'bg-amber-50/90 border-amber-300'
+                : 'bg-white border-blue-200'
                 }`}
             >
               <div className="flex items-center gap-2 mb-1">
