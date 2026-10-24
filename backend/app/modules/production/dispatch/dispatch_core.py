@@ -339,8 +339,15 @@ class DispatchCore:
 
         _, target_stage, is_final_cnc = self.selector.get_stage_info_for_machine(db, loc, cart.item_id)
         current_stage = cart.current_stage_level or 0
-        completed_stage = target_stage if target_stage > current_stage else current_stage + 1
 
+        # Kiểm tra ngăn chặn cập nhật vượt cấp: Nếu xe đã đạt hoặc vượt stage của máy này -> Chặn lại
+        if current_stage >= target_stage:
+            raise ValueError(
+                f"Khay phôi '{cart.container_code}' đã hoàn thành công đoạn Level {current_stage} "
+                f"của máy này (yêu cầu Level {target_stage}). Vui lòng chờ AMR vận chuyển sang công đoạn tiếp theo."
+            )
+
+        completed_stage = target_stage
         cart.current_stage_level = completed_stage
 
         machine_code = loc.machine.machine_code if loc.machine else None

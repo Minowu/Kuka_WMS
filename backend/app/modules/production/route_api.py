@@ -474,30 +474,56 @@ def get_pda_cnc_stations(
         )
 
         assigned_level = 1
-        if cart:
-            assigned_level = (cart.current_stage_level or 0) + 1
+        stage_name = "Công Đoạn 1"
+        is_final_step = False
+
+        from app.modules.production.production_models import RouteStep, RouteStepMachine
+        from app.modules.production.dispatch.cart_selector import CartSelector
+
+        if cart and cart.item_id and loc.machine_id:
+            # 1. Nếu trên máy ĐANG CÓ RACK: Tra cứu chính xác từ RouteStep của Model trên xe
+            try:
+                _, target_lvl, is_final = CartSelector().get_stage_info_for_machine(db, loc, cart.item_id)
+                assigned_level = target_lvl
+                is_final_step = is_final
+                # Lấy đúng tên bước công nghệ trong RouteStep
+                matched_step = (
+                    db.query(RouteStep)
+                    .join(RouteStepMachine)
+                    .filter(
+                        RouteStepMachine.machine_id == loc.machine_id,
+                        RouteStep.stage_level == target_lvl,
+                    )
+                    .first()
+                )
+                if matched_step and matched_step.step_name:
+                    stage_name = matched_step.step_name
+                else:
+                    stage_name = f"Level {assigned_level}"
+            except Exception:
+                assigned_level = (cart.current_stage_level or 0) + 1
+                stage_name = f"Level {assigned_level}"
         elif loc.machine_id:
-            from app.modules.production.production_models import RouteStep, RouteStepMachine
-            step_link = (
-                db.query(RouteStepMachine)
-                .join(RouteStep)
+            # 2. Nếu máy TRỐNG: Lấy từ RouteStep đầu tiên được gán cho máy trong CSDL
+            first_step = (
+                db.query(RouteStep)
+                .join(RouteStepMachine)
                 .filter(RouteStepMachine.machine_id == loc.machine_id)
                 .order_by(RouteStep.stage_level.asc())
                 .first()
             )
-            if step_link and step_link.route_step:
-                assigned_level = step_link.route_step.stage_level
-        elif loc.machine_code == "CNC-03":
-            assigned_level = 2
-        elif loc.machine_code == "CNC-04":
-            assigned_level = 3
-
-        stage_names = {
-            1: "Phay Thô",
-            2: "Phay Tinh",
-            3: "Khoan Tappi & Hoàn Tất",
-        }
-        stage_name = stage_names.get(assigned_level, f"Công Đoạn {assigned_level}")
+            if first_step:
+                assigned_level = first_step.stage_level
+                stage_name = first_step.step_name or f"Level {assigned_level}"
+                is_final_step = bool(first_step.is_final_cnc_step)
+            else:
+                assigned_level = 1
+                stage_name = "Công Đoạn 1"
+                is_final_step = False
+        else:
+            assigned_level = 1
+            stage_name = "Công Đoạn 1"
+            is_final_step = False
 
         if cart:
             status_str = "OCCUPIED"
@@ -506,11 +532,15 @@ def get_pda_cnc_stations(
                 if cart.updated_at
                 else (cart.created_at.strftime("%H:%M") if cart.created_at else None)
             )
+            is_cart_completed = (cart.current_stage_level or 0) >= assigned_level or bool(cart.is_locked)
             current_rack = PdaCncStationRack(
                 rack_id=cart.container_code,
                 model=cart.item.name if cart.item else "Phôi gia công",
                 level=cart.current_stage_level,
                 started_at=started_at,
+                is_completed=is_cart_completed,
+                is_locked=bool(cart.is_locked),
+                locked_by_mission=cart.locked_by_mission_code,
             )
             calling_model = None
             calling_mission_code = None
@@ -602,6 +632,7 @@ def get_pda_cnc_stations(
                 name=loc.location_name or loc.location_code,
                 assigned_stage_level=assigned_level,
                 stage_name=stage_name,
+                is_final_step=is_final_step,
                 status=status_str,
                 calling_model=calling_model,
                 calling_mission_code=calling_mission_code,
@@ -659,10 +690,13 @@ def get_pda_washing_slots(
                 if cart.updated_at
                 else (cart.created_at.strftime("%H:%M") if cart.created_at else None)
             )
+            from_desc = "Từ trạm CNC"
+            if cart and cart.location and cart.location.machine:
+                from_desc = f"Từ {cart.location.machine.machine_code}"
             current_rack = PdaWashingSlotRack(
                 rack_id=cart.container_code,
                 model=cart.item.name if cart.item else "Thành phẩm",
-                from_station="Từ CNC-04",
+                from_station=from_desc,
                 arrived_at=arrived_at or "--:--",
             )
         else:
@@ -675,8 +709,9 @@ def get_pda_washing_slots(
                 .first()
             )
             status_str = "OCCUPIED" if incoming else "EMPTY"
-            if incoming and incoming.request and incoming.request.cart:
-                c = incoming.request.cart
+            # Trong TransportRequest, quan hệ tới ItemStock tên là 'container' (hoặc đọc từ incoming.container)
+            c = incoming.container if incoming and incoming.container else (incoming.request.container if incoming and incoming.request else None)
+            if c:
                 current_rack = PdaWashingSlotRack(
                     rack_id=c.container_code,
                     model=c.item.name if c.item else "Thành phẩm",

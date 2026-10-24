@@ -175,6 +175,9 @@ class PdaCncStationRack(BaseModel):
     model: str
     level: int
     started_at: Optional[str] = None
+    is_completed: bool = False
+    is_locked: bool = False
+    locked_by_mission: Optional[str] = None
 
 
 class PdaCncSupportedModel(BaseModel):
@@ -196,6 +199,7 @@ class PdaCncStation(BaseModel):
     name: str
     assigned_stage_level: int
     stage_name: str
+    is_final_step: bool = False
     status: str
     calling_model: Optional[str] = None
     calling_mission_code: Optional[str] = None
