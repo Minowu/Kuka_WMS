@@ -45,6 +45,25 @@ class ItemSummary(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+def _validate_unique_machines_in_route(steps: list[RouteStepCreate] | None) -> None:
+    if not steps:
+        return
+    seen_machines: dict[str, int] = {}
+    for step in steps:
+        step_lvl = step.stage_level or step.step_number
+        for m in step.allowed_machines or []:
+            code = str(m).strip().upper()
+            if not code:
+                continue
+            if code in seen_machines:
+                prev_lvl = seen_machines[code]
+                raise ValueError(
+                    f"Máy '{code}' đã được gán tại công đoạn Level {prev_lvl}. "
+                    f"Trong cùng 1 quy trình sản xuất, mỗi máy chỉ được phụ trách 1 công đoạn duy nhất."
+                )
+            seen_machines[code] = step_lvl
+
+
 class ProductionRouteCreate(BaseModel):
     route_code: str = Field(..., min_length=1, max_length=50, description="Mã quy trình (VD: RT-MDL01-V1)")
     route_name: str = Field(..., min_length=1, max_length=100, description="Tên quy trình công nghệ")
@@ -53,12 +72,22 @@ class ProductionRouteCreate(BaseModel):
     is_active: bool = Field(default=True)
     steps: list[RouteStepCreate] = Field(default_factory=list)
 
+    @model_validator(mode="after")
+    def validate_machines_uniqueness(self) -> "ProductionRouteCreate":
+        _validate_unique_machines_in_route(self.steps)
+        return self
+
 
 class ProductionRouteUpdate(BaseModel):
     route_name: Optional[str] = Field(None, min_length=1, max_length=100)
     version: Optional[int] = Field(None, ge=1)
     is_active: Optional[bool] = None
     steps: Optional[list[RouteStepCreate]] = None
+
+    @model_validator(mode="after")
+    def validate_machines_uniqueness(self) -> "ProductionRouteUpdate":
+        _validate_unique_machines_in_route(self.steps)
+        return self
 
 
 class ProductionRouteResponse(BaseModel):
