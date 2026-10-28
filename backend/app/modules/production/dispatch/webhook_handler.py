@@ -196,6 +196,8 @@ class WebhookHandler:
             cart = db.query(ItemStock).filter(ItemStock.id == fleet_task.container_id).first()
             if cart:
                 if is_empty_buffer_dropoff:
+                    container_out_ok = True
+                    container_out_err = None
                     if dropoff_loc and cart.container_code:
                         try:
                             self.fleet_client.fleet_container_out(
@@ -204,15 +206,41 @@ class WebhookHandler:
                                 db=db,
                             )
                         except Exception as e:
-                            logger.error("Could not call fleet_container_out: %s", e)
-                    cart.location_id = None
-                    cart.destination_location_id = None
-                    cart.quantity = 0
-                    cart.current_stage_level = 0
-                    cart.status = "empty"
-                    cart.is_active = False
-                    cart.is_locked = False
-                    cart.locked_by_mission_code = None
+                            container_out_ok = False
+                            container_out_err = str(e)
+                            logger.error(
+                                "Fleet containerOut failed for container=%s at buffer=%s: %s",
+                                cart.container_code,
+                                dropoff_loc.location_code,
+                                e,
+                            )
+
+                    if container_out_ok:
+                        cart.location_id = None
+                        cart.destination_location_id = None
+                        cart.quantity = 0
+                        cart.current_stage_level = 0
+                        cart.status = "empty"
+                        cart.is_active = False
+                        cart.is_locked = False
+                        cart.locked_by_mission_code = None
+                        cart.fleet_registered = False
+                    else:
+                        # Không nuốt lỗi: Giữ xe tại vị trí bãi đệm với trạng thái 'out_failed'
+                        # và fleet_registered=True để WMS biết ô đệm này trên Fleet vẫn đang bị chiếm!
+                        cart.location_id = fleet_task.dropoff_location_id
+                        cart.destination_location_id = None
+                        cart.quantity = 0
+                        cart.current_stage_level = 0
+                        cart.status = "out_failed"
+                        cart.is_active = True
+                        cart.is_locked = False
+                        cart.locked_by_mission_code = None
+                        cart.fleet_registered = True
+                        err_note = f"AMR đã hạ xe nhưng lỗi xóa xe trên Fleet (containerOut): {container_out_err}"
+                        fleet_task.error_message = err_note
+                        if fleet_task.request:
+                            fleet_task.request.error_message = err_note
                 else:
                     cart.location_id = fleet_task.dropoff_location_id
                     cart.destination_location_id = None
