@@ -48,8 +48,6 @@ class Settings(BaseSettings):
     kuka_mission_type: str = "RACK_MOVE"
     kuka_http_timeout_seconds: float = 5.0
     kuka_submit_max_retries: int = 3
-    # Backward compatibility alias
-    ics_base_url: str = "http://192.168.1.71:10870/interfaces/api"
 
     # Warehouses using manual (full-form) print templates — JSON array or comma list, e.g. [2]
     manual_warehouse_ids: list[int] = []
