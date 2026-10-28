@@ -338,7 +338,8 @@ def receive_task_status(payload: dict[str, Any], db: DbSession) -> dict[str, Any
     try:
         dispatch_service.receive_task_status(db, payload)
     except Exception as e:
-        logger.error("Error processing KUKA Fleet webhook: %s", e)
+        db.rollback()
+        logger.exception("Error processing KUKA Fleet webhook (transaction rolled back): %s", e)
     return {"code": 0, "message": "success"}
 
 
@@ -501,8 +502,10 @@ def get_pda_cnc_stations(
                 else:
                     stage_name = f"Level {assigned_level}"
             except Exception:
-                assigned_level = (cart.current_stage_level or 0) + 1
-                stage_name = f"Level {assigned_level}"
+                # Nếu máy chưa được cấu hình Route cho Model này, không tự động cộng Level!
+                # Gán assigned_level = cart.current_stage_level để is_cart_completed = True (ẩn nút Báo xong)
+                assigned_level = cart.current_stage_level or 0
+                stage_name = "Chưa cấu hình Route cho Model này"
         elif loc.machine_id:
             # 2. Nếu máy TRỐNG: Lấy từ RouteStep đầu tiên được gán cho máy trong CSDL
             first_step = (

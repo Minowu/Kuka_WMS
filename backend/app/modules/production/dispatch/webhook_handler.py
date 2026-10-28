@@ -79,7 +79,9 @@ class WebhookHandler:
             raw_payload=payload,
         )
         db.add(record)
-        db.flush()
+        # Lưu cứng tín hiệu webhook vào DB ngay lập tức để không bao giờ bị rollback mất log audit
+        db.commit()
+        db.refresh(record)
 
         # 2. Lock FleetTask by mission_code
         fleet_task = (
