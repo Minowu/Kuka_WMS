@@ -98,7 +98,7 @@ class CartSelector:
                 ItemStock.current_stage_level == stage_level,
                 ItemStock.is_locked.is_(False),
                 ItemStock.is_active.is_(True),
-                ItemStock.quantity > 0,
+                ItemStock.status != "empty",
                 Location.location_type.in_(location_types),
                 Location.is_active.is_(True),
             )
