@@ -493,20 +493,16 @@ class KukaFleetClient:
             task.submit_attempts += 1
             task.error_message = str(e)
 
-            # Nếu lỗi không thể retry (ví dụ Fleet từ chối do không có container, sai node, vị trí sai):
-            # Đánh dấu FAILED và giải phóng khóa cart / khôi phục TransportRequest ngay lập tức!
-            if not getattr(e, "retryable", True):
-                task.status = "failed"
-                if task.container:
-                    task.container.is_locked = False
-                    task.container.locked_by_mission_code = None
-                    task.container.destination_location_id = None
-                if task.request:
-                    task.request.status = "failed"
-                    task.request.error_message = str(e)
-            else:
-                # Lỗi mạng tạm thời (connection timeout, server 500) -> giữ pending_submit để worker thử lại
-                task.status = "pending_submit"
+            # Bất kỳ lỗi IcsError nào khi submitMission đều đánh dấu FAILED và giải phóng khóa xe,
+            # tránh để xe bị kẹt hay treo trạng thái giả lập.
+            task.status = "failed"
+            if task.container:
+                task.container.is_locked = False
+                task.container.locked_by_mission_code = None
+                task.container.destination_location_id = None
+            if task.request:
+                task.request.status = "failed"
+                task.request.error_message = str(e)
 
             db.flush()
         return task

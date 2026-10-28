@@ -111,6 +111,11 @@ class DispatchCore:
         self.fleet_client.submit_fleet_task(db, fleet_task, request_type=transport_req.request_type)
         db.commit()
         db.refresh(fleet_task)
+
+        if fleet_task.status != "sent":
+            err_msg = fleet_task.error_message or "KUKA Fleet từ chối hoặc không thể nhận nhiệm vụ điều phối xe."
+            raise ValueError(f"Lỗi gửi lệnh sang KUKA Fleet: {err_msg}")
+
         return fleet_task
 
     def register_rack_at_raw_material(
@@ -348,6 +353,7 @@ class DispatchCore:
             )
 
         completed_stage = target_stage
+        previous_stage = cart.current_stage_level
         cart.current_stage_level = completed_stage
 
         machine_code = loc.machine.machine_code if loc.machine else None
@@ -395,13 +401,20 @@ class DispatchCore:
             db.add(transport_req)
             db.flush()
 
-            self.lock_cart_and_dispatch_fleet_task(
-                db=db,
-                transport_req=transport_req,
-                cart=cart,
-                pickup_location_id=cart.location_id,
-                dropoff_location_id=wash_slot.id,
-            )
+            try:
+                self.lock_cart_and_dispatch_fleet_task(
+                    db=db,
+                    transport_req=transport_req,
+                    cart=cart,
+                    pickup_location_id=cart.location_id,
+                    dropoff_location_id=wash_slot.id,
+                )
+            except Exception as e:
+                # Nếu gửi lệnh sang KUKA Fleet thất bại, khôi phục lại stage_level ban đầu
+                # để nút 'Báo xong' trên PDA không bị ẩn mất vĩnh viễn!
+                cart.current_stage_level = previous_stage
+                db.commit()
+                raise
             action_result = "DISPATCHED_TO_WASHING"
         else:
             transport_req = TransportRequest(
@@ -461,11 +474,6 @@ class DispatchCore:
         if not loc or loc.location_type != "WASHING_SLOT":
             raise ValueError(f"Xe '{clean_code}' không nằm tại vị trí Khu Tẩy Rửa (WASHING_SLOT).")
 
-        cart.quantity = 0
-        cart.status = "empty"
-        cart.current_stage_level = 0
-        db.flush()
-
         buffer_slot = self.selector.find_next_empty_buffer_slot(db)
         req_code = f"REQ-{uuid.uuid4().hex[:8].upper()}"
 
@@ -485,6 +493,7 @@ class DispatchCore:
             db.add(transport_req)
             db.flush()
 
+            # Gọi gửi lệnh sang Fleet trước. Nếu Fleet từ chối, văng lỗi ngay và không đổi cart.status = 'empty'
             self.lock_cart_and_dispatch_fleet_task(
                 db=db,
                 transport_req=transport_req,
@@ -492,7 +501,16 @@ class DispatchCore:
                 pickup_location_id=cart.location_id,
                 dropoff_location_id=buffer_slot.id,
             )
+            # Chỉ khi Fleet nhận lệnh thành công mới reset phôi về rỗng
+            cart.quantity = 0
+            cart.status = "empty"
+            cart.current_stage_level = 0
+            db.flush()
         else:
+            cart.quantity = 0
+            cart.status = "empty"
+            cart.current_stage_level = 0
+            db.flush()
             transport_req = TransportRequest(
                 request_code=req_code,
                 request_type="RETURN_EMPTY_CART",
