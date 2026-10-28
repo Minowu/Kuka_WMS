@@ -16,7 +16,7 @@ logger = get_logger("main")
 
 
 def _ics_configured() -> bool:
-    base = (settings.ics_base_url or "").strip()
+    base = (settings.kuka_base_url or "").strip()
     return bool(base and base != "Your RCS Server path" and base.startswith("http"))
 
 
@@ -43,7 +43,7 @@ class KukaFleetClient:
     ) -> dict[str, Any]:
         """Low-level HTTP POST to KUKA Fleet Manager with audit logging in fleet_api_call."""
         req_id = request_id or str(payload.get("requestId") or f"REQ_{uuid.uuid4().hex[:12].upper()}")
-        base = getattr(settings, "kuka_base_url", None) or getattr(settings, "ics_base_url", "")
+        base = getattr(settings, "kuka_base_url", None) or getattr(settings, "kuka_base_url", "")
         base = base.rstrip("/")
         endpoint = endpoint_path if endpoint_path.startswith("/") else f"/{endpoint_path}"
         url = f"{base}{endpoint}"
@@ -66,7 +66,7 @@ class KukaFleetClient:
                 )
                 db.add(call_log)
                 db.flush()
-            return err_resp
+            raise IcsError(error_msg, retryable=False)
 
         timeout_sec = float(getattr(settings, "kuka_http_timeout_seconds", 5.0))
         http_status = None
@@ -92,11 +92,9 @@ class KukaFleetClient:
             fleet_code = str(resp_data.get("code", ""))
             fleet_msg = resp_data.get("message")
 
-            # Ngoại lệ hợp lệ riêng: Với containerIn, nếu container đã tồn tại trong Fleet (code 100502: Container has entered)
-            # thì coi như idempotent thành công vì container đã sẵn sàng ở Fleet.
-            if not fleet_success and api_name == "containerIn" and fleet_code == "100502":
-                logger.info("Fleet containerIn idempotent: Container %s already exists in Fleet (100502)", container_code)
-                fleet_success = True
+            # Lưu ý về mã 100502 từ KUKA RCS: "Container[xxx] doesn't exist".
+            # Nếu Fleet thông báo xe chưa tồn tại trong danh mục RCS -> Fleet từ chối (fleet_success = False).
+            # Tuyệt đối không ghi đè fleet_success = True khi RCS báo container doesn't exist!
 
             if db:
                 call_log = FleetApiCall(
@@ -188,9 +186,9 @@ class KukaFleetClient:
             db=db,
         )
 
-    def fleet_insert_rack(self, location_code: str, container_code: str) -> dict[str, Any]:
+    def fleet_insert_rack(self, location_code: str, container_code: str, db: Optional[Session] = None) -> dict[str, Any]:
         """Alias for fleet_container_in."""
-        return self.fleet_container_in(location_code, container_code)
+        return self.fleet_container_in(location_code, container_code, db=db)
 
     def fleet_container_out(
         self,

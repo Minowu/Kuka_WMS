@@ -150,7 +150,7 @@ File [`dispatch_service.py`](file:///D:/KuKA/KUKA_WMS/backend/app/modules/produc
 ### Nhóm A: Kết nối & Phát lệnh sang KUKA Fleet Manager (RCS/ICS)
 
 #### 1. `_ics_configured() -> bool`
-* **Tác dụng**: Kiểm tra xem file cấu hình `.env` đã điền URL thật của server KUKA RCS chưa (`settings.ics_base_url`).
+* **Tác dụng**: Kiểm tra xem file cấu hình `.env` đã điền URL thật của server KUKA RCS chưa (`settings.kuka_base_url`).
 * **Cơ chế**: Nếu URL rỗng hoặc mang giá trị mặc định `"Your RCS Server path"`, hàm trả về `False` để hệ thống tự động kích hoạt **chế độ Giả lập an toàn (Dev/Simulation Mode)** mà không gây crash phần mềm.
 
 #### 2. `add_task(payload, endpoint_path) -> dict`

@@ -42,6 +42,12 @@ FLEET_MISSION_STATUS = {
     "FAILED": "failed",
     "CANCELLED": "cancelled",
     "CANCEL": "cancelled",
+    "ABORTED": "failed",
+    "ABORT": "failed",
+    "EXCEPTION": "failed",
+    "TERMINATED": "failed",
+    "TIMEOUT": "failed",
+    "ERROR": "failed",
 }
 
 # Compatibility alias

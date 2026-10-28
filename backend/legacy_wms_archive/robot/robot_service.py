@@ -15,7 +15,7 @@ from app.core.logger import get_logger
 from app.core.cache import cache_set
 logger = get_logger("main")
 
-ICS_ADD_TASK_PATH = f"{settings.ics_base_url.rstrip('/')}:7000/ics/taskOrder/addTask"
+ICS_ADD_TASK_PATH = f"{settings.kuka_base_url.rstrip('/')}:7000/ics/taskOrder/addTask"
 
 class IcsError(Exception):
     def __init__(self, message: str, *, retryable: bool = True):

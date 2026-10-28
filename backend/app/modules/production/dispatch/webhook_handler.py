@@ -137,7 +137,7 @@ class WebhookHandler:
             if on_completed_fn:
                 on_completed_fn(db, mission_code_str)
 
-        elif mapped_status in ("failed", "cancelled") or raw_status in ("FAILED", "CANCELLED", "CANCEL"):
+        elif mapped_status in ("failed", "cancelled") or raw_status in ("FAILED", "CANCELLED", "CANCEL", "ABORTED", "ABORT", "EXCEPTION", "TERMINATED", "TIMEOUT", "ERROR"):
             term_status = "cancelled" if "cancel" in raw_status.lower() else "failed"
             fleet_task.status = term_status
             fleet_task.error_message = msg or f"Fleet reported {raw_status}"

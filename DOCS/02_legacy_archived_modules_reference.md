@@ -33,7 +33,7 @@
 
 #### B. File [`robot_service.py`](file:///D:/Cty_sptech/kuka/backend/legacy_wms_archive/robot/robot_service.py) — Class `TaskStatusService`
 1. **[`add_task(self, payload: dict) -> dict` (dòng 29–41)](file:///D:/Cty_sptech/kuka/backend/legacy_wms_archive/robot/robot_service.py#L29-L41)**:
-   - Dùng `httpx.Client(timeout=5.0)` gửi `POST` tới `{settings.ics_base_url}:7000/ics/taskOrder/addTask`.
+   - Dùng `httpx.Client(timeout=5.0)` gửi `POST` tới `{settings.kuka_base_url}:7000/ics/taskOrder/addTask`.
    - Nếu lỗi HTTP $\ge 500$ hoặc mất kết nối mạng $\rightarrow$ Ném ngoại lệ `IcsError(..., retryable=True)` để Celery tự động thử lại (retry).
 2. **[`create_robot_task(self, db: Session, task: RobotTask, not_inserted: bool = True)` (dòng 43–59)](file:///D:/Cty_sptech/kuka/backend/legacy_wms_archive/robot/robot_service.py#L43-L59)**:
    - Đóng gói dữ liệu chuẩn gửi xuống RCS:

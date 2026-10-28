@@ -39,7 +39,7 @@
 
 | Setting | Mặc định | Dùng ở |
 |---|---|---|
-| `kuka_base_url` (đổi tên từ `ics_base_url`) | `http://192.168.1.71:10870/interfaces/api` | Mọi API outbound |
+| `kuka_base_url` (đổi tên từ `kuka_base_url`) | `http://192.168.1.71:10870/interfaces/api` | Mọi API outbound |
 | `kuka_access_token` | `""` | Header HTTP `Authorization` khi Fleet bật xác thực |
 | `kuka_org_id` | `KUKA011021` | `submitMission.orgId` |
 | `kuka_container_model_code` | `1001` | `submitMission.containerModelCode` |

@@ -38,3 +38,7 @@ build/
 *.swo
 .DS_Store
 Thumbs.db
+
+# Vault symlink
+vault-docs
+AGENTS.md
