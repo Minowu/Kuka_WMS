@@ -1,6 +1,7 @@
 import React, { useEffect } from 'react';
 import { usePdaStore } from '@/store/usePdaStore';
 import { useLogout } from '@/hooks/useAuth';
+import { usePdaSocket } from '@/realtime/usePdaSocket';
 
 interface PdaLayoutWrapperProps {
   title: string;
@@ -13,22 +14,27 @@ export const PdaLayoutWrapper: React.FC<PdaLayoutWrapperProps> = ({
   stationSubtitle,
   children,
 }) => {
+  // Kích hoạt kết nối WebSocket thời gian thực cho PDA
+  usePdaSocket();
+
   const toast = usePdaStore((s) => s.toast);
   const hideToast = usePdaStore((s) => s.hideToast);
+  const wsConnected = usePdaStore((s) => s.wsConnected);
   const logout = useLogout();
 
   useEffect(() => {
     if (!toast) return;
+    const duration = toast.type === 'error' ? 6000 : 3500;
     const t = setTimeout(() => {
       hideToast();
-    }, 3500);
+    }, duration);
     return () => clearTimeout(t);
   }, [toast, hideToast]);
 
   return (
     <div className="min-h-screen bg-slate-950 flex flex-col justify-start items-center p-0 sm:py-6 select-none font-sans">
       <div className="w-full max-w-[480px] bg-slate-900 border-x sm:border border-slate-800 sm:rounded-2xl shadow-2xl flex flex-col min-h-screen sm:min-h-[840px] overflow-hidden relative">
-        {/* Header tinh giản công nghiệp: Không có đồng hồ, không có badge PDA, không có link chuyển phân xưởng */}
+        {/* Header tinh giản công nghiệp */}
         <header className="bg-slate-950 px-4 py-3 border-b border-slate-800 flex items-center justify-between">
           <div className="flex items-center gap-2.5">
             <span className="w-2.5 h-2.5 rounded-full bg-[#FF5800]" />
@@ -45,9 +51,17 @@ export const PdaLayoutWrapper: React.FC<PdaLayoutWrapperProps> = ({
           </div>
 
           <div className="flex items-center gap-2.5">
-            <span className="text-[11px] font-mono text-emerald-400 font-bold tracking-wider">
-              ONLINE
-            </span>
+            {wsConnected ? (
+              <span className="flex items-center gap-1.5 text-[11px] font-mono text-emerald-400 font-bold tracking-wider">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+                ONLINE
+              </span>
+            ) : (
+              <span className="flex items-center gap-1.5 text-[11px] font-mono text-amber-400 font-bold tracking-wider animate-pulse">
+                <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
+                RECONNECTING
+              </span>
+            )}
             <button
               onClick={logout}
               title="Đăng xuất ca làm việc"
@@ -63,12 +77,14 @@ export const PdaLayoutWrapper: React.FC<PdaLayoutWrapperProps> = ({
           {children}
         </main>
 
-        {/* Toast thông báo dạng dải công nghiệp tinh gọn, không icon hoạt hình */}
+        {/* Toast thông báo dạng dải công nghiệp */}
         {toast && (
           <div className="fixed sm:absolute bottom-4 left-4 right-4 z-50">
             <div
               className={`p-3 rounded-xl shadow-xl flex items-center justify-between border ${
-                toast.type === 'kuka'
+                toast.type === 'error'
+                  ? 'bg-red-950/95 border-red-500 text-red-200'
+                  : toast.type === 'kuka'
                   ? 'bg-[#FF5800] text-white border-orange-400'
                   : toast.type === 'success'
                   ? 'bg-slate-900 border-emerald-500 text-emerald-300'

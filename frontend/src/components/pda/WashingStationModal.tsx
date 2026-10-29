@@ -80,6 +80,17 @@ export const WashingStationModal: React.FC<WashingStationModalProps> = ({
                 </span>
               </div>
 
+              {/* Cảnh báo lỗi điều xe gần nhất */}
+              {slot.lastError && (
+                <div className="mb-2 p-2 rounded-lg bg-red-950/60 border border-red-500/50 flex items-start gap-2">
+                  <span className="text-red-400 font-bold text-xs mt-0.5">⚠️</span>
+                  <div className="flex-1">
+                    <div className="text-[11px] font-bold text-red-300">Lỗi điều xe gần nhất:</div>
+                    <div className="text-[10px] text-red-200 leading-tight mt-0.5">{slot.lastError}</div>
+                  </div>
+                </div>
+              )}
+
               {isOccupied && rack && (
                 <div className="space-y-2">
                   <div className="bg-slate-950 p-2 rounded-lg border border-slate-800 space-y-1 text-xs">

@@ -168,6 +168,12 @@ export const RawMaterialWizard: React.FC<RawMaterialWizardProps> = ({
                   ) : (
                     <div className="text-[11px] text-slate-400 mt-0.5">Sẵn sàng nạp</div>
                   )}
+                  {pos.lastError && (
+                    <div className="text-[10px] text-red-300 font-medium truncate w-full mt-1 flex items-center gap-1">
+                      <span>⚠️</span>
+                      <span className="truncate">{pos.lastError}</span>
+                    </div>
+                  )}
                 </button>
               );
             })}

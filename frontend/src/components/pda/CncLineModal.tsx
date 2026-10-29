@@ -121,15 +121,14 @@ export const CncLineModal: React.FC<CncLineModalProps> = ({
             return (
               <div
                 key={st.id}
-                className={`rounded-xl border p-3 transition-all ${
-                  isEmpty
+                className={`rounded-xl border p-3 transition-all ${isEmpty
                     ? 'bg-slate-900/90 border-slate-800'
                     : isCalling
-                    ? 'bg-blue-950/20 border-blue-500/50'
-                    : isQueued
-                    ? 'bg-amber-950/20 border-amber-600/50'
-                    : 'bg-slate-900 border-slate-700'
-                }`}
+                      ? 'bg-blue-950/20 border-blue-500/50'
+                      : isQueued
+                        ? 'bg-amber-950/20 border-amber-600/50'
+                        : 'bg-slate-900 border-slate-700'
+                  }`}
               >
                 {/* Header trạm */}
                 <div className="flex items-center justify-between pb-2 border-b border-slate-800 mb-2.5">
@@ -170,6 +169,17 @@ export const CncLineModal: React.FC<CncLineModalProps> = ({
                   )}
                 </div>
 
+                {/* Cảnh báo lỗi điều xe gần nhất */}
+                {st.lastError && (
+                  <div className="mb-2.5 p-2 rounded-lg bg-red-950/60 border border-red-500/50 flex items-start gap-2">
+                    <span className="text-red-400 font-bold text-xs mt-0.5">⚠️</span>
+                    <div className="flex-1">
+                      <div className="text-[11px] font-bold text-red-300">Lỗi điều xe gần nhất:</div>
+                      <div className="text-[10px] text-red-200 leading-tight mt-0.5">{st.lastError}</div>
+                    </div>
+                  </div>
+                )}
+
                 {/* 1. TRẠNG THÁI: TRỐNG -> GỌI PHÔI */}
                 {isEmpty && (
                   <div className="space-y-2">
@@ -180,8 +190,8 @@ export const CncLineModal: React.FC<CncLineModalProps> = ({
                           {supported.length === 1
                             ? supported[0].modelCode
                             : supported.length > 1
-                            ? `${supported.length} Model khả dụng`
-                            : 'Chưa cấu hình'}
+                              ? `${supported.length} Model khả dụng`
+                              : 'Chưa cấu hình'}
                         </span>
                       </span>
                       {supported.length === 1 && (
@@ -296,13 +306,12 @@ export const CncLineModal: React.FC<CncLineModalProps> = ({
                             setUpdatingStationId(null);
                           }
                         }}
-                        className={`w-full min-h-[54px] text-white rounded-xl font-bold text-sm tracking-wide transition-all ${
-                          updatingStationId === st.id
+                        className={`w-full min-h-[54px] text-white rounded-xl font-bold text-sm tracking-wide transition-all ${updatingStationId === st.id
                             ? 'bg-slate-700 cursor-not-allowed opacity-80'
                             : isFinalStep
-                            ? 'bg-[#FF5800] hover:bg-[#e04e00] active:scale-[0.98] cursor-pointer'
-                            : 'bg-[#10B981] hover:bg-[#059669] active:scale-[0.98] cursor-pointer'
-                        }`}
+                              ? 'bg-[#FF5800] hover:bg-[#e04e00] active:scale-[0.98] cursor-pointer'
+                              : 'bg-[#10B981] hover:bg-[#059669] active:scale-[0.98] cursor-pointer'
+                          }`}
                       >
                         {updatingStationId === st.id ? (
                           <div className="flex items-center justify-center gap-2">
