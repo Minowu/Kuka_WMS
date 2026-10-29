@@ -155,6 +155,9 @@ class WebhookHandler:
                 if cart:
                     cart.is_locked = True
                     cart.locked_by_mission_code = mission_code_str
+                    # Giải phóng vị trí nguồn (Source Location) ngay khi AMR nhấc xe phôi lên:
+                    # Xe phôi rời mặt sàn, đang nằm trên lưng AMR di chuyển tới đích.
+                    cart.location_id = None
             db.commit()
             publish_event(
                 "floor.changed",
@@ -169,6 +172,11 @@ class WebhookHandler:
 
         elif raw_status == "DOWN_CONTAINER":
             fleet_task.status = "in_progress"
+            if fleet_task.container_id and fleet_task.dropoff_location_id:
+                cart = db.query(ItemStock).filter(ItemStock.id == fleet_task.container_id).first()
+                if cart:
+                    # Xe phôi chạm sàn tại vị trí đích
+                    cart.location_id = fleet_task.dropoff_location_id
             db.commit()
             publish_event(
                 "floor.changed",
