@@ -32,6 +32,11 @@ class Settings(BaseSettings):
 
     #Database
     database_url: str = "postgresql://postgres:thado123@localhost:5432/masan_wms"
+    db_role: str = "backend"  # "backend" | "celery"
+    db_pool_size: int = 20
+    db_max_overflow: int = 20
+    db_pool_timeout: int = 10
+    db_pool_recycle: int = 1800
 
     #JWT
     secret_key: str = "no_secret_key"

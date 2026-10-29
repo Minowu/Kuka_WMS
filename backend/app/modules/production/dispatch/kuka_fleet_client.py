@@ -219,8 +219,9 @@ class KukaFleetClient:
         if token:
             headers["Authorization"] = token
 
+        connect_timeout = min(2.0, timeout_sec)
         try:
-            with httpx.Client(timeout=httpx.Timeout(timeout_sec)) as client:
+            with httpx.Client(timeout=httpx.Timeout(timeout_sec, connect=connect_timeout)) as client:
                 response = client.post(url, json=payload, headers=headers)
                 http_status = response.status_code
                 response.raise_for_status()

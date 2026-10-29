@@ -74,18 +74,12 @@ celery_app.conf.update(
 
 @worker_process_init.connect
 def init_worker_logging(**_kwargs):
-    """Worker không import main.py → phải setup logger riêng."""
+    """Worker không import main.py → setup logger và gán vai trò DB Celery."""
+    import os
+    os.environ["WMS_DB_ROLE"] = "celery"
     setup_logger(
         name="main",
         log_level="INFO",
         service_name="celery",
         log_dir="logs/celery",
-    )
-
-def run_logic_task(task: Task, /, **kwargs: Any) -> Any:
-    if settings.debug:  
-        return task.apply(kwargs=kwargs).get(propagate=True)
-    return task.apply_async(kwargs=kwargs).get(
-        timeout=CELERY_LOGIC_TIMEOUT,
-        propagate=True,
     )
