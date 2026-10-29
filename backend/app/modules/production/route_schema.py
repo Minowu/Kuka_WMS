@@ -197,6 +197,7 @@ class PdaRawMaterialSlot(BaseModel):
     has_rack: bool
     current_rack_id: Optional[str] = None
     current_model: Optional[str] = None
+    last_error: Optional[str] = None
 
 
 class PdaCncStationRack(BaseModel):
@@ -234,6 +235,7 @@ class PdaCncStation(BaseModel):
     calling_mission_code: Optional[str] = None
     current_rack: Optional[PdaCncStationRack] = None
     supported_models: list[PdaCncSupportedModel] = []
+    last_error: Optional[str] = None
 
 
 class PdaWashingSlotRack(BaseModel):
@@ -250,3 +252,4 @@ class PdaWashingSlot(BaseModel):
     name: str
     status: str
     current_rack: Optional[PdaWashingSlotRack] = None
+    last_error: Optional[str] = None

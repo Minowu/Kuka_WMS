@@ -1,5 +1,6 @@
 """REST API endpoints for Production Routes, Rack QR Registration, AMR Dispatch & Fleet Webhook."""
 
+from datetime import datetime, timedelta, timezone
 from typing import Annotated, Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -16,13 +17,9 @@ from app.modules.production.dispatch_service import dispatch_service
 from app.modules.production.production_celery_task import persist_task_status
 from app.modules.production.production_models import FleetTask, Machine, TransportRequest, UserLocation
 from app.modules.production.route_schema import (
-    AvailableMachineResponse,
     CallMaterialRequest,
     ContainerActionRequest,
     CompleteStageRequest,
-    MachineCreateRequest,
-    MachineUpdateRequest,
-    MapAvailableNodeResponse,
     PdaCncStation,
     PdaCncStationRack,
     PdaCncSupportedModel,
@@ -36,10 +33,6 @@ from app.modules.production.route_schema import (
     ProductionRouteUpdate,
     RackRegistrationRequest,
     RackRegistrationResponse,
-    StationCatalogItem,
-    StationCatalogResponse,
-    StationSlotCreateRequest,
-    StationSlotUpdateRequest,
 )
 from app.modules.warehouse.item.item_model import Item
 from app.modules.warehouse.item_stock.item_stock_model import ItemStock
@@ -326,7 +319,6 @@ def return_empty_cart_from_washing(
 # 3. KUKA FLEET MANAGER (RCS / ICS) WEBHOOK CALLBACK (/receive-status)
 # =========================================================================
 
-@fleet_router.post("/receive-status", status_code=status.HTTP_200_OK)
 @fleet_router.post(
     "/production/fleet/receive-status", status_code=status.HTTP_200_OK)
 def receive_task_status(payload: dict[str, Any], db: DbSession) -> dict[str, Any]:
@@ -346,6 +338,26 @@ def receive_task_status(payload: dict[str, Any], db: DbSession) -> dict[str, Any
 # =========================================================================
 # 4. PDA CALLER CLIENT APIS (RAW MATERIAL, CNC LINE, WASHING STATION)
 # =========================================================================
+
+def _get_recent_location_error(db: Session, location_id: int, cutoff: datetime) -> Optional[str]:
+    """
+    Tra cứu lỗi gần nhất trong 5 phút qua tại vị trí này.
+    Nếu task mới nhất là failed/cancelled thì trả về error_message.
+    Nếu có task mới hơn đang xử lý/hoàn thành thì lỗi cũ được coi là đã qua.
+    """
+    latest_task = (
+        db.query(FleetTask)
+        .filter(
+            (FleetTask.pickup_location_id == location_id) | (FleetTask.dropoff_location_id == location_id),
+            FleetTask.updated_at >= cutoff,
+        )
+        .order_by(FleetTask.updated_at.desc(), FleetTask.id.desc())
+        .first()
+    )
+    if latest_task and latest_task.status in ("failed", "cancelled") and latest_task.error_message:
+        return latest_task.error_message
+    return None
+
 
 @pda_router.get(
     "/production/pda/models",
@@ -401,6 +413,7 @@ def get_pda_raw_materials(
         .order_by(Location.position_index.asc().nullslast(), Location.location_code.asc())
         .all()
     )
+    cutoff = datetime.now(timezone.utc) - timedelta(minutes=5)
     result = []
     for loc in locations:
         cart = (
@@ -422,6 +435,7 @@ def get_pda_raw_materials(
                 has_rack=has_rack,
                 current_rack_id=current_rack_id,
                 current_model=current_model,
+                last_error=_get_recent_location_error(db, loc.id, cutoff),
             )
         )
     return result
@@ -462,7 +476,7 @@ def get_pda_cnc_stations(
         )
         .all()
     )
-
+    cutoff = datetime.now(timezone.utc) - timedelta(minutes=5)
     result = []
     for loc in locations:
         cart = (
@@ -641,6 +655,7 @@ def get_pda_cnc_stations(
                 calling_mission_code=calling_mission_code,
                 current_rack=current_rack,
                 supported_models=supported_models,
+                last_error=_get_recent_location_error(db, loc.id, cutoff),
             )
         )
     return result
@@ -674,6 +689,7 @@ def get_pda_washing_slots(
         .order_by(Location.position_index.asc().nullslast(), Location.location_code.asc())
         .all()
     )
+    cutoff = datetime.now(timezone.utc) - timedelta(minutes=5)
     result = []
     for idx, loc in enumerate(slots, start=1):
         slot_index = loc.position_index or idx
@@ -732,6 +748,7 @@ def get_pda_washing_slots(
                 name=loc.location_name or f"Slot {slot_index}",
                 status=status_str,
                 current_rack=current_rack,
+                last_error=_get_recent_location_error(db, loc.id, cutoff),
             )
         )
     return result
