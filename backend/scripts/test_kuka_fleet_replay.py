@@ -325,6 +325,16 @@ def run_kuka_fleet_replay_test():
                 loc18.location_name = loc18_orig_name
                 loc18.machine_id = loc18_orig_machine
                 loc18.position_index = loc18_orig_pos
+
+            # Dọn dẹp sạch sẽ các bản ghi test để không để lại lệnh nào chạy dở
+            if 'mission_code' in locals():
+                db.query(TaskStatus).filter(TaskStatus.mission_code == mission_code).delete()
+                db.query(FleetTask).filter(FleetTask.mission_code == mission_code).delete()
+            if 'container_code' in locals():
+                for c in db.query(ItemStock).filter(ItemStock.container_code == container_code).all():
+                    db.query(TransportRequest).filter(TransportRequest.container_id == c.id).delete()
+                    db.query(ProductionRecord).filter(ProductionRecord.container_id == c.id).delete()
+                    db.delete(c)
             db.commit()
         except Exception as e:
             print(f"Warning: Failed to restore locations in finally: {e}")
