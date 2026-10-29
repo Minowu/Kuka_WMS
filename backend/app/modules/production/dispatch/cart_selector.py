@@ -106,6 +106,15 @@ class CartSelector:
             )
         )
 
+        if target_location is not None:
+            # 1. Loại trừ xe đang nằm tại chính vị trí đích
+            base_query = base_query.filter(ItemStock.location_id != target_location.id)
+            # 2. Loại trừ xe đang nằm tại vị trí khác thuộc CÙNG MỘT MÁY (tránh AMR gắp xe từ POS1 sang POS2 của cùng 1 máy)
+            if target_location.machine_id is not None:
+                base_query = base_query.filter(
+                    (Location.machine_id != target_location.machine_id) | (Location.machine_id.is_(None))
+                )
+
         # Trường hợp 1: stage_level == 0 hoặc vị trí đích không có tọa độ -> thuần FIFO, chỉ khóa ĐÚNG 1 dòng!
         if (
             stage_level <= 0
