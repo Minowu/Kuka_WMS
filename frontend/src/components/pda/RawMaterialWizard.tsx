@@ -66,7 +66,7 @@ export const RawMaterialWizard: React.FC<RawMaterialWizardProps> = ({
     onSupplyConfirm({
       positionId: selectedPosition,
       modelId: selectedModel,
-      rackId: rackId.trim().toUpperCase(),
+      rackId: rackId.trim(),
     });
 
     // Tự động quay về Bước 1
@@ -265,7 +265,7 @@ export const RawMaterialWizard: React.FC<RawMaterialWizardProps> = ({
             <input
               type="text"
               value={rackId}
-              onChange={(e) => setRackId(e.target.value.toUpperCase())}
+              onChange={(e) => setRackId(e.target.value)}
               placeholder="Nhập hoặc quét mã barcode/QR..."
               className="w-full min-h-[52px] bg-slate-950 border-2 border-[#FF5800]/70 focus:border-[#FF5800] rounded-xl px-3 text-base font-mono font-bold text-white placeholder-slate-600 outline-none"
             />
