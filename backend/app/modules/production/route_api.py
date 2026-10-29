@@ -4,9 +4,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Annotated, Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy.orm import Session
-
-from app.core.celery_app import run_logic_task
+from sqlalchemy.orm import Session, joinedload
 from app.core.config import settings
 from app.core.database import get_db
 from app.core.dependencies import get_current_user
@@ -15,7 +13,7 @@ from app.modules.auth.auth_model import User
 from app.modules.production import route_service
 from app.modules.production.dispatch_service import dispatch_service
 from app.modules.production.production_celery_task import persist_task_status
-from app.modules.production.production_models import FleetTask, Machine, TransportRequest, UserLocation
+from app.modules.production.production_models import FleetTask, Machine, ProductionRoute, RouteStep, RouteStepMachine, TransportRequest, UserLocation
 from app.modules.production.route_schema import (
     CallMaterialRequest,
     ContainerActionRequest,
@@ -359,6 +357,42 @@ def _get_recent_location_error(db: Session, location_id: int, cutoff: datetime) 
     return None
 
 
+def _get_recent_location_errors_batch(
+    db: Session,
+    location_ids: list[int],
+    cutoff: datetime,
+) -> dict[int, Optional[str]]:
+    """
+    Tra cứu lỗi gần nhất trong 5 phút qua theo lô cho danh sách location_ids (S9).
+    Trả về dict {location_id: error_message | None}.
+    """
+    if not location_ids:
+        return {}
+    tasks = (
+        db.query(FleetTask)
+        .filter(
+            (FleetTask.pickup_location_id.in_(location_ids)) | (FleetTask.dropoff_location_id.in_(location_ids)),
+            FleetTask.updated_at >= cutoff,
+        )
+        .order_by(FleetTask.updated_at.desc(), FleetTask.id.desc())
+        .all()
+    )
+    errors: dict[int, Optional[str]] = {lid: None for lid in location_ids}
+    found: set[int] = set()
+    for t in tasks:
+        p_id = t.pickup_location_id
+        d_id = t.dropoff_location_id
+        if p_id in errors and p_id not in found:
+            found.add(p_id)
+            if t.status in ("failed", "cancelled") and t.error_message:
+                errors[p_id] = t.error_message
+        if d_id in errors and d_id not in found:
+            found.add(d_id)
+            if t.status in ("failed", "cancelled") and t.error_message:
+                errors[d_id] = t.error_message
+    return errors
+
+
 @pda_router.get(
     "/production/pda/models",
     response_model=list[PdaModelItem],
@@ -413,17 +447,28 @@ def get_pda_raw_materials(
         .order_by(Location.position_index.asc().nullslast(), Location.location_code.asc())
         .all()
     )
+    if not locations:
+        return []
+
     cutoff = datetime.now(timezone.utc) - timedelta(minutes=5)
+    loc_ids = [loc.id for loc in locations]
+
+    # S9: Tiền-nạp theo lô ItemStock (joinedload item) và lỗi gần nhất
+    carts = (
+        db.query(ItemStock)
+        .options(joinedload(ItemStock.item))
+        .filter(
+            ItemStock.location_id.in_(loc_ids),
+            ItemStock.is_active == True,
+        )
+        .all()
+    )
+    cart_by_loc_id: dict[int, ItemStock] = {c.location_id: c for c in carts}
+    errors_by_loc = _get_recent_location_errors_batch(db, loc_ids, cutoff)
+
     result = []
     for loc in locations:
-        cart = (
-            db.query(ItemStock)
-            .filter(
-                ItemStock.location_id == loc.id,
-                ItemStock.is_active == True,
-            )
-            .first()
-        )
+        cart = cart_by_loc_id.get(loc.id)
         has_rack = cart is not None
         current_rack_id = cart.container_code if cart else None
         current_model = cart.item.name if (cart and cart.item) else None
@@ -435,7 +480,7 @@ def get_pda_raw_materials(
                 has_rack=has_rack,
                 current_rack_id=current_rack_id,
                 current_model=current_model,
-                last_error=_get_recent_location_error(db, loc.id, cutoff),
+                last_error=errors_by_loc.get(loc.id),
             )
         )
     return result
@@ -469,6 +514,7 @@ def get_pda_cnc_stations(
 
     locations = (
         query.outerjoin(Location.machine)
+        .options(joinedload(Location.machine))
         .order_by(
             Machine.machine_code.asc().nullslast(),
             Location.position_index.asc().nullslast(),
@@ -476,60 +522,113 @@ def get_pda_cnc_stations(
         )
         .all()
     )
+    if not locations:
+        return []
+
     cutoff = datetime.now(timezone.utc) - timedelta(minutes=5)
+    loc_ids = [loc.id for loc in locations]
+    machine_ids = list({loc.machine_id for loc in locations if loc.machine_id is not None})
+
+    # S9 Batch Preload 1: Active ItemStock kèm Item
+    carts = (
+        db.query(ItemStock)
+        .options(joinedload(ItemStock.item))
+        .filter(
+            ItemStock.location_id.in_(loc_ids),
+            ItemStock.is_active == True,
+        )
+        .all()
+    )
+    cart_by_loc_id: dict[int, ItemStock] = {c.location_id: c for c in carts}
+
+    # S9 Batch Preload 2: Incoming FleetTask
+    incoming_tasks = (
+        db.query(FleetTask)
+        .options(joinedload(FleetTask.request).joinedload(TransportRequest.item))
+        .filter(
+            FleetTask.dropoff_location_id.in_(loc_ids),
+            FleetTask.status.in_(["created", "pending_submit", "submitting", "sent", "dispatched", "in_progress"]),
+        )
+        .order_by(FleetTask.dropoff_location_id.asc(), FleetTask.id.desc())
+        .all()
+    )
+    incoming_by_loc_id: dict[int, FleetTask] = {}
+    for task in incoming_tasks:
+        if task.dropoff_location_id not in incoming_by_loc_id:
+            incoming_by_loc_id[task.dropoff_location_id] = task
+
+    # S9 Batch Preload 3: Waiting TransportRequest
+    waiting_requests = (
+        db.query(TransportRequest)
+        .options(joinedload(TransportRequest.item))
+        .filter(
+            TransportRequest.destination_location_id.in_(loc_ids),
+            TransportRequest.status.in_(["queued_for_cart", "in_progress"]),
+        )
+        .order_by(TransportRequest.destination_location_id.asc(), TransportRequest.id.desc())
+        .all()
+    )
+    waiting_by_loc_id: dict[int, TransportRequest] = {}
+    for req in waiting_requests:
+        if req.destination_location_id not in waiting_by_loc_id:
+            waiting_by_loc_id[req.destination_location_id] = req
+
+    # S9 Batch Preload 4: RouteStepMachine cho toàn bộ các máy
+    step_links_by_machine: dict[int, list[RouteStepMachine]] = {}
+    if machine_ids:
+        all_step_links = (
+            db.query(RouteStepMachine)
+            .options(
+                joinedload(RouteStepMachine.route_step)
+                .joinedload(RouteStep.route)
+                .joinedload(ProductionRoute.item)
+            )
+            .filter(RouteStepMachine.machine_id.in_(machine_ids))
+            .all()
+        )
+        for link in all_step_links:
+            step_links_by_machine.setdefault(link.machine_id, []).append(link)
+
+    # S9 Batch Preload 5: Lỗi gần nhất cho tất cả vị trí
+    errors_by_loc = _get_recent_location_errors_batch(db, loc_ids, cutoff)
+
     result = []
     for loc in locations:
-        cart = (
-            db.query(ItemStock)
-            .filter(
-                ItemStock.location_id == loc.id,
-                ItemStock.is_active == True,
-            )
-            .first()
-        )
+        cart = cart_by_loc_id.get(loc.id)
+        m_links = step_links_by_machine.get(loc.machine_id, []) if loc.machine_id else []
 
         assigned_level = 1
         stage_name = "Công Đoạn 1"
         is_final_step = False
 
-        from app.modules.production.production_models import RouteStep, RouteStepMachine
-        from app.modules.production.dispatch.cart_selector import CartSelector
-
         if cart and cart.item_id and loc.machine_id:
-            # 1. Nếu trên máy ĐANG CÓ RACK: Tra cứu chính xác từ RouteStep của Model trên xe
-            try:
-                _, target_lvl, is_final = CartSelector().get_stage_info_for_machine(db, loc, cart.item_id)
-                assigned_level = target_lvl
-                is_final_step = is_final
-                # Lấy đúng tên bước công nghệ trong RouteStep
-                matched_step = (
-                    db.query(RouteStep)
-                    .join(RouteStepMachine)
-                    .filter(
-                        RouteStepMachine.machine_id == loc.machine_id,
-                        RouteStep.stage_level == target_lvl,
-                    )
-                    .first()
-                )
-                if matched_step and matched_step.step_name:
-                    stage_name = matched_step.step_name
-                else:
-                    stage_name = f"Level {assigned_level}"
-            except Exception:
-                # Nếu máy chưa được cấu hình Route cho Model này, không tự động cộng Level!
-                # Gán assigned_level = cart.current_stage_level để is_cart_completed = True (ẩn nút Báo xong)
+            # 1. Nếu trên máy ĐANG CÓ RACK: Tra cứu từ RouteStep của Model trên xe
+            matched_links = [
+                l for l in m_links
+                if l.route_step
+                and l.route_step.route
+                and l.route_step.route.is_active
+                and l.route_step.route.item_id == cart.item_id
+            ]
+            if matched_links:
+                matched_links.sort(key=lambda x: x.route_step.stage_level)
+                matched_step = matched_links[0].route_step
+                assigned_level = matched_step.stage_level
+                is_final_step = bool(matched_step.is_final_cnc_step)
+                stage_name = matched_step.step_name or f"Level {assigned_level}"
+            else:
                 assigned_level = cart.current_stage_level or 0
                 stage_name = "Chưa cấu hình Route cho Model này"
+                is_final_step = False
         elif loc.machine_id:
             # 2. Nếu máy TRỐNG: Lấy từ RouteStep đầu tiên được gán cho máy trong CSDL
-            first_step = (
-                db.query(RouteStep)
-                .join(RouteStepMachine)
-                .filter(RouteStepMachine.machine_id == loc.machine_id)
-                .order_by(RouteStep.stage_level.asc())
-                .first()
-            )
-            if first_step:
+            active_links = [
+                l for l in m_links
+                if l.route_step and l.route_step.route and l.route_step.route.is_active
+            ]
+            if active_links:
+                active_links.sort(key=lambda x: x.route_step.stage_level)
+                first_step = active_links[0].route_step
                 assigned_level = first_step.stage_level
                 stage_name = first_step.step_name or f"Level {assigned_level}"
                 is_final_step = bool(first_step.is_final_cnc_step)
@@ -562,18 +661,8 @@ def get_pda_cnc_stations(
             calling_model = None
             calling_mission_code = None
         else:
-            incoming_task = (
-                db.query(FleetTask)
-                .filter(
-                    FleetTask.dropoff_location_id == loc.id,
-                    FleetTask.status.in_(["created", "pending_submit", "submitting", "sent", "dispatched", "in_progress"]),
-                )
-                .order_by(FleetTask.id.desc())
-                .first()
-            )
+            incoming_task = incoming_by_loc_id.get(loc.id)
             if incoming_task:
-                # Nếu robot đã nhận lệnh và bắt đầu di chuyển (in_progress, dispatched) -> CALLING (AMR đang tới)
-                # Nếu mới gửi sang Fleet hoặc đang xếp hàng -> QUEUED (Chờ điều phối / Chờ AMR trống)
                 if incoming_task.status in ("in_progress", "dispatched"):
                     status_str = "CALLING"
                 else:
@@ -586,15 +675,7 @@ def get_pda_cnc_stations(
                 )
                 current_rack = None
             else:
-                waiting_req = (
-                    db.query(TransportRequest)
-                    .filter(
-                        TransportRequest.destination_location_id == loc.id,
-                        TransportRequest.status.in_(["queued_for_cart", "in_progress"]),
-                    )
-                    .order_by(TransportRequest.id.desc())
-                    .first()
-                )
+                waiting_req = waiting_by_loc_id.get(loc.id)
                 if waiting_req:
                     status_str = "QUEUED"
                     calling_model = (
@@ -610,22 +691,13 @@ def get_pda_cnc_stations(
 
         # ADR-002: Lấy danh sách các Model & Công đoạn mà máy này hỗ trợ theo 3NF RouteStepMachine
         supported_models = []
-        if loc.machine_id:
-            from app.modules.production.production_models import RouteStepMachine, RouteStep, ProductionRoute
-            from app.modules.warehouse.item.item_model import Item
-            step_links = (
-                db.query(RouteStepMachine)
-                .join(RouteStep, RouteStepMachine.route_step_id == RouteStep.id)
-                .join(ProductionRoute, RouteStep.route_id == ProductionRoute.id)
-                .join(Item, ProductionRoute.item_id == Item.id)
-                .filter(
-                    RouteStepMachine.machine_id == loc.machine_id,
-                    ProductionRoute.is_active == True,
-                )
-                .order_by(Item.sku.asc(), RouteStep.stage_level.asc())
-                .all()
-            )
-            for link in step_links:
+        if loc.machine_id and m_links:
+            valid_links = [
+                l for l in m_links
+                if l.route_step and l.route_step.route and l.route_step.route.is_active and l.route_step.route.item
+            ]
+            valid_links.sort(key=lambda x: (x.route_step.route.item.sku, x.route_step.stage_level))
+            for link in valid_links:
                 st = link.route_step
                 it = st.route.item
                 in_lvl = max(st.stage_level - 1, 0)
@@ -655,7 +727,7 @@ def get_pda_cnc_stations(
                 calling_mission_code=calling_mission_code,
                 current_rack=current_rack,
                 supported_models=supported_models,
-                last_error=_get_recent_location_error(db, loc.id, cutoff),
+                last_error=errors_by_loc.get(loc.id),
             )
         )
     return result
@@ -689,19 +761,54 @@ def get_pda_washing_slots(
         .order_by(Location.position_index.asc().nullslast(), Location.location_code.asc())
         .all()
     )
+    if not slots:
+        return []
+
     cutoff = datetime.now(timezone.utc) - timedelta(minutes=5)
+    slot_ids = [loc.id for loc in slots]
+
+    # S9 Batch Preload ItemStock với Item và Machine
+    carts = (
+        db.query(ItemStock)
+        .options(
+            joinedload(ItemStock.item),
+            joinedload(ItemStock.location).joinedload(Location.machine),
+        )
+        .filter(
+            ItemStock.location_id.in_(slot_ids),
+            ItemStock.is_active == True,
+            ItemStock.status != "empty",
+        )
+        .all()
+    )
+    cart_by_loc_id: dict[int, ItemStock] = {c.location_id: c for c in carts}
+
+    # S9 Batch Preload Incoming FleetTasks
+    incoming_tasks = (
+        db.query(FleetTask)
+        .options(
+            joinedload(FleetTask.container).joinedload(ItemStock.item),
+            joinedload(FleetTask.request).joinedload(TransportRequest.container).joinedload(ItemStock.item),
+        )
+        .filter(
+            FleetTask.dropoff_location_id.in_(slot_ids),
+            FleetTask.status.in_(["created", "pending_submit", "submitting", "sent", "dispatched", "in_progress"]),
+        )
+        .order_by(FleetTask.dropoff_location_id.asc(), FleetTask.id.desc())
+        .all()
+    )
+    incoming_by_loc_id: dict[int, FleetTask] = {}
+    for task in incoming_tasks:
+        if task.dropoff_location_id not in incoming_by_loc_id:
+            incoming_by_loc_id[task.dropoff_location_id] = task
+
+    # S9 Batch Preload recent errors
+    errors_by_loc = _get_recent_location_errors_batch(db, slot_ids, cutoff)
+
     result = []
     for idx, loc in enumerate(slots, start=1):
         slot_index = loc.position_index or idx
-        cart = (
-            db.query(ItemStock)
-            .filter(
-                ItemStock.location_id == loc.id,
-                ItemStock.is_active == True,
-                ItemStock.status != "empty",
-            )
-            .first()
-        )
+        cart = cart_by_loc_id.get(loc.id)
         if cart:
             status_str = "OCCUPIED"
             arrived_at = (
@@ -719,16 +826,8 @@ def get_pda_washing_slots(
                 arrived_at=arrived_at or "--:--",
             )
         else:
-            incoming = (
-                db.query(FleetTask)
-                .filter(
-                    FleetTask.dropoff_location_id == loc.id,
-                    FleetTask.status.in_(["created", "pending_submit", "submitting", "sent", "dispatched", "in_progress"]),
-                )
-                .first()
-            )
+            incoming = incoming_by_loc_id.get(loc.id)
             status_str = "OCCUPIED" if incoming else "EMPTY"
-            # Trong TransportRequest, quan hệ tới ItemStock tên là 'container' (hoặc đọc từ incoming.container)
             c = incoming.container if incoming and incoming.container else (incoming.request.container if incoming and incoming.request else None)
             if c:
                 current_rack = PdaWashingSlotRack(
@@ -748,7 +847,7 @@ def get_pda_washing_slots(
                 name=loc.location_name or f"Slot {slot_index}",
                 status=status_str,
                 current_rack=current_rack,
-                last_error=_get_recent_location_error(db, loc.id, cutoff),
+                last_error=errors_by_loc.get(loc.id),
             )
         )
     return result

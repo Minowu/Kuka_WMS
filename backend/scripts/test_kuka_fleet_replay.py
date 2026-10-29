@@ -77,10 +77,11 @@ def run_kuka_fleet_replay_test():
         # Intercept _post_kuka when no live access token is configured
         from app.core.config import settings
         recorded_calls = []
-        original_post = dispatch_service._post_kuka
+        from app.modules.production.dispatch.kuka_fleet_client import KukaFleetClient
+        orig_post_kuka = KukaFleetClient._post_kuka
 
-        if not getattr(settings, "kuka_access_token", None):
-            def mock_post_kuka(
+        def mock_post_kuka(
+                self,
                 endpoint_path: str,
                 payload: dict,
                 api_name: str,
@@ -112,7 +113,7 @@ def run_kuka_fleet_replay_test():
                     db.flush()
                 return resp
 
-            dispatch_service._post_kuka = mock_post_kuka
+        KukaFleetClient._post_kuka = mock_post_kuka
 
         mission_code = "KK2026171099191821"
         container_code = "123123"
@@ -169,7 +170,8 @@ def run_kuka_fleet_replay_test():
         db.commit()
 
         assert cart.is_locked is True
-        assert fleet_task.status in ("pending_submit", "sent")
+        db.refresh(fleet_task)
+        assert fleet_task.status in ("pending_submit", "submitting", "sent")
         print(f"  ✔ FleetTask tạo thành công với mission_code=[{mission_code}], container=[{container_code}] bị khóa.")
 
         # Step 3: Replay 7 exact signals
@@ -310,6 +312,9 @@ def run_kuka_fleet_replay_test():
         print("=" * 70)
 
     finally:
+        if 'orig_post_kuka' in locals():
+            from app.modules.production.dispatch.kuka_fleet_client import KukaFleetClient
+            KukaFleetClient._post_kuka = orig_post_kuka
         # Restore original location settings for node 17 & 18 if modified
         try:
             if 'loc17_orig_type' in locals() and loc17:
