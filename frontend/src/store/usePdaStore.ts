@@ -16,9 +16,6 @@ import {
   completeMachiningStageApi,
   returnEmptyCartFromWashingApi,
 } from '@/api/pda';
-import { useAuthStore } from './useAuthStore';
-import { getUserLocationsApi } from '@/api/machine';
-
 interface PdaState {
   positions: RawMaterialPosition[];
   models: PartModel[];
@@ -27,9 +24,11 @@ interface PdaState {
   toast: PdaToastNotification | null;
   loading: boolean;
   initialized: boolean;
+  wsConnected: boolean;
 
+  setWsConnected: (connected: boolean) => void;
   fetchFloorState: () => Promise<void>;
-  showToast: (msg: string, type?: 'success' | 'info' | 'warning' | 'kuka') => void;
+  showToast: (msg: string, type?: 'success' | 'info' | 'warning' | 'kuka' | 'error') => void;
   hideToast: () => void;
 
   // Luồng Nguyên Liệu
@@ -51,6 +50,9 @@ export const usePdaStore = create<PdaState>((set, get) => ({
   toast: null,
   loading: false,
   initialized: false,
+  wsConnected: false,
+
+  setWsConnected: (connected) => set({ wsConnected: connected }),
 
   fetchFloorState: async () => {
     set({ loading: true });
@@ -123,7 +125,7 @@ export const usePdaStore = create<PdaState>((set, get) => ({
       await fetchFloorState();
     } catch (err: any) {
       const errorMsg = err?.response?.data?.detail || err?.message || 'Lỗi cấp phôi';
-      showToast(`Lỗi cấp phôi: ${errorMsg}`, 'warning');
+      showToast(`Lỗi cấp phôi: ${errorMsg}`, 'error');
     }
   },
 
@@ -151,10 +153,10 @@ export const usePdaStore = create<PdaState>((set, get) => ({
       cncStations: state.cncStations.map((st) =>
         st.id === stationId
           ? {
-              ...st,
-              status: 'CALLING',
-              callingModel: modelLabel,
-            }
+            ...st,
+            status: 'CALLING',
+            callingModel: modelLabel,
+          }
           : st
       ),
     }));
@@ -168,7 +170,7 @@ export const usePdaStore = create<PdaState>((set, get) => ({
       await fetchFloorState();
     } catch (err: any) {
       const errorMsg = err?.response?.data?.detail || err?.message || 'Lỗi gọi phôi';
-      showToast(`Lỗi gọi phôi: ${errorMsg}`, 'warning');
+      showToast(`Lỗi gọi phôi: ${errorMsg}`, 'error');
       await fetchFloorState();
     }
   },
@@ -212,7 +214,7 @@ export const usePdaStore = create<PdaState>((set, get) => ({
       await fetchFloorState();
     } catch (err: any) {
       const errorMsg = err?.response?.data?.detail || err?.message || 'Lỗi cập nhật công đoạn';
-      showToast(`Lỗi: ${errorMsg}`, 'warning');
+      showToast(`Lỗi: ${errorMsg}`, 'error');
       await fetchFloorState();
     }
   },
@@ -233,7 +235,7 @@ export const usePdaStore = create<PdaState>((set, get) => ({
       await fetchFloorState();
     } catch (err: any) {
       const errorMsg = err?.response?.data?.detail || err?.message || 'Lỗi giải phóng slot';
-      showToast(`Lỗi: ${errorMsg}`, 'warning');
+      showToast(`Lỗi: ${errorMsg}`, 'error');
       await fetchFloorState();
     }
   },

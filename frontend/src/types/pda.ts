@@ -7,6 +7,7 @@ export interface RawMaterialPosition {
   hasRack: boolean;
   currentRackId?: string;
   currentModel?: string;
+  lastError?: string | null;
 }
 
 export interface PartModel {
@@ -40,6 +41,7 @@ export interface CncMachineStation {
   callingModel?: string;
   callingTaskCode?: string;
   supportedModels?: CncSupportedModel[];
+  lastError?: string | null;
   currentRack?: {
     rackId: string;
     model: string;
@@ -57,6 +59,7 @@ export interface WashingSlot {
   code?: string; // 'WASH-01' -> 'WASH-04'
   name: string; // 'Slot 1' -> 'Slot 4'
   status: 'EMPTY' | 'OCCUPIED';
+  lastError?: string | null;
   currentRack?: {
     rackId: string;
     model: string;
@@ -68,6 +71,6 @@ export interface WashingSlot {
 export interface PdaToastNotification {
   id: string;
   message: string;
-  type: 'success' | 'info' | 'warning' | 'kuka';
+  type: 'success' | 'info' | 'warning' | 'kuka' | 'error';
   timestamp: number;
 }
