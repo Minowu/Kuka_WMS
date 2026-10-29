@@ -108,13 +108,8 @@ class DispatchCore:
         db.commit()
         db.refresh(fleet_task)
 
-        self.fleet_client.submit_fleet_task(db, fleet_task, request_type=transport_req.request_type)
-        db.commit()
-        db.refresh(fleet_task)
-
-        if fleet_task.status != "sent":
-            err_msg = fleet_task.error_message or "KUKA Fleet từ chối hoặc không thể nhận nhiệm vụ điều phối xe."
-            raise ValueError(f"Lỗi gửi lệnh sang KUKA Fleet: {err_msg}")
+        from app.modules.production.production_celery_task import enqueue_fleet_submit
+        enqueue_fleet_submit(fleet_task.id)
 
         return fleet_task
 
@@ -493,19 +488,23 @@ class DispatchCore:
             db.add(transport_req)
             db.flush()
 
-            # Gọi gửi lệnh sang Fleet trước. Nếu Fleet từ chối, văng lỗi ngay và không đổi cart.status = 'empty'
-            self.lock_cart_and_dispatch_fleet_task(
-                db=db,
-                transport_req=transport_req,
-                cart=cart,
-                pickup_location_id=cart.location_id,
-                dropoff_location_id=buffer_slot.id,
-            )
-            # Chỉ khi Fleet nhận lệnh thành công mới reset phôi về rỗng
             cart.quantity = 0
             cart.status = "empty"
             cart.current_stage_level = 0
             db.flush()
+
+            try:
+                self.lock_cart_and_dispatch_fleet_task(
+                    db=db,
+                    transport_req=transport_req,
+                    cart=cart,
+                    pickup_location_id=cart.location_id,
+                    dropoff_location_id=buffer_slot.id,
+                )
+            except Exception:
+                cart.status = "available"
+                db.commit()
+                raise
         else:
             cart.quantity = 0
             cart.status = "empty"

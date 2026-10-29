@@ -291,7 +291,7 @@ class FleetTask(Base):
     picked_up_at = Column(DateTime(timezone=True), nullable=True)
     submit_attempts = Column(Integer, default=0, nullable=False)
 
-    # created | pending_submit | sent | in_progress | completed | failed | cancelled
+    # created | pending_submit | submitting | sent | in_progress | completed | failed | cancelled
     status = Column(String(30), default="created", nullable=False, index=True)
     error_message = Column(Text, nullable=True)
     sent_at = Column(DateTime(timezone=True), nullable=True)

@@ -37,7 +37,13 @@ services:
       - "8001:8000"
     env_file:
       - ./backend/.env
+    environment:
+      DATABASE_URL: postgresql://postgres:thado123@db:5432/kuka
+      REDIS_URL: redis://redis:6379/0
+      CELERY_BROKER_URL: redis://redis:6379/1
+      CELERY_BROKER_RESULT_URL: redis://redis:6379/2
     volumes:
+      - ./backend/app:/app/app
       - ./backend/logs:/app/logs
       - ./backend/uploads:/app/uploads
       - ./backend/app/static/file_import_item:/app/app/static/file_import_item
@@ -62,16 +68,19 @@ services:
     env_file:
       - ./backend/.env
     environment:
+      DATABASE_URL: postgresql://postgres:thado123@db:5432/kuka
+      REDIS_URL: redis://redis:6379/0
       CELERY_BROKER_URL: redis://redis:6379/1
       CELERY_BROKER_RESULT_URL: redis://redis:6379/2
     volumes:
+      - ./backend/app:/app/app
       - ./backend/logs:/app/logs
       - ./backend/uploads:/app/uploads
       - ./backend/app/static/file_import_item:/app/app/static/file_import_item
     depends_on:
+      db:
+        condition: service_healthy
       redis:
-        condition: service_started
-      backend:
         condition: service_started
     restart: unless-stopped
 
@@ -89,15 +98,72 @@ services:
     env_file:
       - ./backend/.env
     environment:
+      DATABASE_URL: postgresql://postgres:thado123@db:5432/kuka
+      REDIS_URL: redis://redis:6379/0
       CELERY_BROKER_URL: redis://redis:6379/1
       CELERY_BROKER_RESULT_URL: redis://redis:6379/2
     volumes:
+      - ./backend/app:/app/app
       - ./backend/logs:/app/logs
       - ./backend/uploads:/app/uploads
     depends_on:
+      db:
+        condition: service_healthy
       redis:
         condition: service_started
-      backend:
+    restart: unless-stopped
+
+  celery-worker-fleet:
+    image: wms-backend:latest
+    container_name: wms-celery-fleet
+    command: >
+      celery -A app.core.celery_app.celery_app worker
+      -Q fleet
+      --loglevel=INFO
+      --concurrency=4
+      --prefetch-multiplier=1
+      --max-tasks-per-child=500
+      -n fleet@%h
+    env_file:
+      - ./backend/.env
+    environment:
+      DATABASE_URL: postgresql://postgres:thado123@db:5432/kuka
+      REDIS_URL: redis://redis:6379/0
+      CELERY_BROKER_URL: redis://redis:6379/1
+      CELERY_BROKER_RESULT_URL: redis://redis:6379/2
+    volumes:
+      - ./backend/app:/app/app
+      - ./backend/logs:/app/logs
+      - ./backend/uploads:/app/uploads
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    restart: unless-stopped
+
+  celery-beat:
+    image: wms-backend:latest
+    container_name: wms-celery-beat
+    command: >
+      celery -A app.core.celery_app.celery_app beat
+      --loglevel=INFO
+      --schedule=/data/celerybeat-schedule
+    env_file:
+      - ./backend/.env
+    environment:
+      DATABASE_URL: postgresql://postgres:thado123@db:5432/kuka
+      REDIS_URL: redis://redis:6379/0
+      CELERY_BROKER_URL: redis://redis:6379/1
+      CELERY_BROKER_RESULT_URL: redis://redis:6379/2
+    volumes:
+      - ./backend/app:/app/app
+      - ./backend/logs:/app/logs
+      - celerybeat_data:/data
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
         condition: service_started
     restart: unless-stopped
 
@@ -117,3 +183,4 @@ services:
 volumes:
   postgres_data:
   redis_data:
+  celerybeat_data:

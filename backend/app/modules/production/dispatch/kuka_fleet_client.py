@@ -10,7 +10,13 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.logger import get_logger
-from app.modules.production.production_models import FleetApiCall, FleetTask
+from app.modules.production.production_models import (
+    FleetApiCall,
+    FleetTask,
+    ProductionRoute,
+    RouteStep,
+    TransportQueue,
+)
 
 logger = get_logger("main")
 
@@ -26,6 +32,78 @@ class IcsError(Exception):
     def __init__(self, message: str, *, retryable: bool = True):
         super().__init__(message)
         self.retryable = retryable
+
+
+def fail_and_release(db: Session, task: FleetTask, reason: str) -> FleetTask:
+    """
+    Đánh dấu `FleetTask` là `failed` (đảm bảo tính bất biến/idempotent - gọi nhiều lần không lỗi),
+    mở khóa xe phôi `ItemStock` và khôi phục an toàn trạng thái nghiệp vụ cho cả 4 luồng sản xuất:
+    1. Mở khóa xe `task.container` (`is_locked = False`, xóa `locked_by_mission_code` và `destination_location_id`).
+    2. Nếu `task.request` xuất phát từ Hàng đợi tự động `TransportQueue` (`WAITING_CART` hoặc `WAITING_SLOT`),
+       mở lại bản ghi hàng đợi về trạng thái `PENDING` để yêu cầu không bao giờ bị mất khi Fleet lỗi.
+    3. Nếu `task.request` là `MOVE_TO_WASH` / `SEND_TO_WASH` (từ máy CNC cuối đi Rửa), khôi phục
+       `cart.current_stage_level` về công đoạn trước đó để nút 'Hoàn thành công đoạn' hiện lại trên PDA.
+    4. Nếu `task.request` là `RETURN_EMPTY_CART` (từ khu Rửa trả xe rỗng), khôi phục
+       `cart.status = 'available'` để chiếc xe không bị biến mất khỏi màn hình PDA khu Rửa.
+    """
+    task.status = "failed"
+    task.error_message = reason
+
+    cart = task.container
+    if cart:
+        if not cart.locked_by_mission_code or cart.locked_by_mission_code == task.mission_code:
+            cart.is_locked = False
+            cart.locked_by_mission_code = None
+            cart.destination_location_id = None
+
+    req = task.request
+    if req and req.status not in ("completed", "cancelled"):
+        queue_entry = (
+            db.query(TransportQueue)
+            .filter(TransportQueue.request_id == req.id)
+            .order_by(TransportQueue.id.desc())
+            .first()
+        )
+        if queue_entry:
+            # Nếu yêu cầu xuất phát từ Hàng đợi tự động, mở lại PENDING để chu kỳ quét sau thử lại
+            queue_entry.status = "PENDING"
+            queue_entry.resolved_at = None
+            req.error_message = reason
+            if queue_entry.queue_type == "WAITING_CART":
+                req.status = "queued_for_cart"
+                req.container_id = None
+                req.source_location_id = None
+            else:
+                req.status = "queued_for_slot"
+        else:
+            req.status = "failed"
+            req.error_message = reason
+
+            # Bảo vệ Lỗi 2 (Vị trí 2): Máy CNC cuối báo xong đi Rửa nhưng Fleet từ chối
+            # -> Khôi phục current_stage_level về bước trước để nút 'Hoàn thành' trên PDA hiện lại!
+            if req.request_type in ("MOVE_TO_WASH", "SEND_TO_WASH") and cart:
+                req_stage = req.required_stage_level or 0
+                if req_stage > 0 and (cart.current_stage_level or 0) >= req_stage:
+                    prev_step = (
+                        db.query(RouteStep.stage_level)
+                        .join(ProductionRoute, RouteStep.route_id == ProductionRoute.id)
+                        .filter(
+                            ProductionRoute.item_id == cart.item_id,
+                            RouteStep.stage_level < req_stage,
+                        )
+                        .order_by(RouteStep.stage_level.desc())
+                        .first()
+                    )
+                    cart.current_stage_level = prev_step[0] if prev_step else max(0, req_stage - 1)
+
+            # Bảo vệ Lỗi 3 (Vị trí 2): Khu Rửa bấm trả xe rỗng nhưng Fleet từ chối
+            # -> Đảm bảo status = 'available' để xe không bị biến mất khỏi màn hình PDA khu Rửa!
+            elif req.request_type == "RETURN_EMPTY_CART" and cart:
+                if cart.status == "empty":
+                    cart.status = "available"
+
+    db.flush()
+    return task
 
 
 class KukaFleetClient:
@@ -461,6 +539,192 @@ class KukaFleetClient:
         """Alias for fleet_move_empty_container."""
         return self.fleet_move_empty_container(task, pickup_code, buffer_code, container_code, db=db)
 
+    def build_mission_payload(
+        self,
+        mission_code: str,
+        fleet_request_id: Optional[str],
+        pickup_code: str,
+        dropoff_code: str,
+        container_code: Optional[str],
+        request_type: str = "CALL_MATERIAL",
+    ) -> tuple[str, str, list[dict[str, Any]], dict[str, Any]]:
+        """
+        Tạo dữ liệu `(req_id, api_name, mission_data, payload)` cho API `/amr/submitMission` mà không cần giữ kết nối DB.
+        Giữ nguyên `fleet_request_id` qua các lần retry để đảm bảo tính chống trùng lặp (idempotency) bên phía KUKA Fleet.
+        """
+        org_id = getattr(settings, "kuka_org_id", "KUKA011021")
+        container_model = getattr(settings, "kuka_container_model_code", "1001")
+        robot_type = getattr(settings, "kuka_robot_type", "LIFT")
+        mission_type = getattr(settings, "kuka_mission_type", "RACK_MOVE")
+
+        req_id = fleet_request_id or f"SUB{datetime.now().strftime('%Y%m%d%H%M%S%f')[:17]}{uuid.uuid4().hex[:4].upper()}"
+
+        if request_type in ("MOVE_TO_WASH", "SEND_TO_WASH"):
+            put_down_dropoff = False
+            lock_robot = True
+            api_name = "submitMission:wash"
+        elif request_type == "RETURN_EMPTY_CART":
+            put_down_dropoff = True
+            lock_robot = False
+            api_name = "submitMission:empty_container"
+        else:
+            put_down_dropoff = True
+            lock_robot = False
+            api_name = "submitMission:material"
+
+        mission_data = [
+            {
+                "sequence": 1,
+                "position": pickup_code,
+                "type": "NODE_POINT",
+                "putDown": False,
+                "passStrategy": "AUTO",
+                "waitingMillis": 0,
+            },
+            {
+                "sequence": 2,
+                "position": dropoff_code,
+                "type": "NODE_POINT",
+                "putDown": put_down_dropoff,
+                "passStrategy": "AUTO",
+                "waitingMillis": 0,
+            },
+        ]
+
+        payload = {
+            "orgId": org_id,
+            "requestId": req_id,
+            "missionCode": mission_code,
+            "missionType": mission_type,
+            "viewBoardType": "",
+            "robotModels": [],
+            "robotIds": [],
+            "robotType": robot_type,
+            "priority": 1,
+            "containerModelCode": container_model,
+            "templateCode": "",
+            "lockRobotAfterFinish": lock_robot,
+            "unlockRobotId": "",
+            "unlockMissionCode": "",
+            "idleNode": "",
+            "missionData": mission_data,
+        }
+        return req_id, api_name, mission_data, payload
+
+    def _do_fleet_call(
+        self,
+        endpoint_path: str,
+        payload: dict[str, Any],
+        api_name: str,
+        mission_code: Optional[str] = None,
+        container_code: Optional[str] = None,
+        request_id: Optional[str] = None,
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        """
+        Thực hiện gọi HTTP POST thuần tới KUKA Fleet Manager MÀ KHÔNG giữ kết nối Database.
+        Trả về `(response_data, audit_log_dict)` nếu gửi thành công.
+        Nếu thất bại, đính kèm thông tin nhật ký `e.audit_log` vào ngoại lệ `IcsError` và ném lỗi ra ngoài.
+        """
+        req_id = request_id or str(payload.get("requestId") or f"REQ_{uuid.uuid4().hex[:12].upper()}")
+        base = (getattr(settings, "kuka_base_url", None) or "").strip().rstrip("/")
+        endpoint = endpoint_path if endpoint_path.startswith("/") else f"/{endpoint_path}"
+        url = f"{base}{endpoint}"
+
+        if not _ics_configured():
+            error_msg = f"KUKA Fleet API chưa được cấu hình hoặc offline — không thể điều xe {api_name}"
+            logger.error(error_msg)
+            err_resp = {"code": -1, "message": error_msg, "success": False}
+            err = IcsError(error_msg, retryable=True)
+            err.audit_log = {
+                "api_name": api_name,
+                "request_id": req_id,
+                "mission_code": mission_code,
+                "container_code": container_code,
+                "request_body": payload,
+                "http_status": 503,
+                "response_body": err_resp,
+                "error": error_msg,
+                "success": False,
+            }
+            raise err
+
+        timeout_sec = float(getattr(settings, "kuka_http_timeout_seconds", 5.0))
+        connect_timeout = min(2.0, timeout_sec)
+        headers = {
+            "Content-Type": "application/json",
+            "orgId": getattr(settings, "kuka_org_id", "KUKA011021"),
+        }
+        token = getattr(settings, "kuka_access_token", None) or getattr(settings, "kuka_api_token", None)
+        if token:
+            headers["Authorization"] = token
+
+        try:
+            with httpx.Client(timeout=httpx.Timeout(timeout_sec, connect=connect_timeout)) as client:
+                response = client.post(url, json=payload, headers=headers)
+                http_status = response.status_code
+                response.raise_for_status()
+                resp_data = response.json()
+            logger.info("KUKA Fleet POST %s [%s] response: %s", endpoint_path, api_name, resp_data)
+
+            fleet_success = resp_data.get("success") is True and str(resp_data.get("code", "")) in ("0", "200")
+            fleet_code = str(resp_data.get("code", ""))
+            fleet_msg = resp_data.get("message")
+
+            if not fleet_success and api_name == "containerIn" and fleet_code == "100502":
+                fleet_success = True
+
+            audit_log = {
+                "api_name": api_name,
+                "request_id": req_id,
+                "mission_code": mission_code,
+                "container_code": container_code,
+                "request_body": payload,
+                "http_status": http_status,
+                "response_body": resp_data,
+                "success": fleet_success,
+                "error": fleet_msg if not fleet_success else None,
+            }
+
+            if not fleet_success:
+                err_text = f"KUKA Fleet từ chối [{api_name}] (code={fleet_code}): {fleet_msg}"
+                logger.warning(err_text)
+                err = IcsError(err_text, retryable=False)
+                err.audit_log = audit_log
+                raise err
+
+            return resp_data, audit_log
+        except httpx.HTTPStatusError as e:
+            http_status = e.response.status_code
+            error_msg = f"KUKA Fleet server error ({http_status}): {e.response.text}"
+            err = IcsError(error_msg, retryable=(http_status >= 500))
+            err.audit_log = {
+                "api_name": api_name,
+                "request_id": req_id,
+                "mission_code": mission_code,
+                "container_code": container_code,
+                "request_body": payload,
+                "http_status": http_status,
+                "response_body": None,
+                "success": False,
+                "error": error_msg,
+            }
+            raise err from e
+        except httpx.RequestError as e:
+            error_msg = f"Cannot reach KUKA Fleet server: {e}"
+            err = IcsError(error_msg, retryable=True)
+            err.audit_log = {
+                "api_name": api_name,
+                "request_id": req_id,
+                "mission_code": mission_code,
+                "container_code": container_code,
+                "request_body": payload,
+                "http_status": None,
+                "response_body": None,
+                "success": False,
+                "error": error_msg,
+            }
+            raise err from e
+
     def submit_fleet_task(self, db: Session, task: FleetTask, request_type: str = "CALL_MATERIAL") -> FleetTask:
         """Submit an already-persisted FleetTask to KUKA Fleet Manager via submitMission."""
         pickup_loc = db.query(Location).filter(Location.id == task.pickup_location_id).first()
@@ -468,10 +732,7 @@ class KukaFleetClient:
         if not pickup_loc or not dropoff_loc:
             error_msg = f"Vị trí lấy/hạ hàng không tồn tại (pickup={task.pickup_location_id}, dropoff={task.dropoff_location_id})"
             logger.error(error_msg)
-            task.status = "failed"
-            task.error_message = error_msg
-            db.flush()
-            return task
+            return fail_and_release(db, task, error_msg)
 
         pickup_code = pickup_loc.location_code
         dropoff_code = dropoff_loc.location_code
@@ -493,16 +754,9 @@ class KukaFleetClient:
             task.submit_attempts += 1
             task.error_message = str(e)
 
-            # Bất kỳ lỗi IcsError nào khi submitMission đều đánh dấu FAILED và giải phóng khóa xe,
-            # tránh để xe bị kẹt hay treo trạng thái giả lập.
-            task.status = "failed"
-            if task.container:
-                task.container.is_locked = False
-                task.container.locked_by_mission_code = None
-                task.container.destination_location_id = None
-            if task.request:
-                task.request.status = "failed"
-                task.request.error_message = str(e)
-
-            db.flush()
+            if not getattr(e, "retryable", True):
+                fail_and_release(db, task, str(e))
+            else:
+                task.status = "pending_submit"
+                db.flush()
         return task

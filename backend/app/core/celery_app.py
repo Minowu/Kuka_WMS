@@ -16,6 +16,7 @@ CELERY_LOGIC_TIMEOUT = 120
 
 QUEUE_LOGIC = "logic"
 QUEUE_STATUS = "status"
+QUEUE_FLEET = "fleet"
 
 celery_app = Celery(
     "wms",
@@ -42,6 +43,7 @@ celery_app.conf.update(
     task_time_limit=300,              
     task_soft_time_limit=270,        
 
+    task_ignore_result=True,
     result_expires=3600,             
     task_track_started=True,         
 
@@ -49,8 +51,11 @@ celery_app.conf.update(
     task_queues={
         QUEUE_LOGIC: {},
         QUEUE_STATUS: {},
+        QUEUE_FLEET: {},
     },
     task_routes={
+        "production.submit_fleet_task": {"queue": QUEUE_FLEET},
+        "production.sweep_fleet_tasks": {"queue": QUEUE_FLEET},
         "production.*": {"queue": QUEUE_LOGIC},
         "robot.*": {"queue": QUEUE_STATUS},
     },
@@ -58,6 +63,10 @@ celery_app.conf.update(
         "always-scan-transport-queue": {
             "task": "production.scan_transport_queue",
             "schedule": 5.0,
+        },
+        "sweep-fleet-tasks": {
+            "task": "production.sweep_fleet_tasks",
+            "schedule": 15.0,
         },
     },
 )

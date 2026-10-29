@@ -552,7 +552,7 @@ def get_pda_cnc_stations(
                 db.query(FleetTask)
                 .filter(
                     FleetTask.dropoff_location_id == loc.id,
-                    FleetTask.status.in_(["created", "sent", "dispatched", "in_progress"]),
+                    FleetTask.status.in_(["created", "pending_submit", "submitting", "sent", "dispatched", "in_progress"]),
                 )
                 .order_by(FleetTask.id.desc())
                 .first()
@@ -707,7 +707,7 @@ def get_pda_washing_slots(
                 db.query(FleetTask)
                 .filter(
                     FleetTask.dropoff_location_id == loc.id,
-                    FleetTask.status.in_(["created", "sent", "dispatched", "in_progress"]),
+                    FleetTask.status.in_(["created", "pending_submit", "submitting", "sent", "dispatched", "in_progress"]),
                 )
                 .first()
             )

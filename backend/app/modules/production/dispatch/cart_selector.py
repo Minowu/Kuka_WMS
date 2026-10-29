@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 import math
 from typing import Optional
 
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.orm import Session, joinedload, lazyload
 
 from app.modules.production.production_models import (
     FleetTask,
@@ -82,15 +82,17 @@ class CartSelector:
         target_location: Optional[Location] = None,
     ) -> Optional[ItemStock]:
         """
-        Select an available cart matching `item_id` and `current_stage_level`:
-        - For `stage_level == 0` (Raw Material): FIFO order (`created_at ASC, id ASC`).
-        - For `stage_level > 0` (CNC WIP transfer): Nearest 2D Euclidean distance to `target_location`
-          (if map coordinates exist), tie-broken by FIFO (`created_at ASC, id ASC`).
-        Uses `with_for_update(of=ItemStock, skip_locked=True)` so concurrent requests never pick the same cart.
+        Tìm xe phôi rảnh phù hợp với `item_id` và `current_stage_level`:
+        - Với `stage_level == 0` (Phôi thô): Sắp xếp theo thứ tự nhập trước xuất trước FIFO (`created_at ASC, id ASC`).
+          Dùng `.first()` kết hợp `with_for_update(of=ItemStock, skip_locked=True)` để mỗi request
+          chỉ khóa đúng 1 dòng xe phôi thay vì khóa toàn bộ kho phôi thô!
+        - Với `stage_level > 0` (Chuyển phôi bán thành phẩm WIP giữa các máy CNC): Ưu tiên khoảng cách
+          Euclid 2D gần nhất tới `target_location` (nếu có tọa độ bản đồ), nếu bằng nhau thì xét theo FIFO.
+          Xếp hạng danh sách ứng viên trước (không giữ khóa DB), sau đó mới thử khóa lần lượt từng xe gần nhất.
         """
         location_types = ["RAW_MATERIAL"] if stage_level == 0 else ["CNC_SLOT", "RAW_MATERIAL"]
 
-        candidates = (
+        base_query = (
             db.query(ItemStock)
             .join(Location, ItemStock.location_id == Location.id)
             .filter(
@@ -102,32 +104,64 @@ class CartSelector:
                 Location.location_type.in_(location_types),
                 Location.is_active.is_(True),
             )
+        )
+
+        # Trường hợp 1: stage_level == 0 hoặc vị trí đích không có tọa độ -> thuần FIFO, chỉ khóa ĐÚNG 1 dòng!
+        if (
+            stage_level <= 0
+            or target_location is None
+            or target_location.map_x is None
+            or target_location.map_y is None
+        ):
+            return (
+                base_query.options(lazyload("*"))
+                .order_by(ItemStock.created_at.asc(), ItemStock.id.asc())
+                .with_for_update(of=ItemStock, skip_locked=True)
+                .first()
+            )
+
+        # Trường hợp 2: stage_level > 0 có tọa độ vị trí đích -> tính khoảng cách 2D trên danh sách chưa khóa,
+        # sau đó mới khóa dòng (FOR UPDATE SKIP LOCKED) trên xe ứng viên gần nhất còn rảnh.
+        unlocked_candidates = (
+            base_query.options(lazyload("*"), joinedload(ItemStock.location))
             .order_by(ItemStock.created_at.asc(), ItemStock.id.asc())
-            .with_for_update(of=ItemStock, skip_locked=True)
             .all()
         )
-        if not candidates:
+        if not unlocked_candidates:
             return None
 
-        if (
-            stage_level > 0
-            and target_location is not None
-            and target_location.map_x is not None
-            and target_location.map_y is not None
-        ):
-            candidates_with_coords = [
-                c for c in candidates if c.location and c.location.map_x is not None and c.location.map_y is not None
-            ]
-            if candidates_with_coords:
-                candidates.sort(
-                    key=lambda c: (
-                        self.calculate_distance(c.location, target_location),
-                        c.created_at or datetime.min.replace(tzinfo=timezone.utc),
-                        c.id,
-                    )
+        candidates_with_coords = [
+            c for c in unlocked_candidates if c.location and c.location.map_x is not None and c.location.map_y is not None
+        ]
+        if candidates_with_coords:
+            unlocked_candidates.sort(
+                key=lambda c: (
+                    self.calculate_distance(c.location, target_location)
+                    if (c.location and c.location.map_x is not None and c.location.map_y is not None)
+                    else float("inf"),
+                    c.created_at or datetime.min.replace(tzinfo=timezone.utc),
+                    c.id,
                 )
+            )
 
-        return candidates[0]
+        for cand in unlocked_candidates:
+            locked_cart = (
+                db.query(ItemStock)
+                .options(lazyload("*"))
+                .filter(
+                    ItemStock.id == cand.id,
+                    ItemStock.is_locked.is_(False),
+                    ItemStock.is_active.is_(True),
+                    ItemStock.status != "empty",
+                    ItemStock.current_stage_level == stage_level,
+                )
+                .with_for_update(of=ItemStock, skip_locked=True)
+                .first()
+            )
+            if locked_cart:
+                return locked_cart
+
+        return None
 
     def is_location_free(self, db: Session, location_id: int) -> bool:
         """
@@ -163,7 +197,7 @@ class CartSelector:
             db.query(FleetTask.id)
             .filter(
                 FleetTask.dropoff_location_id == location_id,
-                FleetTask.status.in_(["created", "sent", "in_progress"]),
+                FleetTask.status.in_(["created", "pending_submit", "submitting", "sent", "in_progress"]),
             )
             .first()
         )

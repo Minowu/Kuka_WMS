@@ -61,6 +61,8 @@ class QueueService:
             )
             if cart and lock_and_dispatch_fn:
                 try:
+                    entry.status = "RESOLVED"
+                    entry.resolved_at = datetime.now(timezone.utc)
                     lock_and_dispatch_fn(
                         db=db,
                         transport_req=req,
@@ -68,15 +70,14 @@ class QueueService:
                         pickup_location_id=cart.location_id,
                         dropoff_location_id=req.destination_location_id,
                     )
-                    entry.status = "RESOLVED"
-                    entry.resolved_at = datetime.now(timezone.utc)
                     resolved_count += 1
                 except Exception as exc:
+                    entry.status = "PENDING"
+                    entry.resolved_at = None
                     logger.warning(
                         "Không thể dispatch nhiệm vụ cho hàng đợi WAITING_CART (req_id=%s, cart=%s): %s",
                         req.id, cart.container_code, exc
                     )
-                    # Giữ nguyên entry.status = 'PENDING' để lần quét sau thử lại
 
         if resolved_count:
             db.commit()
@@ -120,6 +121,8 @@ class QueueService:
 
             if target_slot and lock_and_dispatch_fn:
                 try:
+                    entry.status = "RESOLVED"
+                    entry.resolved_at = datetime.now(timezone.utc)
                     lock_and_dispatch_fn(
                         db=db,
                         transport_req=req,
@@ -127,15 +130,14 @@ class QueueService:
                         pickup_location_id=cart.location_id,
                         dropoff_location_id=target_slot.id,
                     )
-                    entry.status = "RESOLVED"
-                    entry.resolved_at = datetime.now(timezone.utc)
                     resolved_count += 1
                 except Exception as exc:
+                    entry.status = "PENDING"
+                    entry.resolved_at = None
                     logger.warning(
                         "Không thể dispatch nhiệm vụ cho hàng đợi WAITING_SLOT (req_id=%s, slot=%s): %s",
                         req.id, target_slot.location_code, exc
                     )
-                    # Giữ nguyên entry.status = 'PENDING' để lần quét sau thử lại
 
         if resolved_count:
             db.commit()
