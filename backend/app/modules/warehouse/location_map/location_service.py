@@ -1176,8 +1176,8 @@ def adapt_kuka_floor_map_to_canvas(data: dict) -> MapDataResponse:
         func_list = n.get("functionList", [])
         has_func = bool(func_list)
         # Any functional node (workstation 1, rack 2, rest 3, charge 4, docking 10) is renderable station
-        is_rack = any(f.get("functionType") in (1, 2, 3, 4, 10) for f in func_list)
-        node_type = 1 if (is_rack or has_func) else 0
+        is_rack = any(f.get("functionType") == 2 for f in func_list)
+        node_type = 1 if is_rack else 0
         shelf_turn = 1 if is_rack else 0
         extra = [f.get("functionType") for f in func_list if f.get("functionType") is not None]
 
