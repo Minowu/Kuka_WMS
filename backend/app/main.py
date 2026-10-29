@@ -13,7 +13,7 @@ from app.modules.warehouse.dashboard.dashboard_api import router as dashboard_ro
 from app.modules.production.route_api import router as production_router
 from app.core.logger import setup_logger
 from app.core.cache import close_redis, get_redis
-from app.socket.ws_manager import ws_manager
+from app.socket.ws_manager import ws_manager, ws_router
 import redis
 from prometheus_fastapi_instrumentator import Instrumentator
 
@@ -74,6 +74,7 @@ app.include_router(item_stock_router, prefix="/api/v1")
 app.include_router(notification_router, prefix="/api/v1")
 app.include_router(dashboard_router, prefix="/api/v1")
 app.include_router(production_router, prefix="/api/v1")
+app.include_router(ws_router, prefix="/api/v1")
 
 @app.get("/")
 async def root():

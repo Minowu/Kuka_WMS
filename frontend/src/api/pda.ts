@@ -21,6 +21,7 @@ export const getPdaRawMaterialsApi = async (): Promise<RawMaterialPosition[]> =>
     hasRack: r.has_rack ?? r.hasRack ?? false,
     currentRackId: r.current_rack_id ?? r.currentRackId,
     currentModel: r.current_model ?? r.currentModel,
+    lastError: r.last_error ?? r.lastError ?? null,
   }));
 };
 
@@ -38,6 +39,7 @@ export const getPdaCncStationsApi = async (): Promise<CncMachineStation[]> => {
     status: s.status,
     callingModel: s.calling_model ?? s.callingModel,
     callingTaskCode: s.calling_mission_code ?? s.calling_task_code ?? s.callingTaskCode,
+    lastError: s.last_error ?? s.lastError ?? null,
     supportedModels: (s.supported_models || s.supportedModels || []).map((m: any) => ({
       itemId: m.item_id ?? m.itemId,
       modelCode: m.model_code ?? m.modelCode,
@@ -68,6 +70,7 @@ export const getPdaWashingSlotsApi = async (): Promise<WashingSlot[]> => {
     code: w.code,
     name: w.name,
     status: w.status,
+    lastError: w.last_error ?? w.lastError ?? null,
     currentRack: w.current_rack
       ? {
           rackId: w.current_rack.rack_id ?? w.current_rack.rackId,

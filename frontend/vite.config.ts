@@ -27,6 +27,7 @@ export default defineConfig({
         target: 'http://localhost:8001',
         changeOrigin: true,
         secure: false,
+        ws: true,
       },
       // Orchestrator local — tránh Mixed Content khi FE chạy HTTPS
       '/task': {
