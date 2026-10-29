@@ -52,35 +52,19 @@ def run_kuka_fleet_replay_test():
         # 1. Setup / Lookup Node 17 and Node 18
         loc17 = db.query(Location).filter(Location.location_code == "CNC001-CNC001-17").first()
         loc18 = db.query(Location).filter(Location.location_code == "CNC001-CNC001-18").first()
-        if not loc17:
-            loc17 = Location(
-                location_code="CNC001-CNC001-17",
-                location_name="Node 17 Pickup",
-                location_type="RAW_MATERIAL",
-                warehouse_id=1,
-                is_active=True,
-            )
-            db.add(loc17)
-            db.flush()
-        else:
-            loc17.is_active = True
-            loc17.location_type = "RAW_MATERIAL"
-            db.flush()
+        # Backup original location types to restore after test
+        loc17_orig_type = loc17.location_type
+        loc17_orig_name = loc17.location_name
+        loc18_orig_type = loc18.location_type
+        loc18_orig_name = loc18.location_name
+        loc18_orig_machine = loc18.machine_id
+        loc18_orig_pos = loc18.position_index
 
-        if not loc18:
-            loc18 = Location(
-                location_code="CNC001-CNC001-18",
-                location_name="Node 18 Dropoff",
-                location_type="CNC_SLOT",
-                warehouse_id=1,
-                is_active=True,
-            )
-            db.add(loc18)
-            db.flush()
-        else:
-            loc18.is_active = True
-            loc18.location_type = "CNC_SLOT"
-            db.flush()
+        loc17.is_active = True
+        loc17.location_type = "RAW_MATERIAL"
+        loc18.is_active = True
+        loc18.location_type = "CNC_SLOT"
+        db.flush()
 
         test_item = db.query(Item).first()
         if not test_item:
@@ -326,6 +310,19 @@ def run_kuka_fleet_replay_test():
         print("=" * 70)
 
     finally:
+        # Restore original location settings for node 17 & 18 if modified
+        try:
+            if 'loc17_orig_type' in locals() and loc17:
+                loc17.location_type = loc17_orig_type
+                loc17.location_name = loc17_orig_name
+            if 'loc18_orig_type' in locals() and loc18:
+                loc18.location_type = loc18_orig_type
+                loc18.location_name = loc18_orig_name
+                loc18.machine_id = loc18_orig_machine
+                loc18.position_index = loc18_orig_pos
+            db.commit()
+        except Exception as e:
+            print(f"Warning: Failed to restore locations in finally: {e}")
         db.close()
 
 
