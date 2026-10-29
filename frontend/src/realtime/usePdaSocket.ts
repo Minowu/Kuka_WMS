@@ -77,7 +77,9 @@ export function usePdaSocket(): void {
         // Gửi thông điệp xác thực JWT đầu tiên
         const currentToken = useAuthStore.getState().access_token;
         if (currentToken && ws.readyState === WebSocket.OPEN) {
-          ws.send(JSON.stringify({ type: 'auth', token: currentToken }));
+          const cleanToken = currentToken.replace(/^Bearer\s+/i, '').trim();
+          console.log('[WS] Đã mở socket, gửi gói auth...');
+          ws.send(JSON.stringify({ type: 'auth', token: cleanToken }));
         }
 
         // Khởi động chu kỳ gửi ping mỗi 25s để giữ kết nối qua các reverse proxy

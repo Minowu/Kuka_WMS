@@ -33,8 +33,13 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -
     return encoded_jwt
 
 def decode_access_token(token: str) -> Optional[dict]:
+    if not token or not isinstance(token, str):
+        return None
+    clean = token.strip()
+    if clean.lower().startswith("bearer "):
+        clean = clean[7:].strip()
     try:
-        payload = jwt.decode(token, settings.secret_key, algorithms=[settings.algorithm])
+        payload = jwt.decode(clean, settings.secret_key, algorithms=[settings.algorithm])
         if payload.get("type") != "access":
             return None
         return payload

@@ -332,8 +332,13 @@ def _authenticate_ws_token(token: str) -> Optional[dict[str, Any]]:
     if not token or not isinstance(token, str):
         return None
 
-    payload = decode_access_token(token.strip())
+    clean_token = token.strip()
+    if clean_token.lower().startswith("bearer "):
+        clean_token = clean_token[7:].strip()
+
+    payload = decode_access_token(clean_token)
     if not payload:
+        logger.warning("[WS] decode_access_token failed for token starting with: %s...", clean_token[:15] if len(clean_token) > 15 else clean_token)
         return None
 
     username = payload.get("sub")
