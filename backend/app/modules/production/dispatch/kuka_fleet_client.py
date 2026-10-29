@@ -17,6 +17,7 @@ from app.modules.production.production_models import (
     RouteStep,
     TransportQueue,
 )
+from app.socket.event_bus import resolve_location_recipient_user_ids, schedule_event_after_commit
 
 logger = get_logger("main")
 
@@ -37,7 +38,8 @@ class IcsError(Exception):
 def fail_and_release(db: Session, task: FleetTask, reason: str) -> FleetTask:
     """
     Đánh dấu `FleetTask` là `failed` (đảm bảo tính bất biến/idempotent - gọi nhiều lần không lỗi),
-    mở khóa xe phôi `ItemStock` và khôi phục an toàn trạng thái nghiệp vụ cho cả 4 luồng sản xuất:
+    mở khóa xe phôi `ItemStock`, khôi phục an toàn trạng thái nghiệp vụ cho cả 4 luồng sản xuất,
+    và xếp hàng phát sự kiện WebSocket `fleet.task_failed` + `floor.changed` ngay sau khi `db.commit()`:
     1. Mở khóa xe `task.container` (`is_locked = False`, xóa `locked_by_mission_code` và `destination_location_id`).
     2. Nếu `task.request` xuất phát từ Hàng đợi tự động `TransportQueue` (`WAITING_CART` hoặc `WAITING_SLOT`),
        mở lại bản ghi hàng đợi về trạng thái `PENDING` để yêu cầu không bao giờ bị mất khi Fleet lỗi.
@@ -46,8 +48,10 @@ def fail_and_release(db: Session, task: FleetTask, reason: str) -> FleetTask:
     4. Nếu `task.request` là `RETURN_EMPTY_CART` (từ khu Rửa trả xe rỗng), khôi phục
        `cart.status = 'available'` để chiếc xe không bị biến mất khỏi màn hình PDA khu Rửa.
     """
+    now = datetime.now(timezone.utc)
     task.status = "failed"
     task.error_message = reason
+    task.updated_at = now
 
     cart = task.container
     if cart:
@@ -57,6 +61,7 @@ def fail_and_release(db: Session, task: FleetTask, reason: str) -> FleetTask:
             cart.destination_location_id = None
 
     req = task.request
+    req_type = req.request_type if req else None
     if req and req.status not in ("completed", "cancelled"):
         queue_entry = (
             db.query(TransportQueue)
@@ -68,7 +73,6 @@ def fail_and_release(db: Session, task: FleetTask, reason: str) -> FleetTask:
             # Nếu yêu cầu xuất phát từ Hàng đợi tự động, mở lại PENDING để chu kỳ quét sau thử lại
             queue_entry.status = "PENDING"
             queue_entry.resolved_at = None
-            req.error_message = reason
             if queue_entry.queue_type == "WAITING_CART":
                 req.status = "queued_for_cart"
                 req.container_id = None
@@ -77,7 +81,6 @@ def fail_and_release(db: Session, task: FleetTask, reason: str) -> FleetTask:
                 req.status = "queued_for_slot"
         else:
             req.status = "failed"
-            req.error_message = reason
 
             # Bảo vệ Lỗi 2 (Vị trí 2): Máy CNC cuối báo xong đi Rửa nhưng Fleet từ chối
             # -> Khôi phục current_stage_level về bước trước để nút 'Hoàn thành' trên PDA hiện lại!
@@ -103,6 +106,65 @@ def fail_and_release(db: Session, task: FleetTask, reason: str) -> FleetTask:
                     cart.status = "available"
 
     db.flush()
+
+    # Xác định các vị trí liên quan và danh sách công nhân nhận thông báo qua WebSocket sau khi commit
+    raw_loc_ids = [
+        task.pickup_location_id,
+        task.dropoff_location_id,
+        req.source_location_id if req else None,
+        req.destination_location_id if req else None,
+        cart.location_id if cart else None,
+    ]
+    loc_ids = sorted({int(lid) for lid in raw_loc_ids if lid is not None})
+
+    if req_type in ("MOVE_TO_WASH", "SEND_TO_WASH", "RETURN_EMPTY_CART"):
+        primary_loc_id = (
+            (req.source_location_id if req else None)
+            or task.pickup_location_id
+            or task.dropoff_location_id
+        )
+    else:
+        primary_loc_id = (
+            (req.destination_location_id if req else None)
+            or task.dropoff_location_id
+            or task.pickup_location_id
+        )
+
+    recipient_user_ids = resolve_location_recipient_user_ids(
+        db,
+        loc_ids,
+        extra_user_ids=[req.created_by if req else None],
+    )
+
+    m_code = task.mission_code or f"task-{task.id}"
+    schedule_event_after_commit(
+        db,
+        dedup_key=f"fleet.task_failed:{m_code}",
+        event_type="fleet.task_failed",
+        payload={
+            "mission_code": task.mission_code,
+            "location_id": primary_loc_id,
+            "location_ids": loc_ids,
+            "container_code": task.container_code,
+            "request_type": req_type,
+            "message": reason,
+        },
+        user_ids=recipient_user_ids,
+        admins=True,
+    )
+    schedule_event_after_commit(
+        db,
+        dedup_key=f"floor.changed:fail:{m_code}",
+        event_type="floor.changed",
+        payload={
+            "reason": "task_failed",
+            "mission_code": task.mission_code,
+            "location_ids": loc_ids,
+        },
+        user_ids=recipient_user_ids,
+        admins=True,
+    )
+
     return task
 
 
@@ -169,10 +231,6 @@ class KukaFleetClient:
             fleet_success = resp_data.get("success") is True and str(resp_data.get("code", "")) in ("0", "200")
             fleet_code = str(resp_data.get("code", ""))
             fleet_msg = resp_data.get("message")
-
-            # Lưu ý về mã 100502 từ KUKA RCS: "Container[xxx] doesn't exist".
-            # Nếu Fleet thông báo xe chưa tồn tại trong danh mục RCS -> Fleet từ chối (fleet_success = False).
-            # Tuyệt đối không ghi đè fleet_success = True khi RCS báo container doesn't exist!
 
             if db:
                 call_log = FleetApiCall(
@@ -546,7 +604,7 @@ class KukaFleetClient:
         pickup_code: str,
         dropoff_code: str,
         container_code: Optional[str],
-        request_type: str = "CALL_MATERIAL",
+        request_type: Optional[str] = None,
     ) -> tuple[str, str, list[dict[str, Any]], dict[str, Any]]:
         """
         Tạo dữ liệu `(req_id, api_name, mission_data, payload)` cho API `/amr/submitMission` mà không cần giữ kết nối DB.
@@ -670,9 +728,6 @@ class KukaFleetClient:
             fleet_code = str(resp_data.get("code", ""))
             fleet_msg = resp_data.get("message")
 
-            if not fleet_success and api_name == "containerIn" and fleet_code == "100502":
-                fleet_success = True
-
             audit_log = {
                 "api_name": api_name,
                 "request_id": req_id,
@@ -725,7 +780,7 @@ class KukaFleetClient:
             }
             raise err from e
 
-    def submit_fleet_task(self, db: Session, task: FleetTask, request_type: str = "CALL_MATERIAL") -> FleetTask:
+    def submit_fleet_task(self, db: Session, task: FleetTask, request_type: Optional[str] = None) -> FleetTask:
         """Submit an already-persisted FleetTask to KUKA Fleet Manager via submitMission."""
         pickup_loc = db.query(Location).filter(Location.id == task.pickup_location_id).first()
         dropoff_loc = db.query(Location).filter(Location.id == task.dropoff_location_id).first()
@@ -733,6 +788,9 @@ class KukaFleetClient:
             error_msg = f"Vị trí lấy/hạ hàng không tồn tại (pickup={task.pickup_location_id}, dropoff={task.dropoff_location_id})"
             logger.error(error_msg)
             return fail_and_release(db, task, error_msg)
+
+        if request_type is None and task.request:
+            request_type = task.request.request_type
 
         pickup_code = pickup_loc.location_code
         dropoff_code = dropoff_loc.location_code

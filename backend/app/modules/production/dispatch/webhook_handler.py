@@ -6,7 +6,7 @@ from typing import Any, Callable, Optional
 from sqlalchemy.orm import Session
 
 from app.core.logger import get_logger
-from app.modules.production.dispatch.kuka_fleet_client import KukaFleetClient
+from app.modules.production.dispatch.kuka_fleet_client import KukaFleetClient, fail_and_release
 from app.modules.production.production_models import (
     FLEET_MISSION_STATUS,
     MAPPING_STATUS,
@@ -15,6 +15,7 @@ from app.modules.production.production_models import (
 )
 from app.modules.warehouse.item_stock.item_stock_model import ItemStock
 from app.modules.warehouse.location_map.location_model import Location
+from app.socket.event_bus import publish_event, resolve_location_recipient_user_ids
 
 logger = get_logger("main")
 
@@ -103,11 +104,27 @@ class WebhookHandler:
             db.refresh(record)
             return record
 
+        now = datetime.now(timezone.utc)
         fleet_task.last_mission_status = raw_status
+        fleet_task.updated_at = now
         if curr_pos:
             fleet_task.current_position = curr_pos
         if robot_id:
             fleet_task.robot_id = robot_id
+
+        loc_ids = sorted(
+            {
+                int(lid)
+                for lid in (fleet_task.pickup_location_id, fleet_task.dropoff_location_id)
+                if lid is not None
+            }
+        )
+        created_by = fleet_task.request.created_by if fleet_task.request else None
+        recipient_user_ids = resolve_location_recipient_user_ids(
+            db,
+            loc_ids,
+            extra_user_ids=[created_by],
+        )
 
         # 4. State transition
         mapped_status = FLEET_MISSION_STATUS.get(raw_status) or MAPPING_STATUS.get(raw_status)
@@ -117,10 +134,20 @@ class WebhookHandler:
             if fleet_task.request:
                 fleet_task.request.status = "in_progress"
             db.commit()
+            publish_event(
+                "floor.changed",
+                {
+                    "reason": f"webhook_{raw_status.lower()}",
+                    "mission_code": mission_code_str,
+                    "location_ids": loc_ids,
+                },
+                user_ids=recipient_user_ids,
+                admins=True,
+            )
 
         elif raw_status == "UP_CONTAINER":
             fleet_task.status = "in_progress"
-            fleet_task.picked_up_at = datetime.now(timezone.utc)
+            fleet_task.picked_up_at = now
             if fleet_task.request:
                 fleet_task.request.status = "in_progress"
             if fleet_task.container_id:
@@ -129,28 +156,56 @@ class WebhookHandler:
                     cart.is_locked = True
                     cart.locked_by_mission_code = mission_code_str
             db.commit()
+            publish_event(
+                "floor.changed",
+                {
+                    "reason": "webhook_up_container",
+                    "mission_code": mission_code_str,
+                    "location_ids": loc_ids,
+                },
+                user_ids=recipient_user_ids,
+                admins=True,
+            )
 
         elif raw_status == "DOWN_CONTAINER":
             fleet_task.status = "in_progress"
             db.commit()
+            publish_event(
+                "floor.changed",
+                {
+                    "reason": "webhook_down_container",
+                    "mission_code": mission_code_str,
+                    "location_ids": loc_ids,
+                },
+                user_ids=recipient_user_ids,
+                admins=True,
+            )
 
         elif raw_status == "COMPLETED" or mapped_status == "completed":
             db.commit()
             if on_completed_fn:
                 on_completed_fn(db, mission_code_str)
 
-        elif mapped_status in ("failed", "cancelled") or raw_status in ("FAILED", "CANCELLED", "CANCEL", "ABORTED", "ABORT", "EXCEPTION", "TERMINATED", "TIMEOUT", "ERROR"):
+        elif mapped_status in ("failed", "cancelled") or raw_status in (
+            "FAILED",
+            "CANCELLED",
+            "CANCEL",
+            "ABORTED",
+            "ABORT",
+            "EXCEPTION",
+            "TERMINATED",
+            "TIMEOUT",
+            "ERROR",
+        ):
             term_status = "cancelled" if "cancel" in raw_status.lower() else "failed"
-            fleet_task.status = term_status
-            fleet_task.error_message = msg or f"Fleet reported {raw_status}"
-            if fleet_task.request:
-                fleet_task.request.status = term_status
-            if fleet_task.container_id:
-                cart = db.query(ItemStock).filter(ItemStock.id == fleet_task.container_id).first()
-                if cart:
-                    cart.is_locked = False
-                    cart.locked_by_mission_code = None
-                    cart.destination_location_id = None
+            err_msg = msg or f"Fleet reported {raw_status}"
+            # Dùng fail_and_release để mở khóa xe, khôi phục nghiệp vụ và tự động xếp hàng phát
+            # sự kiện WebSocket `fleet.task_failed` + `floor.changed` ngay sau khi db.commit()!
+            fail_and_release(db, fleet_task, err_msg)
+            if term_status == "cancelled":
+                fleet_task.status = "cancelled"
+                if fleet_task.request and fleet_task.request.status == "failed":
+                    fleet_task.request.status = "cancelled"
             db.commit()
         else:
             db.commit()
@@ -177,10 +232,13 @@ class WebhookHandler:
         now = datetime.now(timezone.utc)
         fleet_task.status = "completed"
         fleet_task.completed_at = now
+        fleet_task.updated_at = now
 
         req_type = None
+        created_by = None
         if fleet_task.request:
             req_type = fleet_task.request.request_type
+            created_by = fleet_task.request.created_by
             fleet_task.request.status = "completed"
             fleet_task.request.completed_at = now
 
@@ -194,6 +252,7 @@ class WebhookHandler:
             or (dropoff_loc and dropoff_loc.location_type == "EMPTY_CART_BUFFER")
         )
 
+        container_out_err_note: Optional[str] = None
         if fleet_task.container_id:
             cart = db.query(ItemStock).filter(ItemStock.id == fleet_task.container_id).first()
             if cart:
@@ -239,10 +298,8 @@ class WebhookHandler:
                         cart.is_locked = False
                         cart.locked_by_mission_code = None
                         cart.fleet_registered = True
-                        err_note = f"AMR đã hạ xe nhưng lỗi xóa xe trên Fleet (containerOut): {container_out_err}"
-                        fleet_task.error_message = err_note
-                        if fleet_task.request:
-                            fleet_task.request.error_message = err_note
+                        container_out_err_note = f"AMR đã hạ xe nhưng lỗi xóa xe trên Fleet (containerOut): {container_out_err}"
+                        fleet_task.error_message = container_out_err_note
                 else:
                     cart.location_id = fleet_task.dropoff_location_id
                     cart.destination_location_id = None
@@ -250,7 +307,46 @@ class WebhookHandler:
                     cart.locked_by_mission_code = None
                     cart.status = "available"
 
+        loc_ids = sorted(
+            {
+                int(lid)
+                for lid in (fleet_task.pickup_location_id, fleet_task.dropoff_location_id)
+                if lid is not None
+            }
+        )
+        recipient_user_ids = resolve_location_recipient_user_ids(
+            db,
+            loc_ids,
+            extra_user_ids=[created_by],
+        )
+
         db.commit()
+
+        if container_out_err_note:
+            publish_event(
+                "fleet.task_failed",
+                {
+                    "mission_code": mission_code,
+                    "location_id": fleet_task.pickup_location_id or fleet_task.dropoff_location_id,
+                    "location_ids": loc_ids,
+                    "container_code": fleet_task.container_code,
+                    "request_type": req_type or "RETURN_EMPTY_CART",
+                    "message": container_out_err_note,
+                },
+                user_ids=recipient_user_ids,
+                admins=True,
+            )
+
+        publish_event(
+            "floor.changed",
+            {
+                "reason": "task_completed",
+                "mission_code": mission_code,
+                "location_ids": loc_ids,
+            },
+            user_ids=recipient_user_ids,
+            admins=True,
+        )
 
         if on_after_complete_fn:
             on_after_complete_fn(db)

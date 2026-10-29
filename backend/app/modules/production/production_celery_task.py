@@ -16,6 +16,7 @@ from app.modules.production.dispatch.kuka_fleet_client import (
 from app.modules.production.dispatch_service import dispatch_service
 from app.modules.production.production_models import FleetApiCall, FleetTask
 from app.modules.warehouse.location_map.location_model import Location
+from app.socket.event_bus import publish_event, resolve_location_recipient_user_ids
 
 logger = get_logger("main")
 
@@ -101,13 +102,19 @@ def submit_fleet_task(self, fleet_task_id: int) -> Optional[dict[str, Any]]:
 
         mission_code = task.mission_code
         fleet_req_id = task.fleet_request_id
+        pickup_loc_id = task.pickup_location_id
+        dropoff_loc_id = task.dropoff_location_id
         pickup_code = pickup_loc.location_code
         dropoff_code = dropoff_loc.location_code
         container_code = task.container_code
-        request_type = (
-            task.request.request_type
-            if (task.request and task.request.request_type)
-            else "CALL_MATERIAL"
+        created_by = task.request.created_by if task.request else None
+        request_type = task.request.request_type if task.request else None
+
+        event_loc_ids = sorted({int(lid) for lid in (pickup_loc_id, dropoff_loc_id) if lid is not None})
+        recipient_user_ids = resolve_location_recipient_user_ids(
+            db,
+            event_loc_ids,
+            extra_user_ids=[created_by],
         )
 
         req_id, api_name, mission_data, payload = _fleet_client.build_mission_payload(
@@ -181,6 +188,16 @@ def submit_fleet_task(self, fleet_task_id: int) -> Optional[dict[str, Any]]:
                 synchronize_session=False,
             )
             db.commit()
+            publish_event(
+                "floor.changed",
+                {
+                    "reason": "task_sent",
+                    "mission_code": mission_code,
+                    "location_ids": event_loc_ids,
+                },
+                user_ids=recipient_user_ids,
+                admins=True,
+            )
             return {"status": "sent", "fleet_task_id": fleet_task_id, "mission_code": mission_code}
 
         # Nhánh xử lý khi gọi KUKA Fleet gặp lỗi

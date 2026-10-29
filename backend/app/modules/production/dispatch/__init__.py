@@ -66,7 +66,7 @@ class DispatchService:
     def submit_fleet_task(self, *args, **kwargs):
         return self.fleet_client.submit_fleet_task(*args, **kwargs)
 
-    def create_fleet_task(self, db: Session, task: FleetTask, request_type: str = "CALL_MATERIAL") -> FleetTask:
+    def create_fleet_task(self, db: Session, task: FleetTask, request_type: Optional[str] = None) -> FleetTask:
         return self.submit_fleet_task(db, task, request_type=request_type)
 
     # --- Cart Selector Delegations ---

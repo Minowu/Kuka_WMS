@@ -24,6 +24,7 @@ from app.modules.production.production_models import (
 from app.modules.warehouse.item.item_model import Item
 from app.modules.warehouse.item_stock.item_stock_model import ItemStock
 from app.modules.warehouse.location_map.location_model import Location
+from app.socket.event_bus import publish_event, resolve_location_recipient_user_ids
 
 logger = get_logger("main")
 
@@ -105,11 +106,28 @@ class DispatchCore:
             status="pending_submit",
         )
         db.add(fleet_task)
+        loc_ids = sorted({int(lid) for lid in (pickup_location_id, dropoff_location_id) if lid is not None})
+        recipient_user_ids = resolve_location_recipient_user_ids(
+            db,
+            loc_ids,
+            extra_user_ids=[transport_req.created_by],
+        )
         db.commit()
         db.refresh(fleet_task)
 
         from app.modules.production.production_celery_task import enqueue_fleet_submit
         enqueue_fleet_submit(fleet_task.id)
+
+        publish_event(
+            "floor.changed",
+            {
+                "reason": "task_dispatched",
+                "mission_code": mission_code,
+                "location_ids": loc_ids,
+            },
+            user_ids=recipient_user_ids,
+            admins=True,
+        )
 
         return fleet_task
 
@@ -206,8 +224,25 @@ class DispatchCore:
             stage_level=0,
             lock_and_dispatch_fn=self.lock_cart_and_dispatch_fleet_task,
         )
+        loc_ids = sorted({int(lid) for lid in (location.id, cart.destination_location_id) if lid is not None})
+        recipient_user_ids = resolve_location_recipient_user_ids(
+            db,
+            loc_ids,
+            extra_user_ids=[operator_id],
+        )
         db.commit()
         db.refresh(cart)
+
+        publish_event(
+            "floor.changed",
+            {
+                "reason": "rack_registered",
+                "location_ids": loc_ids,
+                "container_code": clean_container_code,
+            },
+            user_ids=recipient_user_ids,
+            admins=True,
+        )
 
         return {
             "success": True,
@@ -299,8 +334,33 @@ class DispatchCore:
             )
             db.add(queue_entry)
 
+        loc_ids = sorted(
+            {
+                int(lid)
+                for lid in (dest_loc.id, transport_req.source_location_id)
+                if lid is not None
+            }
+        )
+        recipient_user_ids = resolve_location_recipient_user_ids(
+            db,
+            loc_ids,
+            extra_user_ids=[created_by],
+        )
         db.commit()
         db.refresh(transport_req)
+
+        if not cart:
+            publish_event(
+                "floor.changed",
+                {
+                    "reason": "call_material_queued",
+                    "request_code": transport_req.request_code,
+                    "location_ids": loc_ids,
+                },
+                user_ids=recipient_user_ids,
+                admins=True,
+            )
+
         return transport_req
 
     def complete_machining_stage(
@@ -365,11 +425,26 @@ class DispatchCore:
         db.add(record)
 
         if not is_final_cnc:
+            recipient_user_ids = resolve_location_recipient_user_ids(
+                db,
+                [loc.id],
+                extra_user_ids=[operator_id],
+            )
             db.commit()
             self.queue_service.try_resolve_waiting_cart_queue(
                 db,
                 stage_level=completed_stage,
                 lock_and_dispatch_fn=self.lock_cart_and_dispatch_fleet_task,
+            )
+            publish_event(
+                "floor.changed",
+                {
+                    "reason": "stage_completed",
+                    "location_ids": [loc.id],
+                    "container_code": cart.container_code,
+                },
+                user_ids=recipient_user_ids,
+                admins=True,
             )
             return {
                 "container_code": cart.container_code,
@@ -437,7 +512,32 @@ class DispatchCore:
             db.add(queue_entry)
             action_result = "QUEUED_FOR_WASHING_SLOT"
 
+        loc_ids = sorted(
+            {
+                int(lid)
+                for lid in (loc.id, wash_slot.id if wash_slot else None)
+                if lid is not None
+            }
+        )
+        recipient_user_ids = resolve_location_recipient_user_ids(
+            db,
+            loc_ids,
+            extra_user_ids=[operator_id],
+        )
         db.commit()
+
+        if not wash_slot:
+            publish_event(
+                "floor.changed",
+                {
+                    "reason": "stage_completed_queued_wash",
+                    "location_ids": loc_ids,
+                    "container_code": cart.container_code,
+                },
+                user_ids=recipient_user_ids,
+                admins=True,
+            )
+
         return {
             "container_code": cart.container_code,
             "completed_stage_level": completed_stage,
@@ -535,7 +635,31 @@ class DispatchCore:
                 )
             )
 
+        loc_ids = sorted(
+            {
+                int(lid)
+                for lid in (loc.id, buffer_slot.id if buffer_slot else None)
+                if lid is not None
+            }
+        )
+        recipient_user_ids = resolve_location_recipient_user_ids(
+            db,
+            loc_ids,
+            extra_user_ids=[operator_id],
+        )
         db.commit()
+
+        if not buffer_slot:
+            publish_event(
+                "floor.changed",
+                {
+                    "reason": "washing_released_queued",
+                    "location_ids": loc_ids,
+                    "container_code": clean_code,
+                },
+                user_ids=recipient_user_ids,
+                admins=True,
+            )
 
         self.queue_service.try_resolve_waiting_slot_queue(
             db,
