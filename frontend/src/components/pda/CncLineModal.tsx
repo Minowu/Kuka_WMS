@@ -20,19 +20,22 @@ export const CncLineModal: React.FC<CncLineModalProps> = ({
   const [selectedStationForModal, setSelectedStationForModal] = useState<CncMachineStation | null>(null);
   const [updatingStationId, setUpdatingStationId] = useState<string | null>(null);
 
-  const getLevelLabel = (level: number) => {
-    switch (level) {
-      case 0:
-        return 'Level 0: Phôi Thô';
-      case 1:
-        return 'Level 1: Phay Thô';
-      case 2:
-        return 'Level 2: Phay Tinh';
-      case 3:
-        return 'Level 3: Hoàn Tất CNC';
-      default:
-        return `Level ${level}`;
+  const getLevelLabel = (level: number, station?: CncMachineStation, modelName?: string) => {
+    if (level === 0) {
+      return 'Level 0 (Phôi thô)';
     }
+    if (station) {
+      if (level === station.assignedStageLevel && station.stageName) {
+        return `Level ${level}: ${station.stageName}`;
+      }
+      const matched = station.supportedModels?.find(
+        (m) => m.stageLevel === level && (!modelName || m.modelName === modelName || m.modelCode === modelName)
+      );
+      if (matched?.stageName) {
+        return `Level ${level}: ${matched.stageName}`;
+      }
+    }
+    return `Level ${level}`;
   };
 
   const renderPosBadge = (pos?: number) => {
@@ -122,12 +125,12 @@ export const CncLineModal: React.FC<CncLineModalProps> = ({
               <div
                 key={st.id}
                 className={`rounded-xl border p-3 transition-all ${isEmpty
-                    ? 'bg-slate-900/90 border-slate-800'
-                    : isCalling
-                      ? 'bg-blue-950/20 border-blue-500/50'
-                      : isQueued
-                        ? 'bg-amber-950/20 border-amber-600/50'
-                        : 'bg-slate-900 border-slate-700'
+                  ? 'bg-slate-900/90 border-slate-800'
+                  : isCalling
+                    ? 'bg-blue-950/20 border-blue-500/50'
+                    : isQueued
+                      ? 'bg-amber-950/20 border-amber-600/50'
+                      : 'bg-slate-900 border-slate-700'
                   }`}
               >
                 {/* Header trạm */}
@@ -149,18 +152,18 @@ export const CncLineModal: React.FC<CncLineModalProps> = ({
                   )}
                   {isQueued && (
                     <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30">
-                      ĐANG CHỜ AMR
+                      ĐỢI AMR
                     </span>
                   )}
                   {isCalling && (
                     <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-blue-500/20 text-blue-300 border border-blue-500/30">
-                      AMR ĐANG CHỞ TỚI
+                      AMR ĐANG TỚI
                     </span>
                   )}
                   {isOccupied && rack?.isCompleted ? (
                     <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-purple-500/20 text-purple-300 border border-purple-500/30 flex items-center gap-1">
                       <span className="w-1.5 h-1.5 rounded-full bg-purple-400 animate-pulse" />
-                      ĐÃ BÁO XONG - CHỜ AMR
+                      ĐÃ XONG - CHỜ AMR
                     </span>
                   ) : isOccupied && (
                     <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
@@ -205,7 +208,7 @@ export const CncLineModal: React.FC<CncLineModalProps> = ({
                       onClick={() => handleCallButtonClick(st)}
                       className="w-full min-h-[50px] bg-[#3B82F6] hover:bg-blue-600 text-white rounded-xl font-bold text-sm tracking-wide active:scale-[0.98] transition-all cursor-pointer shadow-md flex items-center justify-center gap-2"
                     >
-                      <span>GỌI PHÔI (ĐIỀU AMR ĐẾN)</span>
+                      <span>GỌI AMR CẤP TỚI</span>
                       {supported.length > 1 && (
                         <span className="text-xs bg-blue-900/80 px-2 py-0.5 rounded-full border border-blue-400/40">
                           {supported.length} Model ▼
@@ -269,9 +272,9 @@ export const CncLineModal: React.FC<CncLineModalProps> = ({
                         <span className="font-bold text-white truncate max-w-[200px]">{rack.model}</span>
                       </div>
                       <div className="flex justify-between pt-1 border-t border-slate-800 text-[11px]">
-                        <span className="text-slate-400">Hiện tại: {getLevelLabel(rack.level)}</span>
+                        <span className="text-slate-400">Hiện tại: <strong className="text-slate-200 font-medium">{getLevelLabel(rack.level, st, rack.model)}</strong></span>
                         <span className="text-[#FF5800] font-bold font-mono">
-                          Đích: Level {st.assignedStageLevel}
+                          Đích: Level {st.assignedStageLevel}{st.stageName ? ` (${st.stageName})` : ''}
                         </span>
                       </div>
                     </div>
@@ -307,10 +310,10 @@ export const CncLineModal: React.FC<CncLineModalProps> = ({
                           }
                         }}
                         className={`w-full min-h-[54px] text-white rounded-xl font-bold text-sm tracking-wide transition-all ${updatingStationId === st.id
-                            ? 'bg-slate-700 cursor-not-allowed opacity-80'
-                            : isFinalStep
-                              ? 'bg-[#FF5800] hover:bg-[#e04e00] active:scale-[0.98] cursor-pointer'
-                              : 'bg-[#10B981] hover:bg-[#059669] active:scale-[0.98] cursor-pointer'
+                          ? 'bg-slate-700 cursor-not-allowed opacity-80'
+                          : isFinalStep
+                            ? 'bg-[#FF5800] hover:bg-[#e04e00] active:scale-[0.98] cursor-pointer'
+                            : 'bg-[#10B981] hover:bg-[#059669] active:scale-[0.98] cursor-pointer'
                           }`}
                       >
                         {updatingStationId === st.id ? (
@@ -319,9 +322,9 @@ export const CncLineModal: React.FC<CncLineModalProps> = ({
                             <span>ĐANG CẬP NHẬT...</span>
                           </div>
                         ) : isFinalStep ? (
-                          `BÁO XONG: CẬP NHẬT LEVEL ${st.assignedStageLevel} (CHUYỂN TẨY RỬA)`
+                          `HOÀN THÀNH MỨC ${st.assignedStageLevel}-> (CHUYỂN TẨY RỬA)`
                         ) : (
-                          `BÁO XONG: CẬP NHẬT LEVEL ${st.assignedStageLevel}`
+                          `HOÀN THÀNH MỨC ${st.assignedStageLevel}`
                         )}
                       </button>
                     )}
@@ -341,7 +344,7 @@ export const CncLineModal: React.FC<CncLineModalProps> = ({
               <div>
                 <h3 className="text-base font-bold text-white">CHỌN MODEL SẢN PHẨM</h3>
                 <p className="text-xs text-slate-400 mt-0.5">
-                  Gọi phôi gia công tới <span className="text-blue-400 font-mono font-bold">[{selectedStationForModal.name}]</span>
+                  Gọi AMR THEO MODEL <span className="text-blue-400 font-mono font-bold">[{selectedStationForModal.name}]</span>
                 </p>
               </div>
               <button
