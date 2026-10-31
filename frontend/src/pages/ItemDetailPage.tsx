@@ -30,7 +30,6 @@ import type { ItemStock } from "@/types/item";
 import { useAppStore } from "@/store/useAppStore";
 import { getApiErrorMessage } from "@/utils/apiErrorMessage";
 import { useWarehouses } from "@/hooks/useWarehouse";
-import { useUnits } from "@/hooks/useUnit";
 import { DetailView } from "@/components/ui/DetailView";
 import dayjs from "dayjs";
 import type { Item } from "@/types/item";
@@ -196,7 +195,6 @@ export default function ItemDetailPage() {
   const navigate = useNavigate();
   const { selectedWarehouseId } = useAppStore();
   const { data: warehouses = [] } = useWarehouses();
-  const { data: units = [], isLoading: isUnitsLoading } = useUnits();
   const [isEditOpen, setIsEditOpen] = useState(false);
   const [form] = Form.useForm<ItemFormValues>();
   const { id } = useParams<{ id: string }>();

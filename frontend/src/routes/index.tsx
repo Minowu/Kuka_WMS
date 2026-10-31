@@ -9,15 +9,6 @@ import { ProtectedRoute } from "../components/auth/ProtectedRoute";
 import ItemPage from "@/pages/ItemPage";
 import UserSettingPage from "@/pages/UserSettingPage";
 import ItemDetailPage from "@/pages/ItemDetailPage";
-import OutboundPage from "@/pages/OutboundPage";
-import ImportPage from "@/pages/ImportPage";
-import ImportDetailPage from "@/pages/ImportDetailPage";
-import ZoneSettingPage from "@/pages/ZoneSettingPage";
-import UnitSettingPage from "@/pages/UnitSettingPage";
-import OutboundDetailPage from "@/pages/OutboundDetailPage";
-import StocktakePage from "@/pages/StocktakePage";
-import StocktakeDetailPage from "@/pages/StocktakeDetailPage";
-import BacklogPage from "@/pages/BacklogPage";
 import NotificationPage from "@/pages/NotificationPage";
 import { RoleHomeRedirect } from "@/components/auth/RoleHomeRedirect";
 import ProductionRoutePage from "@/pages/production/ProductionRoutePage";
@@ -97,22 +88,12 @@ export default function AppRoutes() {
         <Route path="production/stations" element={<StationSettingPage />} />
         <Route path="machines" element={<Navigate to="/production/stations" replace />} />
         <Route path="zones" element={<Navigate to="/production/stations" replace />} />
-        <Route path="import" element={<ImportPage />} />
-        <Route path="import/:id" element={<ImportDetailPage />} />
-        <Route path="export" element={<OutboundPage />} />
-        <Route path="export/:orderId" element={<OutboundDetailPage />} />
-        <Route path="inventory" element={<StocktakePage />} />
-        <Route path="inventory/:id" element={<StocktakeDetailPage />} />
-        <Route path="backlog" element={<BacklogPage />} />
         <Route path="report" element={<ReportPage />} />
         <Route path="notification" element={<NotificationPage />} />
-        <Route path="setting" element={<div>Trang Cài Đặt</div>} />
+        <Route path="setting" element={<Navigate to="/setting/users" replace />} />
         <Route path="setting/users" element={<UserSettingPage />} />
         <Route path="setting/warehouse" element={<WarehouseSettingPage />} />
-        <Route path="setting/zones" element={<Navigate to="/zones" replace />} />
-        <Route path="setting/units" element={<UnitSettingPage />} />
-        <Route path="setting/entry-points" element={<Navigate to="/zones" replace />} />
-        <Route path="setting/exit-points" element={<Navigate to="/setting/units" replace />} />
+        <Route path="setting/zones" element={<Navigate to="/production/stations" replace />} />
       </Route>
     </Routes>
   );
