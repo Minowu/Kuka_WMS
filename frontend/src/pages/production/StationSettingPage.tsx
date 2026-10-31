@@ -1240,7 +1240,6 @@ export default function StationSettingPage() {
               label="Mã máy CNC"
               rules={[
                 { required: true, message: 'Vui lòng nhập mã máy CNC!' },
-                { pattern: /^[A-Z0-9_-]+$/, message: 'Mã chỉ gồm chữ hoa, số và dấu gạch nối (VD: CNC-05)' },
               ]}
             >
               <Input
