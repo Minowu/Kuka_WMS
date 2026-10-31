@@ -116,6 +116,15 @@ class DispatchService:
     def complete_washing_and_return_empty_cart(self, *args, **kwargs) -> TransportRequest:
         return self.core.complete_washing_and_return_empty_cart(*args, **kwargs)
 
+    def call_empty_cart_async(self, *args, **kwargs) -> TransportRequest:
+        return self.core.call_empty_cart_async(*args, **kwargs)
+
+    def call_material_cart_async(self, *args, **kwargs) -> TransportRequest:
+        return self.core.call_material_cart_async(*args, **kwargs)
+
+    def dispatch_transport_request(self, *args, **kwargs) -> FleetTask:
+        return self.core.dispatch_transport_request(*args, **kwargs)
+
     # --- Webhook & Completion Delegations ---
     def receive_task_status(self, db: Session, payload: dict[str, Any]) -> Optional[TaskStatus]:
         return self.webhook_handler.receive_task_status(

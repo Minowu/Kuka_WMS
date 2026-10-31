@@ -7,6 +7,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
 from app.core.config import settings
+from app.core.logger import get_logger
 from app.core.security import (
     create_access_token,
     create_refresh_token,
@@ -28,6 +29,8 @@ from app.modules.auth.auth_schema import (
     StaffUsernamesResponse,
 )
 from app.modules.warehouse.warehouse_zone.warehouse_model import Warehouse
+
+logger = get_logger("wms.auth")
 
 
 def _user_query(db: Session, *, include_inactive: bool = False):
@@ -137,6 +140,13 @@ def _is_admin_request(
 def _apply_access_on_create(db: Session, user: User, body: UserCreate) -> None:
     if _is_admin_request(is_admin=body.is_admin, role_ids=body.role_ids, db=db):
         _assign_admin_access(db, user)
+        assigned_roles = [r.name for r in (user.roles or [])]
+        logger.info(
+            "Initial roles assigned to user '%s': %s (admin granted)",
+            user.username,
+            assigned_roles,
+            extra={"username": user.username, "roles": assigned_roles},
+        )
         return
     if body.role_ids:
         user.roles = _get_roles_by_ids(db, body.role_ids)
@@ -144,6 +154,13 @@ def _apply_access_on_create(db: Session, user: User, body: UserCreate) -> None:
         cnc_role = db.query(Role).filter(Role.name == "operator_cnc").first()
         user.roles = [cnc_role] if cnc_role else []
     user.warehouses = db.query(Warehouse).all()
+    assigned_roles = [r.name for r in (user.roles or [])]
+    logger.info(
+        "Initial roles assigned to user '%s': %s",
+        user.username,
+        assigned_roles,
+        extra={"username": user.username, "roles": assigned_roles},
+    )
 
 
 def _apply_access_on_update(db: Session, user: User, body: UserUpdate) -> None:
@@ -155,18 +172,40 @@ def _apply_access_on_update(db: Session, user: User, body: UserUpdate) -> None:
     if not access_touched:
         return
 
+    old_roles = [r.name for r in (user.roles or [])]
+
     if _is_admin_request(is_admin=is_admin, role_ids=role_ids, db=db):
         _assign_admin_access(db, user)
+        new_roles = [r.name for r in (user.roles or [])]
+        logger.info(
+            "User '%s' (user_id=%s) role changed: %s -> %s (admin granted)",
+            user.username,
+            user.id,
+            old_roles,
+            new_roles,
+            extra={"username": user.username, "user_id": user.id, "old_roles": old_roles, "new_roles": new_roles},
+        )
         return
 
     if role_ids is not None:
         user.roles = _get_roles_by_ids(db, role_ids)
+        new_roles = [r.name for r in (user.roles or [])]
+        logger.info(
+            "User '%s' (user_id=%s) role changed: %s -> %s",
+            user.username,
+            user.id,
+            old_roles,
+            new_roles,
+            extra={"username": user.username, "user_id": user.id, "old_roles": old_roles, "new_roles": new_roles},
+        )
 
 
 def login(db: Session, body: LoginRequest) -> LoginResponse:
     user = authenticate_user(db, body.username, body.password)
     if not user:
+        logger.warning("Login failed for username '%s'", body.username, extra={"username": body.username})
         raise ValueError("Invalid username or password")
+    logger.info("Login successful for username '%s' (user_id=%s)", user.username, user.id, extra={"username": user.username, "user_id": user.id})
     return LoginResponse(
         user=user_to_response(db, user),
         tokens=TokenResponse(
@@ -204,10 +243,24 @@ def sign_up(db: Session, user_in: UserCreate) -> UserSignupResponse:
             .filter(User.id == new_user.id)
             .one()
         )
-    except ValueError:
+    except ValueError as exc:
+        logger.error(
+            "Database rollback during signup for user '%s': %s",
+            user_in.username,
+            exc,
+            exc_info=True,
+            extra={"username": user_in.username},
+        )
         db.rollback()
         raise
     except IntegrityError as e:
+        logger.error(
+            "Database rollback during signup for user '%s' due to IntegrityError: %s",
+            user_in.username,
+            e,
+            exc_info=True,
+            extra={"username": user_in.username},
+        )
         db.rollback()
         raise ValueError(f"Database conflict: {str(e.orig)}") from e
 
@@ -232,16 +285,20 @@ def sign_up(db: Session, user_in: UserCreate) -> UserSignupResponse:
 def refresh_access_token(db: Session, refresh_token: str) -> Optional[str]:
     payload = decode_refresh_token(refresh_token)
     if not payload:
+        logger.warning("Token refresh failed: invalid or expired refresh token")
         return None
 
     username = payload.get("sub")
     if not username:
+        logger.warning("Token refresh failed: missing 'sub' claim in token")
         return None
 
     user = db.query(User).filter(User.username == username).first()
     if not user:
+        logger.warning("Token refresh failed: user '%s' not found", username, extra={"username": username})
         return None
 
+    logger.info("Token refresh successful for user '%s'", username, extra={"username": username})
     return create_access_token(
         data={"sub": user.username},
         expires_delta=timedelta(minutes=settings.access_token_expire_minutes),
@@ -251,8 +308,10 @@ def refresh_access_token(db: Session, refresh_token: str) -> Optional[str]:
 def authenticate_user(db: Session, username: str, password: str) -> Optional[User]:
     user = _user_query(db).filter(User.username == username).first()
     if not user:
+        logger.warning("Authentication failed: user '%s' not found", username, extra={"username": username})
         return None
     if not verify_password(password, user.hashed_password):
+        logger.warning("Authentication failed: invalid password for user '%s'", username, extra={"username": username})
         return None
     return user
 
@@ -310,15 +369,35 @@ def update_user(db: Session, user_id: int, body: UserUpdate) -> Optional[User]:
         password = (data["password"] or "").strip()
         if password:
             user.hashed_password = get_password_hash(password)
+            logger.info(
+                "Password reset/updated for user '%s' (user_id=%s)",
+                user.username,
+                user.id,
+                extra={"username": user.username, "user_id": user.id},
+            )
 
     try:
         _apply_access_on_update(db, user, body)
         db.commit()
         user = _user_query(db, include_inactive=True).filter(User.id == user_id).one()
-    except ValueError:
+    except ValueError as exc:
+        logger.error(
+            "Database rollback during update for user_id=%s: %s",
+            user_id,
+            exc,
+            exc_info=True,
+            extra={"user_id": user_id},
+        )
         db.rollback()
         raise
     except IntegrityError as e:
+        logger.error(
+            "Database rollback during update for user_id=%s due to IntegrityError: %s",
+            user_id,
+            e,
+            exc_info=True,
+            extra={"user_id": user_id},
+        )
         db.rollback()
         raise ValueError(f"Database conflict: {e.orig}") from e
     return user

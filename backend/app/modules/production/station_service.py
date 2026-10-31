@@ -1,5 +1,6 @@
 from sqlalchemy.orm import Session
 
+from app.core.logger import get_logger
 from app.modules.production.production_models import Machine
 from app.modules.production.station_schema import (
     StationCatalogResponse,
@@ -16,6 +17,8 @@ from app.modules.production.location_guard import (
     resolve_warehouse_id,
 )
 from app.modules.warehouse.location_map.location_model import Location
+
+log = get_logger("wms.domain.production")
 
 
 def get_station_catalog(db: Session) -> StationCatalogResponse:
@@ -104,9 +107,21 @@ def create_station_slot(
 
     loc = find_map_node(db, wh_id, node_lbl, req_code)
     if not loc:
+        log.warning(
+            "Station slot create rejected: map node '%s' not found",
+            node_lbl or req_code,
+            extra={"node_label": node_lbl, "location_code": req_code, "location_type": loc_type, "reason": "node_not_found"},
+        )
         raise ValueError(f"Không tìm thấy node bản đồ '{node_lbl or req_code}' để gán trạm.")
 
     if loc.location_type != "UNASSIGNED" and loc.location_type != loc_type:
+        log.warning(
+            "Station slot create rejected: node %s already assigned to %s (%s)",
+            loc.location_label or loc.location_code,
+            loc.location_type,
+            loc.location_name,
+            extra={"station_code": loc.location_code, "location_type": loc.location_type, "target_type": loc_type, "reason": "node_already_assigned"},
+        )
         raise ValueError(
             f"Node {loc.location_label or loc.location_code} đã được gán cho khu vực {loc.location_type} ({loc.location_name}). Không thể gán trùng!"
         )
@@ -129,6 +144,27 @@ def create_station_slot(
 
     db.commit()
     db.refresh(loc)
+    log.info(
+        "Station slot created: id=%s, location_code=%s, location_type=%s, name=%s, position_index=%s",
+        loc.id,
+        loc.location_code,
+        loc.location_type,
+        loc.location_name,
+        loc.position_index,
+        extra={
+            "station_code": loc.location_code,
+            "location_type": loc.location_type,
+            "position_index": loc.position_index,
+        },
+    )
+    if loc.location_type == "EMPTY_CART_BUFFER":
+        log.info(
+            "Buffer configuration created: station_code=%s, position_index=%s, name=%s",
+            loc.location_code,
+            loc.position_index,
+            loc.location_name,
+            extra={"station_code": loc.location_code, "buffer_type": loc.location_type, "position_index": loc.position_index},
+        )
     return StationCatalogItem(
         id=loc.id,
         location_code=loc.location_code,
@@ -150,8 +186,18 @@ def update_station_slot(
 ) -> StationCatalogItem:
     loc = db.query(Location).filter(Location.id == location_id).first()
     if not loc:
+        log.warning(
+            "Station slot update rejected: location ID %s not found",
+            location_id,
+            extra={"location_id": location_id, "reason": "location_not_found"},
+        )
         raise ValueError(f"Không tìm thấy vị trí với ID {location_id}")
     if loc.location_type == "UNASSIGNED":
+        log.warning(
+            "Station slot update rejected: location ID %s is UNASSIGNED",
+            location_id,
+            extra={"location_id": location_id, "reason": "unassigned_location"},
+        )
         raise ValueError(f"Vị trí ID {location_id} chưa được gán trạm nào.")
 
     # 1. Đổi node bản đồ = chuyển trạm sang bản ghi Location (node vật lý) khác.
@@ -160,9 +206,22 @@ def update_station_slot(
     if new_ref and new_ref not in {loc.location_code, loc.location_label}:
         target = find_map_node(db, loc.warehouse_id, new_ref)
         if not target:
+            log.warning(
+                "Station slot update rejected: map node '%s' not found for location ID %s",
+                new_ref,
+                location_id,
+                extra={"location_id": location_id, "node_ref": new_ref, "reason": "node_not_found"},
+            )
             raise ValueError(f"Không tìm thấy node bản đồ '{new_ref}'.")
         if target.id != loc.id:
             if target.location_type != "UNASSIGNED":
+                log.warning(
+                    "Station slot update rejected: target node %s already assigned to %s (%s)",
+                    target.location_label or target.location_code,
+                    target.location_type,
+                    target.location_name,
+                    extra={"station_code": target.location_code, "location_type": target.location_type, "reason": "node_already_assigned"},
+                )
                 raise ValueError(
                     f"Node {target.location_label or target.location_code} đã được gán cho "
                     f"{target.location_type} ({target.location_name})."
@@ -170,13 +229,20 @@ def update_station_slot(
             ensure_location_has_no_stock(db, loc, "chuyển trạm khỏi vị trí cũ")
             ensure_location_has_no_stock(db, target, "chuyển trạm tới node mới")
 
+            old_code = loc.location_code
             target.location_type = loc.location_type
             target.location_name = loc.location_name
             target.position_index = loc.position_index
             target.is_active = loc.is_active
             release_location(loc, db)
+            log.info(
+                "Station slot relocated: %s -> %s (type: %s, reason: node_reassignment)",
+                old_code,
+                target.location_code,
+                target.location_type,
+                extra={"old_station_code": old_code, "station_code": target.location_code, "location_type": target.location_type},
+            )
             loc = target
-
 
     if payload.location_name is not None:
         loc.location_name = payload.location_name.strip()
@@ -186,6 +252,27 @@ def update_station_slot(
 
     db.commit()
     db.refresh(loc)
+    log.info(
+        "Station slot updated: id=%s, location_code=%s, location_type=%s, name=%s, position_index=%s",
+        loc.id,
+        loc.location_code,
+        loc.location_type,
+        loc.location_name,
+        loc.position_index,
+        extra={
+            "station_code": loc.location_code,
+            "location_type": loc.location_type,
+            "position_index": loc.position_index,
+        },
+    )
+    if loc.location_type == "EMPTY_CART_BUFFER":
+        log.info(
+            "Buffer configuration updated: station_code=%s, position_index=%s, name=%s",
+            loc.location_code,
+            loc.position_index,
+            loc.location_name,
+            extra={"station_code": loc.location_code, "buffer_type": loc.location_type, "position_index": loc.position_index},
+        )
     return StationCatalogItem(
         id=loc.id,
         location_code=loc.location_code,
@@ -203,11 +290,34 @@ def update_station_slot(
 def delete_station_slot(db: Session, location_id: int) -> bool:
     loc = db.query(Location).filter(Location.id == location_id).first()
     if not loc:
+        log.warning(
+            "Station slot delete rejected: location ID %s not found",
+            location_id,
+            extra={"location_id": location_id, "reason": "location_not_found"},
+        )
         raise ValueError(f"Không tìm thấy vị trí với ID {location_id}")
 
     ensure_location_has_no_stock(db, loc, "giải phóng vị trí")
+    old_code = loc.location_code
+    old_type = loc.location_type
+    old_name = loc.location_name
     release_location(loc, db)
     db.commit()
+    log.info(
+        "Station slot deleted: id=%s, location_code=%s, location_type=%s, name=%s",
+        location_id,
+        old_code,
+        old_type,
+        old_name,
+        extra={"station_code": old_code, "location_type": old_type},
+    )
+    if old_type == "EMPTY_CART_BUFFER":
+        log.info(
+            "Buffer configuration removed: station_code=%s, name=%s",
+            old_code,
+            old_name,
+            extra={"station_code": old_code, "buffer_type": old_type},
+        )
     return True
 
 
@@ -224,7 +334,7 @@ def get_available_map_nodes(
 
     results: list[MapAvailableNodeResponse] = []
     for loc in query.all():
-        node_lbl = str(loc.location_code )
+        node_lbl = str(loc.location_code)
         node_num = str(loc.location_label)
         is_assigned = loc.location_type != "UNASSIGNED"
         assigned_to = f"{loc.location_type}: {loc.location_name}" if is_assigned else None

@@ -4,9 +4,12 @@ from typing import Optional
 
 from sqlalchemy.orm import Session
 
+from app.core.logger import get_logger
 from app.modules.warehouse.item_stock.item_stock_model import ItemStock
 from app.modules.warehouse.location_map.location_model import Location
 from app.modules.warehouse.warehouse_zone.warehouse_model import Warehouse
+
+logger = get_logger("wms.dispatch")
 
 
 def resolve_warehouse_id(db: Session, warehouse_id: Optional[int] = None) -> int:
@@ -53,8 +56,19 @@ def _describe(loc: Location) -> str:
     return loc.location_name or loc.location_label or loc.location_code
 
 
-def ensure_location_has_no_stock(db: Session, loc: Location, action: str) -> None:
-    """Raise nếu tại vị trí đang có xe/phôi (item_stock active) hoặc có AGV đang chở hàng tới (đã lock)."""
+def check_pos_buffer_rule(
+    db: Session,
+    loc: Location,
+    action: str = "allocation",
+) -> tuple[bool, Optional[str]]:
+    """
+    Check POS1/POS2 buffer rules and log whether allocation is permitted or rejected.
+    Returns (permitted: bool, reason: Optional[str]).
+    """
+    pos_label = f"POS{loc.position_index}" if loc.position_index else "slot"
+    station_code = loc.location_code or str(loc.id)
+    machine_code = loc.machine.machine_code if getattr(loc, "machine", None) else None
+
     stock = (
         db.query(ItemStock)
         .filter(ItemStock.location_id == loc.id, ItemStock.is_active.is_(True))
@@ -62,10 +76,22 @@ def ensure_location_has_no_stock(db: Session, loc: Location, action: str) -> Non
     )
     if stock:
         label = stock.container_code or (stock.item.sku if stock.item else f"stock #{stock.id}")
-        raise ValueError(
-            f"Không thể {action}: vị trí '{_describe(loc)}' đang có xe/phôi ({label}, SL: {stock.quantity}). "
-            "Vui lòng dọn hoặc chuyển hàng đi trước."
+        reason = f"occupied by active stock {label} (qty={stock.quantity})"
+        logger.warning(
+            "%s buffer rule rejected %s for location '%s' (machine='%s'): %s",
+            pos_label,
+            action,
+            station_code,
+            machine_code or "none",
+            reason,
+            extra={
+                "station_code": station_code,
+                "machine_code": machine_code,
+                "container_code": stock.container_code,
+                "reason": reason,
+            },
         )
+        return False, reason
 
     incoming = (
         db.query(ItemStock)
@@ -77,9 +103,44 @@ def ensure_location_has_no_stock(db: Session, loc: Location, action: str) -> Non
         .first()
     )
     if incoming:
+        reason = f"reserved for incoming AGV mission {incoming.locked_by_mission_code or ''}"
+        logger.warning(
+            "%s buffer rule rejected %s for location '%s' (machine='%s'): %s",
+            pos_label,
+            action,
+            station_code,
+            machine_code or "none",
+            reason,
+            extra={
+                "station_code": station_code,
+                "machine_code": machine_code,
+                "container_code": incoming.container_code,
+                "reason": reason,
+            },
+        )
+        return False, reason
+
+    logger.info(
+        "%s buffer rule permitted %s for location '%s' (machine='%s'): location free",
+        pos_label,
+        action,
+        station_code,
+        machine_code or "none",
+        extra={
+            "station_code": station_code,
+            "machine_code": machine_code,
+        },
+    )
+    return True, None
+
+
+def ensure_location_has_no_stock(db: Session, loc: Location, action: str) -> None:
+    """Raise nếu tại vị trí đang có xe/phôi (item_stock active) hoặc có AGV đang chở hàng tới (đã lock)."""
+    permitted, reason = check_pos_buffer_rule(db, loc, action=action)
+    if not permitted:
         raise ValueError(
-            f"Không thể {action}: vị trí '{_describe(loc)}' đang được giữ chỗ cho nhiệm vụ AGV "
-            f"{incoming.locked_by_mission_code or ''} đang chở hàng tới."
+            f"Không thể {action}: vị trí '{_describe(loc)}' {reason}. "
+            "Vui lòng dọn hoặc chuyển hàng đi trước."
         )
 
 

@@ -6,7 +6,8 @@ from celery.schedules import crontab
 from celery.signals import worker_process_init
 
 from app.core.config import settings
-from app.core.logger import setup_logger
+from app.core.logger import configure_logging
+from app.core.observability import install_celery_signals
 
 
 from typing import Any
@@ -77,9 +78,7 @@ def init_worker_logging(**_kwargs):
     """Worker không import main.py → setup logger và gán vai trò DB Celery."""
     import os
     os.environ["WMS_DB_ROLE"] = "celery"
-    setup_logger(
-        name="main",
-        log_level="INFO",
-        service_name="celery",
-        log_dir="logs/celery",
-    )
+    configure_logging()
+
+
+install_celery_signals()

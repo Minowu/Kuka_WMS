@@ -51,6 +51,7 @@ export default function AppRoutes() {
           </ProtectedRoute>
         }
       />
+      <Route path="/pda/was" element={<Navigate to="/pda/washing" replace />} />
 
       {/* ── TV Andon Displays (Fullscreen 16:9 / 50"-65" TV display - Public Access) ── */}
       <Route path="/tv" element={<RawMaterialAndonPage />} />

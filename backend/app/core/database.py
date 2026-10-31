@@ -32,6 +32,10 @@ engine = create_engine(
     pool_recycle=_pool_recycle,
 )
 
+from app.core.observability import install_db_events  # noqa: E402
+
+install_db_events(engine)
+
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 Base = declarative_base()

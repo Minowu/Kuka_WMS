@@ -1,0 +1,90 @@
+local.file_match "wms_logs" {
+	path_targets = [
+		{
+			__path__         = "/var/log/wms/*.jsonl",
+			__path_exclude__ = "/var/log/wms/{all,error}*.jsonl",
+		},
+	]
+}
+
+loki.source.file "wms" {
+	targets    = local.file_match.wms_logs.targets
+	forward_to = [loki.process.wms.receiver]
+}
+
+loki.process "wms" {
+	forward_to = [loki.write.loki.receiver]
+
+	stage.json {
+		expressions = {
+			channel              = "channel",
+			correlation_id       = "correlation_id",
+			duration_ms          = "duration_ms",
+			exc_type             = "exc_type",
+			fleet_request_id     = "fleet_request_id",
+			fleet_task_id        = "fleet_task_id",
+			func                 = "func",
+			level                = "level",
+			line                 = "line",
+			machine_code         = "machine_code",
+			module               = "module",
+			msg                  = "msg",
+			pid                  = "pid",
+			process              = "process",
+			stack                = "stack",
+			station_code         = "station_code",
+			container_code       = "container_code",
+			transport_request_id = "transport_request_id",
+			ts                   = "ts",
+			user                 = "user",
+		}
+	}
+
+	stage.labels {
+		values = {
+			channel = "channel",
+			level   = "level",
+			process = "process",
+		}
+	}
+
+	stage.label_keep {
+		values = [
+			"channel",
+			"process",
+			"level",
+		]
+	}
+
+	stage.timestamp {
+		source = "ts"
+		format = "RFC3339"
+	}
+
+	stage.structured_metadata {
+		values = {
+			correlation_id       = "correlation_id",
+			duration_ms          = "duration_ms",
+			exc_type             = "exc_type",
+			fleet_request_id     = "fleet_request_id",
+			fleet_task_id        = "fleet_task_id",
+			func                 = "func",
+			line                 = "line",
+			machine_code         = "machine_code",
+			module               = "module",
+			msg                  = "msg",
+			pid                  = "pid",
+			stack                = "stack",
+			station_code         = "station_code",
+			container_code       = "container_code",
+			transport_request_id = "transport_request_id",
+			user                 = "user",
+		}
+	}
+}
+
+loki.write "loki" {
+	endpoint {
+		url = "http://loki:3100/loki/api/v1/push"
+	}
+}

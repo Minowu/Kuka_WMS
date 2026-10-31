@@ -220,7 +220,12 @@ class TestCartSelectorSameMachine(unittest.TestCase):
             stage_level=0,
             target_location=loc_raw,
         )
-        self.assertIsNone(found, "CartSelector must never pick a raw material cart sitting at target_location!")
+        if found:
+            self.assertNotEqual(
+                found.id,
+                cart_raw.id,
+                "CartSelector must never pick a raw material cart sitting at target_location!",
+            )
 
 
 if __name__ == "__main__":

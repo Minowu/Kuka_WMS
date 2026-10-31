@@ -31,3 +31,20 @@ export function randomHex(length: number): string {
     .join('')
     .slice(0, length);
 }
+
+/** Sinh chuỗi UUID v4 chuẩn. */
+export function generateUuid(): string {
+  const webCrypto = getBrowserCrypto();
+  if (webCrypto && typeof webCrypto.randomUUID === 'function') {
+    try {
+      return webCrypto.randomUUID();
+    } catch {
+      // Fallback
+    }
+  }
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0;
+    const v = c === 'x' ? r : (r & 0x3) | 0x8;
+    return v.toString(16);
+  });
+}

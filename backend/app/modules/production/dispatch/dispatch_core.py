@@ -6,7 +6,7 @@ import uuid
 
 from sqlalchemy.orm import Session
 
-from app.core.logger import get_logger
+from app.core.logger import bind_context, get_logger, log_context
 from app.modules.production.dispatch.cart_selector import CartSelector
 from app.modules.production.dispatch.kuka_fleet_client import KukaFleetClient
 from app.modules.production.dispatch.queue_service import QueueService
@@ -26,7 +26,7 @@ from app.modules.warehouse.item_stock.item_stock_model import ItemStock
 from app.modules.warehouse.location_map.location_model import Location
 from app.socket.event_bus import publish_event, resolve_location_recipient_user_ids
 
-logger = get_logger("main")
+logger = get_logger("wms.dispatch")
 
 
 class DispatchCore:
@@ -86,10 +86,15 @@ class DispatchCore:
         mission_code = f"MS{datetime.now().strftime('%Y%m%d%H%M%S%f')[:17]}{uuid.uuid4().hex[:4].upper()}"
         fleet_req_id = f"SUB{datetime.now().strftime('%Y%m%d%H%M%S%f')[:17]}{uuid.uuid4().hex[:4].upper()}"
 
+        dropoff_loc = db.query(Location).filter(Location.id == dropoff_location_id).first()
+        station_code = dropoff_loc.location_code if dropoff_loc else str(dropoff_location_id)
+        machine_code = dropoff_loc.machine.machine_code if dropoff_loc and getattr(dropoff_loc, "machine", None) else None
+
         cart.is_locked = True
         cart.locked_by_mission_code = mission_code
         cart.destination_location_id = dropoff_location_id
 
+        prev_req_status = transport_req.status or "new"
         transport_req.container_id = cart.id
         transport_req.source_location_id = pickup_location_id
         transport_req.destination_location_id = dropoff_location_id
@@ -114,6 +119,39 @@ class DispatchCore:
         )
         db.commit()
         db.refresh(fleet_task)
+
+        # Bind context
+        bind_context(
+            transport_request_id=transport_req.id,
+            fleet_task_id=fleet_task.id,
+            container_code=cart.container_code,
+            station_code=station_code,
+            machine_code=machine_code,
+        )
+
+        logger.info(
+            "TransportRequest %s: %s -> %s (reason: %s)",
+            transport_req.id,
+            prev_req_status,
+            "in_progress",
+            f"Assigned cart {cart.container_code} and created FleetTask {mission_code}",
+        )
+        logger.info(
+            "FleetTask %s: %s -> %s (reason: %s)",
+            fleet_task.mission_code,
+            "new",
+            "pending_submit",
+            f"Created task for TransportRequest {transport_req.id} (cart {cart.container_code})",
+        )
+        logger.info(
+            "dispatch_transport_request: transport_request_id=%s, cart=%s, pickup=%s, dropoff=%s (%s), mission=%s",
+            transport_req.id,
+            cart.container_code,
+            pickup_location_id,
+            dropoff_location_id,
+            station_code,
+            mission_code,
+        )
 
         from app.modules.production.production_celery_task import enqueue_fleet_submit
         enqueue_fleet_submit(fleet_task.id)
@@ -151,6 +189,11 @@ class DispatchCore:
             raise ValueError(f"Vị trí cấp phôi (ID={location_id}) không tồn tại hoặc đã bị khóa.")
         if location.location_type != "RAW_MATERIAL":
             raise ValueError(f"Vị trí '{location.location_code}' không phải là vị trí Khu Nguyên Liệu (RAW_MATERIAL).")
+
+        bind_context(
+            container_code=clean_container_code,
+            station_code=location.location_code,
+        )
 
         item = db.query(Item).filter(Item.id == item_id).first()
         if not item:
@@ -214,7 +257,13 @@ class DispatchCore:
             self.fleet_client.fleet_insert_rack(location.location_code, clean_container_code)
         except Exception as e:
             db.rollback()
-            logger.error("Khai báo xe phôi '%s' vào vị trí '%s' thất bại trên KUKA Fleet: %s", clean_container_code, location.location_code, e)
+            logger.error(
+                "Khai báo xe phôi '%s' vào vị trí '%s' thất bại trên KUKA Fleet: %s",
+                clean_container_code,
+                location.location_code,
+                e,
+                exc_info=True,
+            )
             raise ValueError(f"KUKA Fleet từ chối tiếp nhận xe phôi: {e}") from e
 
         db.flush()
@@ -295,6 +344,20 @@ class DispatchCore:
         if required_stage_level is None:
             required_stage_level = input_lvl
 
+        station_code = dest_loc.location_code
+        machine_code = dest_loc.machine.machine_code if getattr(dest_loc, "machine", None) else None
+        bind_context(station_code=station_code, machine_code=machine_code)
+        logger.info(
+            "call_material_cart_async input: destination_location_id=%s (%s), machine=%s, item_id=%s, required_stage_level=%s, priority=%s, created_by=%s",
+            destination_location_id,
+            station_code,
+            machine_code,
+            item_id,
+            required_stage_level,
+            priority,
+            created_by,
+        )
+
         req_code = f"REQ-{uuid.uuid4().hex[:8].upper()}"
         transport_req = TransportRequest(
             request_code=req_code,
@@ -309,6 +372,15 @@ class DispatchCore:
         db.add(transport_req)
         db.flush()
 
+        bind_context(transport_request_id=transport_req.id)
+        logger.info(
+            "TransportRequest %s: %s -> %s (reason: %s)",
+            transport_req.id,
+            "new",
+            "pending",
+            f"Material requested for station {station_code} (item_id={item_id})",
+        )
+
         cart = self.selector.find_fifo_available_cart(
             db,
             item_id=item_id,
@@ -316,6 +388,12 @@ class DispatchCore:
             target_location=dest_loc,
         )
         if cart:
+            logger.info(
+                "call_material_cart_async candidate decision: selected cart %s at location_id=%s for destination %s",
+                cart.container_code,
+                cart.location_id,
+                station_code,
+            )
             self.lock_cart_and_dispatch_fleet_task(
                 db=db,
                 transport_req=transport_req,
@@ -324,15 +402,27 @@ class DispatchCore:
                 dropoff_location_id=dest_loc.id,
             )
         else:
+            prev_status = transport_req.status
             transport_req.status = "queued_for_cart"
-            queue_entry = TransportQueue(
+            logger.info(
+                "call_material_cart_async candidate decision: no eligible cart found for item_id=%s, stage_level=%s; queuing request",
+                item_id,
+                required_stage_level,
+            )
+            logger.info(
+                "TransportRequest %s: %s -> %s (reason: %s)",
+                transport_req.id,
+                prev_status,
+                "queued_for_cart",
+                f"No eligible cart available for stage {required_stage_level}, enqueued in WAITING_CART",
+            )
+            self.queue_service.enqueue(
+                db=db,
                 request_id=transport_req.id,
                 queue_type="WAITING_CART",
                 target_stage_level=required_stage_level,
-                status="PENDING",
                 priority=priority,
             )
-            db.add(queue_entry)
 
         loc_ids = sorted(
             {
@@ -397,6 +487,14 @@ class DispatchCore:
         if not loc:
             raise ValueError(f"Vị trí của khay phôi '{cart.container_code}' không hợp lệ.")
 
+        station_code = loc.location_code
+        machine_code = loc.machine.machine_code if getattr(loc, "machine", None) else None
+        bind_context(
+            container_code=cart.container_code,
+            station_code=station_code,
+            machine_code=machine_code,
+        )
+
         _, target_stage, is_final_cnc = self.selector.get_stage_info_for_machine(db, loc, cart.item_id)
         current_stage = cart.current_stage_level or 0
 
@@ -411,7 +509,6 @@ class DispatchCore:
         previous_stage = cart.current_stage_level
         cart.current_stage_level = completed_stage
 
-        machine_code = loc.machine.machine_code if loc.machine else None
         record = ProductionRecord(
             container_id=cart.id,
             container_code=cart.container_code,
@@ -456,6 +553,11 @@ class DispatchCore:
         req_code = f"REQ-{uuid.uuid4().hex[:8].upper()}"
         wash_slot = self.selector.find_available_slot_to_wash(db)
         if wash_slot:
+            logger.info(
+                "Final CNC candidate decision: selected wash slot %s for cart %s",
+                wash_slot.location_code,
+                cart.container_code,
+            )
             transport_req = TransportRequest(
                 request_code=req_code,
                 request_type="MOVE_TO_WASH",
@@ -470,6 +572,15 @@ class DispatchCore:
             )
             db.add(transport_req)
             db.flush()
+
+            bind_context(transport_request_id=transport_req.id)
+            logger.info(
+                "TransportRequest %s: %s -> %s (reason: %s)",
+                transport_req.id,
+                "new",
+                "pending",
+                f"Final CNC completed for cart {cart.container_code}, moving to wash slot {wash_slot.location_code}",
+            )
 
             try:
                 self.lock_cart_and_dispatch_fleet_task(
@@ -487,6 +598,10 @@ class DispatchCore:
                 raise
             action_result = "DISPATCHED_TO_WASHING"
         else:
+            logger.info(
+                "Final CNC candidate decision: no wash slot available for cart %s; queuing request",
+                cart.container_code,
+            )
             transport_req = TransportRequest(
                 request_code=req_code,
                 request_type="MOVE_TO_WASH",
@@ -502,14 +617,21 @@ class DispatchCore:
             db.add(transport_req)
             db.flush()
 
-            queue_entry = TransportQueue(
+            bind_context(transport_request_id=transport_req.id)
+            logger.info(
+                "TransportRequest %s: %s -> %s (reason: %s)",
+                transport_req.id,
+                "new",
+                "queued_for_slot",
+                f"No wash slot available for cart {cart.container_code}, enqueued in WAITING_SLOT",
+            )
+            self.queue_service.enqueue(
+                db=db,
                 request_id=transport_req.id,
                 queue_type="WAITING_SLOT",
                 target_stage_level=99,
-                status="PENDING",
                 priority=5,
             )
-            db.add(queue_entry)
             action_result = "QUEUED_FOR_WASHING_SLOT"
 
         loc_ids = sorted(
@@ -569,10 +691,24 @@ class DispatchCore:
         if not loc or loc.location_type != "WASHING_SLOT":
             raise ValueError(f"Xe '{clean_code}' không nằm tại vị trí Khu Tẩy Rửa (WASHING_SLOT).")
 
+        station_code = loc.location_code if loc else None
+        bind_context(container_code=clean_code, station_code=station_code)
+        logger.info(
+            "call_empty_cart_async input: container_code=%s, location=%s, operator_id=%s",
+            clean_code,
+            station_code,
+            operator_id,
+        )
+
         buffer_slot = self.selector.find_next_empty_buffer_slot(db)
         req_code = f"REQ-{uuid.uuid4().hex[:8].upper()}"
 
         if buffer_slot:
+            logger.info(
+                "call_empty_cart_async candidate decision: selected empty buffer slot %s for cart %s",
+                buffer_slot.location_code,
+                clean_code,
+            )
             transport_req = TransportRequest(
                 request_code=req_code,
                 request_type="RETURN_EMPTY_CART",
@@ -587,6 +723,15 @@ class DispatchCore:
             )
             db.add(transport_req)
             db.flush()
+
+            bind_context(transport_request_id=transport_req.id)
+            logger.info(
+                "TransportRequest %s: %s -> %s (reason: %s)",
+                transport_req.id,
+                "new",
+                "pending",
+                f"Returning empty cart {clean_code} to buffer slot {buffer_slot.location_code}",
+            )
 
             cart.quantity = 0
             cart.status = "empty"
@@ -606,6 +751,10 @@ class DispatchCore:
                 db.commit()
                 raise
         else:
+            logger.info(
+                "call_empty_cart_async candidate decision: no empty buffer slot available for cart %s; queuing request",
+                clean_code,
+            )
             cart.quantity = 0
             cart.status = "empty"
             cart.current_stage_level = 0
@@ -625,14 +774,20 @@ class DispatchCore:
             db.add(transport_req)
             db.flush()
 
-            db.add(
-                TransportQueue(
-                    request_id=transport_req.id,
-                    queue_type="WAITING_SLOT",
-                    target_stage_level=0,
-                    status="PENDING",
-                    priority=15,
-                )
+            bind_context(transport_request_id=transport_req.id)
+            logger.info(
+                "TransportRequest %s: %s -> %s (reason: %s)",
+                transport_req.id,
+                "new",
+                "queued_for_slot",
+                f"No empty buffer slot available for cart {clean_code}, enqueued in WAITING_SLOT",
+            )
+            self.queue_service.enqueue(
+                db=db,
+                request_id=transport_req.id,
+                queue_type="WAITING_SLOT",
+                target_stage_level=0,
+                priority=15,
             )
 
         loc_ids = sorted(
@@ -668,3 +823,40 @@ class DispatchCore:
 
         db.refresh(transport_req)
         return transport_req
+
+    # Aliases / async-named wrappers
+    def call_empty_cart_async(
+        self,
+        db: Session,
+        container_code: str,
+        operator_id: Optional[int] = None,
+    ) -> TransportRequest:
+        """Alias for complete_washing_and_return_empty_cart."""
+        return self.complete_washing_and_return_empty_cart(db, container_code, operator_id)
+
+    def call_material_cart_async(
+        self,
+        db: Session,
+        destination_location_id: int,
+        item_id: Optional[int] = None,
+        required_stage_level: Optional[int] = None,
+        created_by: Optional[int] = None,
+        priority: int = 10,
+    ) -> TransportRequest:
+        """Alias for call_material_to_cnc."""
+        return self.call_material_to_cnc(
+            db, destination_location_id, item_id, required_stage_level, created_by, priority
+        )
+
+    def dispatch_transport_request(
+        self,
+        db: Session,
+        transport_req: TransportRequest,
+        cart: ItemStock,
+        pickup_location_id: int,
+        dropoff_location_id: int,
+    ) -> FleetTask:
+        """Alias for lock_cart_and_dispatch_fleet_task."""
+        return self.lock_cart_and_dispatch_fleet_task(
+            db, transport_req, cart, pickup_location_id, dropoff_location_id
+        )

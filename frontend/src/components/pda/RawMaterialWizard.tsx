@@ -197,11 +197,11 @@ export const RawMaterialWizard: React.FC<RawMaterialWizardProps> = ({
             {models.map((model) => (
               <button
                 key={model.id}
-                onClick={() => handleSelectModel(model.id)}
+                onClick={() => handleSelectModel(String(model.id))}
                 className="min-h-[54px] p-3 rounded-xl bg-slate-800 hover:bg-[#FF5800] border border-slate-700 hover:border-orange-500 text-left flex items-center justify-between group transition-all active:scale-[0.98]"
               >
                 <div className="flex items-center gap-3">
-                  <span className="w-8 h-8 rounded-lg bg-slate-900 group-hover:bg-black/30 text-white flex items-center justify-center font-bold text-xs font-mono">
+                  <span className="w-17 h-8 rounded-lg bg-slate-900 group-hover:bg-black/30 text-white flex items-center justify-center font-bold text-xs font-mono">
                     {model.code}
                   </span>
                   <div>

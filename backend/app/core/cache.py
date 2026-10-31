@@ -4,6 +4,24 @@ from typing import Any, Optional
 import redis
 
 from app.core.config import settings
+from functools import wraps
+
+from app.core.logger import get_logger
+
+redis_log = get_logger("wms.redis")
+
+
+def _log_redis_errors(fn):
+    """Log Redis failures on wms.redis then re-raise (behaviour unchanged)."""
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        try:
+            return fn(*args, **kwargs)
+        except redis.RedisError as e:
+            redis_log.error("Redis error in %s(%s): %s", fn.__name__, args[:1], e, exc_info=True)
+            raise
+    return wrapper
+
 
 _redis: Optional[redis.Redis] = None
 
@@ -40,11 +58,13 @@ def close_redis() -> None:
         _redis = None
 
 
+@_log_redis_errors
 def cache_get(key: str) -> Optional[Any]:
     raw = get_redis().get(_prefixed_key(key))
     return json.loads(raw) if raw else None
 
 
+@_log_redis_errors
 def cache_set(key: str, value: Any, ttl: int | None = None) -> None:
     payload = json.dumps(value, default=str)
     prefixed = _prefixed_key(key)
@@ -53,23 +73,27 @@ def cache_set(key: str, value: Any, ttl: int | None = None) -> None:
         return
 
     get_redis().setex(
-        _prefixed_key(key),
+        prefixed,
         ttl or settings.redis_cache_ttl,
-        json.dumps(value, default=str),
+        payload,
     )
 
 
+@_log_redis_errors
 def cache_delete(key: str) -> None:
     get_redis().delete(_prefixed_key(key))
 
 
+@_log_redis_errors
 def cache_exists(key: str) -> bool:
     return bool(get_redis().exists(_prefixed_key(key)))
 
+@_log_redis_errors
 def cache_scan_keys(pattern: str) -> list[str]:
     r = get_redis()
     return list(r.scan_iter(match=_prefixed_pattern(pattern)))
 
+@_log_redis_errors
 def cache_delete_pattern(pattern: str) -> int:
     r = get_redis()
     keys = list(r.scan_iter(match=_prefixed_pattern(pattern)))

@@ -8,6 +8,7 @@ import { useEffect, useRef } from 'react';
 import { useAuthStore } from '@/store/useAuthStore';
 import { usePdaStore } from '@/store/usePdaStore';
 import { refreshAccessTokenApi } from '@/api/authRefresh';
+import { logger } from '@/logger';
 
 function getWebSocketUrl(): string {
   const envUrl = import.meta.env.VITE_API_URL;
@@ -22,7 +23,6 @@ function getWebSocketUrl(): string {
 
 export function usePdaSocket(): void {
   const accessToken = useAuthStore((s) => s.access_token);
-  const refreshToken = useAuthStore((s) => s.refresh_token);
   const setToken = useAuthStore((s) => s.setToken);
   const clearAuth = useAuthStore((s) => s.clearAuth);
 
@@ -58,14 +58,37 @@ export function usePdaSocket(): void {
       }, jitterDelay);
     };
 
+    const scheduleReconnect = () => {
+      if (reconnectTimeoutRef.current) {
+        window.clearTimeout(reconnectTimeoutRef.current);
+      }
+      const attempt = backoffAttemptRef.current;
+      const baseDelay = Math.min(1000 * Math.pow(2, attempt), 15000);
+      const delay = baseDelay + Math.floor(Math.random() * 1000);
+      backoffAttemptRef.current += 1;
+
+      logger.info(`[WS] Lên lịch kết nối lại WebSocket lần ${backoffAttemptRef.current}`, {
+        attempt: backoffAttemptRef.current,
+        delay_ms: delay,
+      });
+
+      reconnectTimeoutRef.current = window.setTimeout(() => {
+        if (!isUnmounted) {
+          connect();
+        }
+      }, delay);
+    };
+
     const connect = () => {
       if (isUnmounted) return;
 
       const wsUrl = getWebSocketUrl();
       let ws: WebSocket;
       try {
+        logger.info('[WS] Khởi tạo kết nối WebSocket...', { url: wsUrl });
         ws = new WebSocket(wsUrl);
       } catch (err) {
+        logger.error('[WS] Lỗi khởi tạo WebSocket', { error: err ? String(err) : 'Init error' });
         console.warn('[WS] Lỗi khởi tạo WebSocket:', err);
         scheduleReconnect();
         return;
@@ -74,6 +97,8 @@ export function usePdaSocket(): void {
       wsRef.current = ws;
 
       ws.onopen = () => {
+        logger.info('[WS] Đã mở kết nối WebSocket thành công', { url: wsUrl });
+
         // Gửi thông điệp xác thực JWT đầu tiên
         const currentToken = useAuthStore.getState().access_token;
         if (currentToken && ws.readyState === WebSocket.OPEN) {
@@ -98,6 +123,7 @@ export function usePdaSocket(): void {
           const msg = JSON.parse(event.data);
 
           if (msg.type === 'auth_ok') {
+            logger.info('[WS] Xác thực WebSocket thành công');
             setWsConnected(true);
             backoffAttemptRef.current = 0;
             // Tải trạng thái sàn ban đầu ngay sau khi xác thực thành công
@@ -122,6 +148,10 @@ export function usePdaSocket(): void {
               }, 10000);
 
               const reason = payload.reason || payload.message || 'Lỗi điều xe AMR!';
+              logger.warn(`[WS] Fleet task thất bại [${missionCode}]: ${reason}`, {
+                mission_code: missionCode,
+                reason,
+              });
               showToast(`AMR [${missionCode}] thất bại: ${reason}`, 'error');
             }
 
@@ -135,11 +165,18 @@ export function usePdaSocket(): void {
             return;
           }
         } catch (err) {
+          logger.warn('[WS] Lỗi parse tin nhắn WebSocket', { error: String(err) });
           console.warn('[WS] Lỗi parse message:', err);
         }
       };
 
       ws.onclose = async (event) => {
+        logger.warn(`[WS] Đóng kết nối WebSocket [code: ${event.code}]`, {
+          code: event.code,
+          reason: event.reason,
+          wasClean: event.wasClean,
+        });
+
         setWsConnected(false);
         if (pingIntervalRef.current) {
           window.clearInterval(pingIntervalRef.current);
@@ -150,21 +187,28 @@ export function usePdaSocket(): void {
 
         // Mã 4401: Token hết hạn -> Thử refresh token
         if (event.code === 4401) {
+          logger.warn('[WS] Đóng kết nối do mã 4401 (Token hết hạn), đang làm mới token...', {
+            code: event.code,
+            reason: event.reason,
+          });
           console.warn('[WS] Đóng kết nối do mã 4401 (Token hết hạn), đang làm mới token...');
           const currentRefresh = useAuthStore.getState().refresh_token;
           if (currentRefresh) {
             try {
               const res = await refreshAccessTokenApi(currentRefresh);
               setToken(res.access_token, res.refresh_token);
+              logger.info('[WS] Làm mới token thành công sau mã 4401, đang kết nối lại...');
               // Thử kết nối lại ngay lập tức với token mới
               connect();
               return;
             } catch (refreshErr) {
+              logger.error('[WS] Làm mới token thất bại sau mã 4401', { error: String(refreshErr) });
               console.error('[WS] Làm mới token thất bại:', refreshErr);
               clearAuth();
               return;
             }
           } else {
+            logger.warn('[WS] Không tìm thấy refresh token sau mã 4401, đăng xuất');
             clearAuth();
             return;
           }
@@ -175,24 +219,9 @@ export function usePdaSocket(): void {
       };
 
       ws.onerror = (err) => {
+        logger.error('[WS] Lỗi kết nối WebSocket', { error: err ? String(err) : 'WebSocket error' });
         console.warn('[WS] Lỗi kết nối WebSocket:', err);
       };
-    };
-
-    const scheduleReconnect = () => {
-      if (reconnectTimeoutRef.current) {
-        window.clearTimeout(reconnectTimeoutRef.current);
-      }
-      const attempt = backoffAttemptRef.current;
-      const baseDelay = Math.min(1000 * Math.pow(2, attempt), 15000);
-      const delay = baseDelay + Math.floor(Math.random() * 1000);
-      backoffAttemptRef.current += 1;
-
-      reconnectTimeoutRef.current = window.setTimeout(() => {
-        if (!isUnmounted) {
-          connect();
-        }
-      }, delay);
     };
 
     // Bắt đầu kết nối
@@ -210,10 +239,11 @@ export function usePdaSocket(): void {
         window.clearInterval(pingIntervalRef.current);
       }
       if (wsRef.current) {
+        logger.info('[WS] Ngắt kết nối WebSocket (hook unmount)');
         wsRef.current.close();
         wsRef.current = null;
       }
       setWsConnected(false);
     };
-  }, [accessToken]);
+  }, [accessToken, clearAuth, fetchFloorState, setToken, setWsConnected, showToast]);
 }

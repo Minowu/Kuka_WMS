@@ -1,5 +1,8 @@
+from typing import Optional
+
 from sqlalchemy.orm import Session
 
+from app.core.logger import get_logger
 from app.modules.production.production_models import Machine, RouteStepMachine
 from app.modules.production.machine_schema import (
     AvailableMachineResponse,
@@ -15,6 +18,10 @@ from app.modules.production.location_guard import (
     resolve_warehouse_id,
 )
 from app.modules.warehouse.location_map.location_model import Location
+
+log = get_logger("wms.domain.production")
+
+VALID_MACHINE_STATUSES = {"IDLE", "RUNNING", "ERROR", "MAINTENANCE"}
 
 
 def list_available_machines(db: Session) -> list[AvailableMachineResponse]:
@@ -105,6 +112,11 @@ def create_machine(db: Session, payload: MachineCreateRequest) -> AvailableMachi
 
     existing = db.query(Machine).filter(Machine.machine_code == code).first()
     if existing:
+        log.warning(
+            "Machine create rejected: machine_code '%s' already exists",
+            code,
+            extra={"machine_code": code, "payload": payload.model_dump(), "reason": "machine_code_already_exists"},
+        )
         raise ValueError(f"Máy CNC với mã '{code}' đã tồn tại trong hệ thống")
     m = Machine(
         machine_code=code,
@@ -125,15 +137,35 @@ def create_machine(db: Session, payload: MachineCreateRequest) -> AvailableMachi
     for s_def in slot_defs:
         pos = s_def.position_index
         if pos < 1 or pos > 3:
+            log.warning(
+                "Machine create rejected: position_index %s out of range [1, 3] for machine '%s'",
+                pos,
+                code,
+                extra={"machine_code": code, "position_index": pos, "reason": "invalid_position_index"},
+            )
             raise ValueError(f"Vị trí đỗ position_index phải từ 1 đến 3 (nhận được: {pos})")
         node_lbl = (s_def.node_label or "").strip()
         loc_name = s_def.location_name or f"{m.machine_name} - Vị trí {pos}"
         
         loc = find_map_node(db, wh_id, node_lbl, s_def.location_code)
         if not loc:
+            log.warning(
+                "Machine create rejected: map node '%s' not found for machine '%s' POS%s",
+                node_lbl or s_def.location_code,
+                code,
+                pos,
+                extra={"machine_code": code, "position_index": pos, "node_label": node_lbl, "reason": "node_not_found"},
+            )
             raise ValueError(f"Không tìm thấy node bản đồ '{node_lbl or s_def.location_code}' cho Vị trí {pos} của máy {code}")
 
         if loc.location_type != "UNASSIGNED" and (loc.location_type != "CNC_SLOT" or loc.machine_id != m.id):
+            log.warning(
+                "Machine create rejected: node %s already assigned to %s (%s)",
+                loc.location_label or loc.location_code,
+                loc.location_type,
+                loc.location_name,
+                extra={"machine_code": code, "station_code": loc.location_code, "assigned_type": loc.location_type, "reason": "node_already_assigned"},
+            )
             raise ValueError(f"Node {loc.location_label or loc.location_code} đã được gán cho {loc.location_type} ({loc.location_name}). Không thể gán cho máy CNC!")
         ensure_location_has_no_stock(db, loc, f"gán Vị trí {pos} cho máy {code}")
         loc.machine_id = m.id
@@ -147,6 +179,14 @@ def create_machine(db: Session, payload: MachineCreateRequest) -> AvailableMachi
         if s_def.map_y is not None:
             loc.map_y = s_def.map_y
         loc.is_active = True
+        log.info(
+            "Machine %s assigned to station slot: location_code=%s, position_index=%s, node_label=%s",
+            m.machine_code,
+            loc.location_code,
+            pos,
+            node_lbl,
+            extra={"machine_code": m.machine_code, "station_code": loc.location_code, "position_index": pos},
+        )
 
     db.commit()
     db.refresh(m)
@@ -167,6 +207,15 @@ def create_machine(db: Session, payload: MachineCreateRequest) -> AvailableMachi
     ]
     slots.sort(key=lambda s: s.position_index or 99)
 
+    log.info(
+        "Machine created: id=%s, machine_code=%s, name=%s, warehouse_id=%s, slots_count=%s",
+        m.id,
+        m.machine_code,
+        m.machine_name,
+        m.warehouse_id,
+        len(slots),
+        extra={"machine_code": m.machine_code, "machine_id": m.id, "slots_count": len(slots)},
+    )
     return AvailableMachineResponse(
         id=m.id,
         machine_code=m.machine_code,
@@ -182,6 +231,11 @@ def create_machine(db: Session, payload: MachineCreateRequest) -> AvailableMachi
 def update_machine(db: Session, machine_id: int, payload: MachineUpdateRequest) -> AvailableMachineResponse:
     m = db.query(Machine).filter(Machine.id == machine_id).first()
     if not m:
+        log.warning(
+            "Machine update rejected: machine ID %s not found",
+            machine_id,
+            extra={"machine_id": machine_id, "reason": "machine_not_found"},
+        )
         raise ValueError(f"Không tìm thấy máy CNC với ID {machine_id}")
 
     if payload.machine_name is not None:
@@ -189,6 +243,11 @@ def update_machine(db: Session, machine_id: int, payload: MachineUpdateRequest) 
 
     if payload.slots is not None:
         if not payload.slots:
+            log.warning(
+                "Machine update rejected: slots list cannot be empty for machine %s",
+                m.machine_code,
+                extra={"machine_code": m.machine_code, "reason": "empty_slots"},
+            )
             raise ValueError("Máy CNC phải có ít nhất 1 vị trí đỗ.")
 
         # Chụp trạng thái slot hiện tại TỪ DB (không dùng m.locations vì sẽ bị thay đổi trong vòng lặp)
@@ -201,6 +260,12 @@ def update_machine(db: Session, machine_id: int, payload: MachineUpdateRequest) 
 
         for pos, s_def in positions_requested.items():
             if pos < 1 or pos > 3:
+                log.warning(
+                    "Machine update rejected: invalid position_index %s for machine %s",
+                    pos,
+                    m.machine_code,
+                    extra={"machine_code": m.machine_code, "position_index": pos, "reason": "invalid_position_index"},
+                )
                 raise ValueError(f"Vị trí đỗ position_index phải từ 1 đến 3 (nhận được: {pos})")
             node_lbl = (s_def.node_label or "").strip()
             loc_name = s_def.location_name or f"{m.machine_name} - Vị trí {pos}"
@@ -210,13 +275,33 @@ def update_machine(db: Session, machine_id: int, payload: MachineUpdateRequest) 
                 # Không gửi node -> giữ nguyên node cũ của POS này
                 target = old_by_pos.get(pos)
             if not target:
+                log.warning(
+                    "Machine update rejected: map node '%s' not found for machine %s POS%s",
+                    node_lbl or s_def.location_code,
+                    m.machine_code,
+                    pos,
+                    extra={"machine_code": m.machine_code, "position_index": pos, "reason": "node_not_found"},
+                )
                 raise ValueError(f"Không tìm thấy node bản đồ '{node_lbl or s_def.location_code}' cho Vị trí {pos}.")
             if target.id in used_target_ids:
+                log.warning(
+                    "Machine update rejected: duplicate node %s for machine %s",
+                    target.location_code,
+                    m.machine_code,
+                    extra={"machine_code": m.machine_code, "station_code": target.location_code, "reason": "duplicate_node"},
+                )
                 raise ValueError(f"Node {target.location_label or target.location_code} bị chọn cho nhiều vị trí đỗ cùng lúc.")
             used_target_ids.add(target.id)
 
             is_own_slot = target.location_type == "CNC_SLOT" and target.machine_id == m.id
             if target.location_type != "UNASSIGNED" and not is_own_slot:
+                log.warning(
+                    "Machine update rejected: node %s already assigned to %s (%s)",
+                    target.location_code,
+                    target.location_type,
+                    target.location_name,
+                    extra={"machine_code": m.machine_code, "station_code": target.location_code, "assigned_type": target.location_type, "reason": "node_already_assigned"},
+                )
                 raise ValueError(f"Node {target.location_label or target.location_code} đã được gán cho {target.location_type} ({target.location_name}).")
 
             old = old_by_pos.get(pos)
@@ -232,12 +317,26 @@ def update_machine(db: Session, machine_id: int, payload: MachineUpdateRequest) 
             target.location_name = loc_name
             target.is_active = True
             kept_ids.add(target.id)
+            log.info(
+                "Machine %s slot assigned: location_code=%s, position_index=%s",
+                m.machine_code,
+                target.location_code,
+                pos,
+                extra={"machine_code": m.machine_code, "station_code": target.location_code, "position_index": pos},
+            )
 
         # Giải phóng mọi node cũ không còn dùng (slot bị bớt HOẶC node cũ của POS vừa đổi)
         for loc in old_locs:
             if loc.id not in kept_ids:
                 ensure_location_has_no_stock(db, loc, f"bớt Vị trí {loc.position_index} của máy {m.machine_code}")
                 release_location(loc, db)
+                log.info(
+                    "Machine %s slot unassigned: location_code=%s, position_index=%s",
+                    m.machine_code,
+                    loc.location_code,
+                    loc.position_index,
+                    extra={"machine_code": m.machine_code, "station_code": loc.location_code, "position_index": loc.position_index},
+                )
 
     db.commit()
     db.refresh(m)
@@ -262,6 +361,14 @@ def update_machine(db: Session, machine_id: int, payload: MachineUpdateRequest) 
         for loc in active_locs
     ]
 
+    log.info(
+        "Machine updated: id=%s, machine_code=%s, name=%s, slots_count=%s",
+        m.id,
+        m.machine_code,
+        m.machine_name,
+        len(slots),
+        extra={"machine_code": m.machine_code, "machine_id": m.id, "slots_count": len(slots)},
+    )
     return AvailableMachineResponse(
         id=m.id,
         machine_code=m.machine_code,
@@ -277,6 +384,11 @@ def update_machine(db: Session, machine_id: int, payload: MachineUpdateRequest) 
 def delete_machine(db: Session, machine_id: int) -> bool:
     m = db.query(Machine).filter(Machine.id == machine_id).first()
     if not m:
+        log.warning(
+            "Machine delete rejected: machine ID %s not found",
+            machine_id,
+            extra={"machine_id": machine_id, "reason": "machine_not_found"},
+        )
         raise ValueError(f"Không tìm thấy máy CNC với ID {machine_id}")
 
     # Guard: Kiểm tra máy có đang được gán trong bất kỳ công đoạn nào của ProductionRoute không
@@ -294,6 +406,13 @@ def delete_machine(db: Session, machine_id: int) -> bool:
             else (f"ID={step.route_id}" if step else "N/A")
         )
         step_name = step.step_name if step else f"bước #{step_machine.route_step_id}"
+        log.warning(
+            "Machine delete rejected: machine '%s' assigned to step '%s' in route %s",
+            m.machine_code,
+            step_name,
+            route_desc,
+            extra={"machine_code": m.machine_code, "step_name": step_name, "reason": "assigned_to_route_step"},
+        )
         raise ValueError(
             f"Không thể xóa máy CNC '{m.machine_code}' vì đang được gán cho công đoạn "
             f"'{step_name}' trong quy trình {route_desc}. Vui lòng gỡ máy khỏi quy trình trước khi xóa."
@@ -304,8 +423,135 @@ def delete_machine(db: Session, machine_id: int) -> bool:
         ensure_location_has_no_stock(db, loc, f"xóa máy CNC {m.machine_code}")
 
     for loc in locations_to_release:
+        log.info(
+            "Machine %s slot unassigned for deletion: location_code=%s, position_index=%s",
+            m.machine_code,
+            loc.location_code,
+            loc.position_index,
+            extra={"machine_code": m.machine_code, "station_code": loc.location_code, "position_index": loc.position_index},
+        )
         release_location(loc, db)
 
+    machine_code = m.machine_code
     db.delete(m)
     db.commit()
+    log.info(
+        "Machine deleted: id=%s, machine_code=%s",
+        machine_id,
+        machine_code,
+        extra={"machine_code": machine_code, "machine_id": machine_id},
+    )
     return True
+
+
+def update_machine_status(
+    db: Session,
+    machine_id: int,
+    new_status: str,
+    old_status: Optional[str] = None,
+    reason: Optional[str] = None,
+) -> str:
+    """Update and log CNC machine status transition (IDLE, RUNNING, ERROR, MAINTENANCE)."""
+    machine = db.query(Machine).filter(Machine.id == machine_id).first()
+    if not machine:
+        log.warning(
+            "Machine status update rejected: machine ID %s not found",
+            machine_id,
+            extra={"machine_id": machine_id, "target_status": new_status, "reason": "machine_not_found"},
+        )
+        raise ValueError(f"Không tìm thấy máy CNC với ID {machine_id}")
+
+    target = new_status.upper().strip()
+    if target not in VALID_MACHINE_STATUSES:
+        log.warning(
+            "Machine status update rejected: invalid status '%s' for machine %s (valid: %s)",
+            new_status,
+            machine.machine_code,
+            sorted(VALID_MACHINE_STATUSES),
+            extra={"machine_code": machine.machine_code, "status": new_status, "reason": "invalid_machine_status"},
+        )
+        raise ValueError(
+            f"Trạng thái máy không hợp lệ: {new_status}. Phải là một trong: {', '.join(sorted(VALID_MACHINE_STATUSES))}"
+        )
+
+    current = old_status or getattr(machine, "status", None) or "IDLE"
+    log.info(
+        "Machine %s status changed: %s -> %s (reason: %s)",
+        machine.machine_code,
+        current,
+        target,
+        reason or "operator_update",
+        extra={
+            "machine_code": machine.machine_code,
+            "old_status": current,
+            "new_status": target,
+            "reason": reason or "operator_update",
+        },
+    )
+    if hasattr(machine, "status"):
+        machine.status = target
+        db.commit()
+    return target
+
+
+def assign_machine_to_step(db: Session, machine_id: int, route_step_id: int) -> RouteStepMachine:
+    """Assign machine to a route step and log transition."""
+    machine = db.query(Machine).filter(Machine.id == machine_id).first()
+    if not machine:
+        log.warning(
+            "Assign machine to step rejected: machine ID %s not found",
+            machine_id,
+            extra={"machine_id": machine_id, "route_step_id": route_step_id, "reason": "machine_not_found"},
+        )
+        raise ValueError(f"Không tìm thấy máy CNC với ID {machine_id}")
+
+    existing = (
+        db.query(RouteStepMachine)
+        .filter(RouteStepMachine.machine_id == machine_id, RouteStepMachine.route_step_id == route_step_id)
+        .first()
+    )
+    if existing:
+        log.warning(
+            "Assign machine to step rejected: machine %s already assigned to route step %s",
+            machine.machine_code,
+            route_step_id,
+            extra={"machine_code": machine.machine_code, "route_step_id": route_step_id, "reason": "already_assigned"},
+        )
+        return existing
+
+    link = RouteStepMachine(route_step_id=route_step_id, machine_id=machine_id)
+    db.add(link)
+    db.commit()
+    log.info(
+        "Machine %s assigned to route step %s",
+        machine.machine_code,
+        route_step_id,
+        extra={"machine_code": machine.machine_code, "route_step_id": route_step_id},
+    )
+    return link
+
+
+def unassign_machine_from_step(db: Session, machine_id: int, route_step_id: int) -> None:
+    """Unassign machine from a route step and log transition."""
+    machine = db.query(Machine).filter(Machine.id == machine_id).first()
+    code = machine.machine_code if machine else f"ID={machine_id}"
+    deleted = (
+        db.query(RouteStepMachine)
+        .filter(RouteStepMachine.machine_id == machine_id, RouteStepMachine.route_step_id == route_step_id)
+        .delete(synchronize_session=False)
+    )
+    db.commit()
+    if deleted:
+        log.info(
+            "Machine %s unassigned from route step %s",
+            code,
+            route_step_id,
+            extra={"machine_code": code, "route_step_id": route_step_id},
+        )
+    else:
+        log.warning(
+            "Unassign machine from step rejected: link not found between machine %s and step %s",
+            code,
+            route_step_id,
+            extra={"machine_code": code, "route_step_id": route_step_id, "reason": "link_not_found"},
+        )

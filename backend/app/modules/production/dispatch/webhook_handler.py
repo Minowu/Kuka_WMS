@@ -5,7 +5,7 @@ from typing import Any, Callable, Optional
 
 from sqlalchemy.orm import Session
 
-from app.core.logger import get_logger
+from app.core.logger import get_logger, bind_context
 from app.modules.production.dispatch.kuka_fleet_client import KukaFleetClient, fail_and_release
 from app.modules.production.production_models import (
     FLEET_MISSION_STATUS,
@@ -17,7 +17,7 @@ from app.modules.warehouse.item_stock.item_stock_model import ItemStock
 from app.modules.warehouse.location_map.location_model import Location
 from app.socket.event_bus import publish_event, resolve_location_recipient_user_ids
 
-logger = get_logger("main")
+logger = get_logger("wms.fleet.webhook")
 
 
 class WebhookHandler:
@@ -61,8 +61,14 @@ class WebhookHandler:
             ry_val = payload.get("robotY")
             if ry_val not in ("", None):
                 robot_y = float(ry_val)
-        except (ValueError, TypeError):
-            pass
+        except (ValueError, TypeError) as exc:
+            logger.warning(
+                "Failed parsing robot coordinates (robotX=%s, robotY=%s): %s",
+                payload.get("robotX"),
+                payload.get("robotY"),
+                exc,
+                exc_info=True,
+            )
 
         # 1. Audit log in task_status
         record = TaskStatus(
@@ -92,17 +98,51 @@ class WebhookHandler:
             .first()
         )
         if not fleet_task:
-            logger.warning("Received status '%s' for unknown missionCode=%s", raw_status, mission_code_str)
+            logger.warning(
+                "Received status '%s' for unknown missionCode=%s",
+                raw_status,
+                mission_code_str,
+                extra={"mission_code": mission_code_str, "raw_status": raw_status, "reason": "unknown_mission_code"},
+            )
             db.commit()
             db.refresh(record)
             return record
 
+        bind_context(fleet_task_id=fleet_task.id)
+
         # 3. Check for immutable final states
         if fleet_task.status in ("completed", "failed", "cancelled"):
-            logger.info("FleetTask %s already in terminal state '%s', ignoring event '%s'", mission_code_str, fleet_task.status, raw_status)
+            logger.warning(
+                "Duplicate/terminal webhook event ignored for FleetTask %s (mission_code=%s): already in terminal state '%s', received event '%s'",
+                fleet_task.id,
+                mission_code_str,
+                fleet_task.status,
+                raw_status,
+                extra={
+                    "fleet_task_id": fleet_task.id,
+                    "mission_code": mission_code_str,
+                    "status": fleet_task.status,
+                    "raw_status": raw_status,
+                    "reason": "terminal_state",
+                },
+            )
             db.commit()
             db.refresh(record)
             return record
+
+        if fleet_task.last_mission_status == raw_status:
+            logger.debug(
+                "Duplicate webhook status event '%s' received for FleetTask %s (mission_code=%s)",
+                raw_status,
+                fleet_task.id,
+                mission_code_str,
+                extra={
+                    "fleet_task_id": fleet_task.id,
+                    "mission_code": mission_code_str,
+                    "raw_status": raw_status,
+                    "reason": "duplicate_event",
+                },
+            )
 
         now = datetime.now(timezone.utc)
         fleet_task.last_mission_status = raw_status
@@ -128,9 +168,40 @@ class WebhookHandler:
 
         # 4. State transition
         mapped_status = FLEET_MISSION_STATUS.get(raw_status) or MAPPING_STATUS.get(raw_status)
+        old_status = fleet_task.status
+
+        if not mapped_status and raw_status not in ("MOVE_BEGIN", "ARRIVED", "UP_CONTAINER", "DOWN_CONTAINER", "COMPLETED"):
+            logger.warning(
+                "Unmapped webhook status event '%s' received for FleetTask %s (mission_code=%s): no mapping in FLEET_MISSION_STATUS",
+                raw_status,
+                fleet_task.id,
+                mission_code_str,
+                extra={
+                    "fleet_task_id": fleet_task.id,
+                    "mission_code": mission_code_str,
+                    "raw_status": raw_status,
+                    "reason": "unmapped_status",
+                },
+            )
 
         if raw_status in ("MOVE_BEGIN", "ARRIVED"):
             fleet_task.status = "in_progress"
+            if old_status != "in_progress":
+                logger.info(
+                    "FleetTask %s status mapping transition: %s -> in_progress (KUKA status: %s, mapped: %s)",
+                    mission_code_str,
+                    old_status,
+                    raw_status,
+                    mapped_status,
+                    extra={
+                        "fleet_task_id": fleet_task.id,
+                        "mission_code": mission_code_str,
+                        "old_status": old_status,
+                        "new_status": "in_progress",
+                        "raw_status": raw_status,
+                        "mapped_status": mapped_status,
+                    },
+                )
             if fleet_task.request:
                 fleet_task.request.status = "in_progress"
             db.commit()
@@ -148,6 +219,22 @@ class WebhookHandler:
         elif raw_status == "UP_CONTAINER":
             fleet_task.status = "in_progress"
             fleet_task.picked_up_at = now
+            if old_status != "in_progress":
+                logger.info(
+                    "FleetTask %s status mapping transition: %s -> in_progress (KUKA status: %s, mapped: %s)",
+                    mission_code_str,
+                    old_status,
+                    raw_status,
+                    mapped_status,
+                    extra={
+                        "fleet_task_id": fleet_task.id,
+                        "mission_code": mission_code_str,
+                        "old_status": old_status,
+                        "new_status": "in_progress",
+                        "raw_status": raw_status,
+                        "mapped_status": mapped_status,
+                    },
+                )
             if fleet_task.request:
                 fleet_task.request.status = "in_progress"
             if fleet_task.container_id:
@@ -172,6 +259,22 @@ class WebhookHandler:
 
         elif raw_status == "DOWN_CONTAINER":
             fleet_task.status = "in_progress"
+            if old_status != "in_progress":
+                logger.info(
+                    "FleetTask %s status mapping transition: %s -> in_progress (KUKA status: %s, mapped: %s)",
+                    mission_code_str,
+                    old_status,
+                    raw_status,
+                    mapped_status,
+                    extra={
+                        "fleet_task_id": fleet_task.id,
+                        "mission_code": mission_code_str,
+                        "old_status": old_status,
+                        "new_status": "in_progress",
+                        "raw_status": raw_status,
+                        "mapped_status": mapped_status,
+                    },
+                )
             if fleet_task.container_id and fleet_task.dropoff_location_id:
                 cart = db.query(ItemStock).filter(ItemStock.id == fleet_task.container_id).first()
                 if cart:
@@ -190,6 +293,21 @@ class WebhookHandler:
             )
 
         elif raw_status == "COMPLETED" or mapped_status == "completed":
+            logger.info(
+                "FleetTask %s status mapping transition: %s -> completed (KUKA status: %s, mapped: %s)",
+                mission_code_str,
+                old_status,
+                raw_status,
+                mapped_status,
+                extra={
+                    "fleet_task_id": fleet_task.id,
+                    "mission_code": mission_code_str,
+                    "old_status": old_status,
+                    "new_status": "completed",
+                    "raw_status": raw_status,
+                    "mapped_status": mapped_status,
+                },
+            )
             db.commit()
             if on_completed_fn:
                 on_completed_fn(db, mission_code_str)
@@ -207,6 +325,22 @@ class WebhookHandler:
         ):
             term_status = "cancelled" if "cancel" in raw_status.lower() else "failed"
             err_msg = msg or f"Fleet reported {raw_status}"
+            logger.info(
+                "FleetTask %s status mapping transition: %s -> %s (KUKA status: %s, mapped: %s)",
+                mission_code_str,
+                old_status,
+                term_status,
+                raw_status,
+                mapped_status,
+                extra={
+                    "fleet_task_id": fleet_task.id,
+                    "mission_code": mission_code_str,
+                    "old_status": old_status,
+                    "new_status": term_status,
+                    "raw_status": raw_status,
+                    "mapped_status": mapped_status,
+                },
+            )
             # Dùng fail_and_release để mở khóa xe, khôi phục nghiệp vụ và tự động xếp hàng phát
             # sự kiện WebSocket `fleet.task_failed` + `floor.changed` ngay sau khi db.commit()!
             fail_and_release(db, fleet_task, err_msg)
@@ -216,6 +350,18 @@ class WebhookHandler:
                     fleet_task.request.status = "cancelled"
             db.commit()
         else:
+            logger.warning(
+                "Unmapped or unhandled webhook event '%s' for FleetTask %s (mission_code=%s): no FSM transition executed",
+                raw_status,
+                fleet_task.id,
+                mission_code_str,
+                extra={
+                    "fleet_task_id": fleet_task.id,
+                    "mission_code": mission_code_str,
+                    "raw_status": raw_status,
+                    "reason": "unmapped_or_unhandled",
+                },
+            )
             db.commit()
 
         db.refresh(record)
@@ -237,10 +383,26 @@ class WebhookHandler:
         if not fleet_task:
             raise ValueError(f"Không tìm thấy FleetTask '{mission_code}'.")
 
+        bind_context(fleet_task_id=fleet_task.id)
+        old_status = fleet_task.status
         now = datetime.now(timezone.utc)
         fleet_task.status = "completed"
         fleet_task.completed_at = now
         fleet_task.updated_at = now
+
+        if old_status != "completed":
+            logger.info(
+                "FleetTask %s status mapping transition: %s -> completed (via complete_fleet_task)",
+                mission_code,
+                old_status,
+                extra={
+                    "fleet_task_id": fleet_task.id,
+                    "mission_code": mission_code,
+                    "old_status": old_status,
+                    "new_status": "completed",
+                    "kuka_status": "COMPLETED",
+                },
+            )
 
         req_type = None
         created_by = None
