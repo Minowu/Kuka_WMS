@@ -204,17 +204,27 @@ export const CncLineModal: React.FC<CncLineModalProps> = ({
                       )}
                     </div>
 
-                    <button
-                      onClick={() => handleCallButtonClick(st)}
-                      className="w-full min-h-[50px] bg-[#3B82F6] hover:bg-blue-600 text-white rounded-xl font-bold text-sm tracking-wide active:scale-[0.98] transition-all cursor-pointer shadow-md flex items-center justify-center gap-2"
-                    >
-                      <span>GỌI AMR CẤP TỚI</span>
-                      {supported.length > 1 && (
-                        <span className="text-xs bg-blue-900/80 px-2 py-0.5 rounded-full border border-blue-400/40">
-                          {supported.length} Model ▼
-                        </span>
-                      )}
-                    </button>
+                    {supported.length === 0 ? (
+                      <button
+                        disabled
+                        className="w-full min-h-[50px] bg-slate-800/80 text-slate-500 border border-slate-700/60 rounded-xl font-bold text-sm tracking-wide cursor-not-allowed shadow-none flex items-center justify-center gap-2"
+                        title="Máy này chưa được gán bước gia công nào trong Quy trình sản xuất"
+                      >
+                        <span className="text-xs">🔒 CHƯA CẤU HÌNH ROUTE (KHÔNG KHẢ DỤNG)</span>
+                      </button>
+                    ) : (
+                      <button
+                        onClick={() => handleCallButtonClick(st)}
+                        className="w-full min-h-[50px] bg-[#3B82F6] hover:bg-blue-600 text-white rounded-xl font-bold text-sm tracking-wide active:scale-[0.98] transition-all cursor-pointer shadow-md flex items-center justify-center gap-2"
+                      >
+                        <span>GỌI AMR CẤP TỚI</span>
+                        {supported.length > 1 && (
+                          <span className="text-xs bg-blue-900/80 px-2 py-0.5 rounded-full border border-blue-400/40">
+                            {supported.length} Model ▼
+                          </span>
+                        )}
+                      </button>
+                    )}
                   </div>
                 )}
 
