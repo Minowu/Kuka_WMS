@@ -3,11 +3,9 @@ import { matchPath, Navigate, NavLink, useLocation } from "react-router-dom";
 import logo_thado from "@/assets/logo_thadorobot.png";
 import { useLogout } from "@/hooks/useAuth";
 import { useAuthStore } from "@/store/useAuthStore";
-import { useNotificationUnsolvedCount } from "@/hooks/useNotification";
 import { useAppStore } from "@/store/useAppStore";
 import {
   LogoutOutlined,
-  BarChartOutlined,
   ShopOutlined,
   AppstoreOutlined,
   BoxPlotOutlined,
@@ -199,7 +197,6 @@ export default function Sidebar() {
   const role = user?.roles?.[0]?.name;
   const selectedWarehouseId = useAppStore((state) => state.selectedWarehouseId);
   const warehouseId = selectedWarehouseId || 0;
-  const { data: unsolvedCount = 0 } = useNotificationUnsolvedCount(warehouseId);
   const logout = useLogout();
   const [collapsed, setCollapsed] = useState(false);
   const isAdmin = !!user?.access?.is_admin;
@@ -218,6 +215,7 @@ export default function Sidebar() {
 
   return (
     <aside
+      data-warehouse-id={warehouseId}
       className={`relative h-screen bg-slate-900 text-white flex flex-col border-r border-slate-800 transition-all duration-300 cursor-pointer ${collapsed ? "w-[72px]" : "w-64"}`}
       onClick={handleSidebarClick}
     >
@@ -243,13 +241,6 @@ export default function Sidebar() {
       </div>
 
       <nav className="flex flex-col gap-1 flex-1 overflow-y-auto mt-6 px-3 overflow-x-hidden">
-        <SidebarLink
-          to="/report"
-          icon={<BarChartOutlined className="text-lg" />}
-          label="Báo cáo"
-          collapsed={collapsed}
-        />
-
         <SidebarGroup
           label="Sản xuất & Điều phối"
           icon={<ShopOutlined className="text-lg" />}
@@ -274,7 +265,6 @@ export default function Sidebar() {
           icon={<BellOutlined className="text-lg" />}
           label="Thông báo"
           collapsed={collapsed}
-          badge={unsolvedCount}
         />
         <SidebarGroup
           label="Cài đặt hệ thống"
@@ -311,7 +301,7 @@ export default function Sidebar() {
               {username || "User"}
             </div>
             <div className="text-[10px] text-slate-500 uppercase tracking-wider">
-              {user?.roles?.[0]?.name || (isAdmin ? "Admin" : "Operator")}
+              {role || (isAdmin ? "Admin" : "Operator")}
             </div>
           </div>
         </div>
