@@ -210,7 +210,7 @@ export const CncLineModal: React.FC<CncLineModalProps> = ({
                         className="w-full min-h-[50px] bg-slate-800/80 text-slate-500 border border-slate-700/60 rounded-xl font-bold text-sm tracking-wide cursor-not-allowed shadow-none flex items-center justify-center gap-2"
                         title="Máy này chưa được gán bước gia công nào trong Quy trình sản xuất"
                       >
-                        <span className="text-xs">🔒 CHƯA CẤU HÌNH ROUTE (KHÔNG KHẢ DỤNG)</span>
+                        <span className="text-xs">CHƯA CẤU HÌNH</span>
                       </button>
                     ) : (
                       <button

@@ -13,7 +13,7 @@ from app.modules.auth.auth_model import User
 from app.modules.production import route_service
 from app.modules.production.dispatch_service import dispatch_service
 from app.modules.production.production_celery_task import persist_task_status
-from app.modules.production.production_models import FleetTask, Machine, ProductionRoute, RouteStep, RouteStepMachine, TransportRequest, UserLocation
+from app.modules.production.production_models import FleetTask, Machine, ProductionRoute, RouteStep, RouteStepMachine, TransportQueue, TransportRequest, UserLocation
 from app.modules.production.route_schema import (
     CallMaterialRequest,
     ContainerActionRequest,
@@ -37,10 +37,12 @@ from app.modules.warehouse.item_stock.item_stock_model import ItemStock
 from app.modules.warehouse.location_map.location_model import Location
 
 logger = get_logger("main")
+webhook_log = get_logger("wms.fleet.webhook")
 router = APIRouter()
 
 from app.modules.production.station_api import station_router as stations_router
 from app.modules.production.machine_api import machine_router as machines_router
+from app.modules.production.andon_api import andon_router
 
 routes_router = APIRouter(tags=["Production - Routes"])
 dispatch_router = APIRouter(tags=["Production - Dispatch Engine"])
@@ -326,10 +328,16 @@ def receive_task_status(payload: dict[str, Any], db: DbSession) -> dict[str, Any
     Luôn trả về HTTP 200 theo quy định của KUKA Fleet.
     """
     try:
+        webhook_log.info(
+            "Fleet webhook received", extra={"payload": payload},
+        )
+    except Exception:  # logging must never break the webhook contract
+        pass
+    try:
         dispatch_service.receive_task_status(db, payload)
     except Exception as e:
         db.rollback()
-        logger.exception("Error processing KUKA Fleet webhook (transaction rolled back): %s", e)
+        webhook_log.exception("Error processing KUKA Fleet webhook (transaction rolled back): %s", e)
     return {"code": 0, "message": "success"}
 
 
@@ -897,6 +905,7 @@ def update_user_locations(
 router.include_router(routes_router)
 router.include_router(stations_router)
 router.include_router(machines_router)
+router.include_router(andon_router)
 router.include_router(dispatch_router)
 router.include_router(pda_router)
 router.include_router(user_locations_router)
