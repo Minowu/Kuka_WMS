@@ -213,6 +213,8 @@ def list_locations_for_map(db: Session, warehouse_id: int) -> LocationsForMapRes
 
     reserved_location_ids: set[int] = set()
     in_transit_pickup_ids: set[int] = set()
+    pickup_task_map = {}
+    dropoff_task_map = {}
     try:
         from app.modules.production.production_models import FleetTask, TransportRequest
         active_fleet_tasks = (
@@ -220,8 +222,10 @@ def list_locations_for_map(db: Session, warehouse_id: int) -> LocationsForMapRes
             .filter(FleetTask.status.in_(["created", "sent", "dispatched", "in_progress", "executing"]))
             .all()
         )
-        reserved_location_ids = {t.dropoff_location_id for t in active_fleet_tasks if t.dropoff_location_id}
-        in_transit_pickup_ids = {t.pickup_location_id for t in active_fleet_tasks if t.pickup_location_id}
+        pickup_task_map = {t.pickup_location_id: t for t in active_fleet_tasks if t.pickup_location_id}
+        dropoff_task_map = {t.dropoff_location_id: t for t in active_fleet_tasks if t.dropoff_location_id}
+        reserved_location_ids = set(dropoff_task_map.keys())
+        in_transit_pickup_ids = set(pickup_task_map.keys())
 
         active_requests = (
             db.query(TransportRequest)
@@ -247,30 +251,31 @@ def list_locations_for_map(db: Session, warehouse_id: int) -> LocationsForMapRes
                 quantity=str(stock.quantity),
             )
             for stock in (loc.stocks or [])
-            if stock.is_active
-            and stock.quantity is not None
+            if stock.quantity is not None
             and stock.quantity > 0
             and (
                 getattr(stock, "stock_level", None) is None or getattr(stock, "stock_level", 1) <= 1
             )
         ]
-        for assigned in _assigned_stocks_for_location(loc.id):
-            stocks.append(
-                MapLocationStockItem(
-                    sku=assigned.get("item_sku") or "",
-                    lot_number=assigned.get("lot_number"),
-                    lot_number_from=assigned.get("lot_number"),
-                    lot_number_to=assigned.get("lot_number"),
-                    quantity=str(assigned.get("quantity") or 0),
-                )
-            )
-        active_stock = next((s for s in (loc.stocks or []) if s.is_active and s.container_code), None)
+        active_stock = next(
+            (s for s in (loc.stocks or []) if s.quantity is not None and s.quantity > 0),
+            next((s for s in (loc.stocks or []) if s.container_code), None)
+        )
         active_container = active_stock.container_code if active_stock else None
+        model_name = active_stock.item.sku if (active_stock and active_stock.item) else None
+        current_stage = active_stock.current_stage_level if active_stock else None
 
-        if loc.id in reserved_location_ids:
+        transit_target = None
+        if loc.id in dropoff_task_map:
             status = "reserved"
-        elif loc.id in in_transit_pickup_ids or (active_stock and getattr(active_stock, "is_locked", False)):
+            task = dropoff_task_map[loc.id]
+            src_name = task.pickup_location.location_name if task.pickup_location else "trạm nguồn"
+            transit_target = f"Từ {src_name}"
+        elif loc.id in pickup_task_map or (active_stock and getattr(active_stock, "is_locked", False)):
             status = "in_transit"
+            task = pickup_task_map.get(loc.id)
+            dst_name = task.dropoff_location.location_name if (task and task.dropoff_location) else "trạm đích"
+            transit_target = f"Đến {dst_name}"
         elif stocks or active_container:
             status = "has_stock"
         else:
@@ -291,6 +296,11 @@ def list_locations_for_map(db: Session, warehouse_id: int) -> LocationsForMapRes
                 location_label=getattr(loc, "location_label", None),
                 location_type=getattr(loc, "location_type", None),
                 container_code=active_container,
+                model_name=model_name,
+                current_stage_level=current_stage,
+                transit_target_name=transit_target,
+                machine_code=loc.machine.machine_code if loc.machine else None,
+                position_index=getattr(loc, "position_index", None),
                 row=getattr(loc, "row", None),
                 column=getattr(loc, "column", None),
                 level=getattr(loc, "level", None),
@@ -376,6 +386,69 @@ def get_location_detail(db: Session, location_id: int) -> LocationDetailResponse
     if loc_resp.status == "empty" and any(s.status == "assigned" for s in item_stock):
         loc_resp = loc_resp.model_copy(update={"status": "has_stock"})
 
+    active_stock = next(
+        (s for s in (location.stocks or []) if s.quantity is not None and s.quantity > 0),
+        next((s for s in (location.stocks or []) if s.container_code), None)
+    )
+    container_code = active_stock.container_code if active_stock else None
+    model_name = active_stock.item.sku if (active_stock and active_stock.item) else None
+    current_stage = active_stock.current_stage_level if active_stock else None
+
+    stage_name = None
+    if active_stock:
+        if location.location_type == "RAW_MATERIAL" or current_stage == 0:
+            stage_name = "Phôi thô chờ gia công"
+        elif location.location_type == "WASHING_SLOT":
+            stage_name = "Chờ tẩy rửa thành phẩm"
+        elif location.location_type == "EMPTY_CART_BUFFER":
+            stage_name = "Xe rỗng sẵn sàng cấp phôi"
+        else:
+            # Tra cứu tên công đoạn thực tế từ RouteStep trong DB của Model này
+            try:
+                from app.modules.production.production_models import ProductionRoute, RouteStep
+                step = (
+                    db.query(RouteStep)
+                    .join(ProductionRoute, ProductionRoute.id == RouteStep.route_id)
+                    .filter(
+                        ProductionRoute.item_id == active_stock.item_id,
+                        ProductionRoute.is_active.is_(True),
+                        RouteStep.stage_level == current_stage,
+                    )
+                    .order_by(ProductionRoute.version.desc())
+                    .first()
+                )
+                if step and step.step_name:
+                    stage_name = step.step_name
+                else:
+                    stage_name = f"Công đoạn {current_stage}"
+            except Exception:
+                stage_name = f"Công đoạn {current_stage}"
+
+    machine_code = location.machine.machine_code if location.machine else None
+    machine_name = location.machine.machine_name if location.machine else None
+    position_name = f"Vị trí POS{location.position_index}" if location.position_index else None
+
+    transit_info = None
+    try:
+        from app.modules.production.production_models import FleetTask
+        active_task = (
+            db.query(FleetTask)
+            .filter(
+                (FleetTask.pickup_location_id == location_id) | (FleetTask.dropoff_location_id == location_id),
+                FleetTask.status.in_(["created", "sent", "dispatched", "in_progress", "executing"])
+            )
+            .first()
+        )
+        if active_task:
+            if active_task.pickup_location_id == location_id:
+                dest = active_task.dropoff_location.location_name if active_task.dropoff_location else "trạm đích"
+                transit_info = f"Đang chuyển đến {dest}"
+            elif active_task.dropoff_location_id == location_id:
+                src = active_task.pickup_location.location_name if active_task.pickup_location else "trạm nguồn"
+                transit_info = f"Đang chờ xe từ {src}"
+    except Exception:
+        pass
+
     return LocationDetailResponse(
         location=loc_resp,
         item_stock=item_stock,
@@ -383,6 +456,15 @@ def get_location_detail(db: Session, location_id: int) -> LocationDetailResponse
             item_stock_count=len(item_stock),
             total_quantity=str(total_qty),
         ),
+        container_code=container_code,
+        model_name=model_name,
+        quantity=str(total_qty) if total_qty > 0 else (str(active_stock.quantity) if active_stock else None),
+        current_stage_level=current_stage,
+        stage_name=stage_name,
+        machine_code=machine_code,
+        machine_name=machine_name,
+        position_name=position_name,
+        transit_info=transit_info,
     )
 
 

@@ -213,12 +213,18 @@ class MapLocationStockItem(BaseModel):
 
 
 class MapLocationItem(BaseModel):
+    model_config = ConfigDict(protected_namespaces=())
     id: int
     location_code: str
     location_name: Optional[str] = None
     location_label: Optional[str] = None
     location_type: Optional[str] = None
     container_code: Optional[str] = None
+    model_name: Optional[str] = None
+    current_stage_level: Optional[int] = None
+    transit_target_name: Optional[str] = None
+    machine_code: Optional[str] = None
+    position_index: Optional[int] = None
     row: Optional[str] = None
     column: Optional[str] = None
     level: Optional[str] = None
@@ -264,9 +270,19 @@ class LocationDetailSummary(BaseModel):
 
 
 class LocationDetailResponse(BaseModel):
+    model_config = ConfigDict(protected_namespaces=())
     location: LocationResponse
     item_stock: list[LocationDetailStockItem]
     summary: LocationDetailSummary
+    container_code: Optional[str] = None
+    model_name: Optional[str] = None
+    quantity: Optional[str] = None
+    current_stage_level: Optional[int] = None
+    stage_name: Optional[str] = None
+    machine_code: Optional[str] = None
+    machine_name: Optional[str] = None
+    position_name: Optional[str] = None
+    transit_info: Optional[str] = None
 
 
 class LocationQrPrintRequest(BaseModel):

@@ -376,7 +376,8 @@ const WarehouseMapCanvas: React.FC<WarehouseMapCanvasProps> = ({
           ctx.fillText('GIU CHO', x, y - fontSize * 0.6, maxTextWidth);
           ctx.font = '500 ' + (fontSize * 0.85) + 'px sans-serif';
           ctx.fillStyle = '#d97706';
-          ctx.fillText(stationTitle, x, y + fontSize * 0.7, maxTextWidth);
+          const reservedLabel = locDetail?.transit_target_name || stationTitle;
+          ctx.fillText(reservedLabel, x, y + fontSize * 0.7, maxTextWidth);
           ctx.restore();
         } else if (isInTransit && !isSelected) {
           ctx.save();
@@ -388,7 +389,8 @@ const WarehouseMapCanvas: React.FC<WarehouseMapCanvasProps> = ({
           ctx.fillText('DANG CHUYEN', x, y - fontSize * 0.6, maxTextWidth);
           ctx.font = '500 ' + (fontSize * 0.85) + 'px sans-serif';
           ctx.fillStyle = '#2563eb';
-          ctx.fillText(locDetail?.container_code ? 'CONT: ' + locDetail.container_code : stationTitle, x, y + fontSize * 0.7, maxTextWidth);
+          const transitLabel = locDetail?.transit_target_name || (locDetail?.container_code ? 'CONT: ' + locDetail.container_code : stationTitle);
+          ctx.fillText(transitLabel, x, y + fontSize * 0.7, maxTextWidth);
           ctx.restore();
         } else if (isFull && !isSelected) {
           ctx.save();
@@ -402,8 +404,9 @@ const WarehouseMapCanvas: React.FC<WarehouseMapCanvasProps> = ({
           ctx.font = '600 ' + fontSize + 'px sans-serif';
 
           const stock = locDetail?.item_stock?.[0];
-          const containerLabel = locDetail?.container_code ? 'CONT: ' + locDetail.container_code : (stock?.sku || 'CO HANG');
-          const qtyText = stock ? 'Qty: ' + formatQuantity(stock.quantity, '0') : (stationTitle || 'Dang co phoi');
+          const modelName = locDetail?.model_name || stock?.sku;
+          const containerLabel = modelName || (locDetail?.container_code ? 'CONT: ' + locDetail.container_code : 'CO PHOI');
+          const qtyText = stock ? `${formatQuantity(stock.quantity, '0')} pcs` : (stationTitle || '');
 
           ctx.fillText(containerLabel, x, y - fontSize * 0.6, maxTextWidth);
           ctx.font = '400 ' + (fontSize * 0.85) + 'px sans-serif';
@@ -707,7 +710,7 @@ const WarehouseMapCanvas: React.FC<WarehouseMapCanvasProps> = ({
 
       if (closest) {
         setSelectedNode(closest);
-        const loc = fullLocationsMapRef.current.get(closest.content);
+        const loc = fullLocationsMapRef.current.get(closest.content) || fullLocationsMapRef.current.get(closest.name);
         setSelectedLocationId(loc?.id);
         if (!hideDrawer) setDrawerVisible(true);
 

@@ -184,6 +184,11 @@ export interface FullLocationDetail {
   location_label?: string | null;
   location_type?: string | null;
   container_code?: string | null;
+  model_name?: string | null;
+  current_stage_level?: number | null;
+  transit_target_name?: string | null;
+  machine_code?: string | null;
+  position_index?: number | null;
   bin_code?: string | null;
   row: string | null;
   column: string | null;
@@ -237,4 +242,13 @@ export interface WarehouseLocationItemStockDetail {
     item_stock_count: number;
     total_quantity: string;
   };
+  container_code?: string | null;
+  model_name?: string | null;
+  quantity?: string | null;
+  current_stage_level?: number | null;
+  stage_name?: string | null;
+  machine_code?: string | null;
+  machine_name?: string | null;
+  position_name?: string | null;
+  transit_info?: string | null;
 }
