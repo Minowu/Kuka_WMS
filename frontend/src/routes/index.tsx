@@ -34,6 +34,7 @@ export default function AppRoutes() {
           </ProtectedRoute>
         }
       />
+      <Route path="/pda/raw" element={<Navigate to="/pda/raw-material" replace />} />
       <Route
         path="/pda/cnc"
         element={
@@ -52,9 +53,9 @@ export default function AppRoutes() {
       />
 
       {/* ── TV Andon Displays (Fullscreen 16:9 / 50"-65" TV display - Public Access) ── */}
-      <Route path="/tv/raw-material" element={<RawMaterialAndonPage />} />
-      <Route path="/tv/raw-material-queue" element={<Navigate to="/tv/raw-material" replace />} />
-      <Route path="/tv" element={<Navigate to="/tv/raw-material" replace />} />
+      <Route path="/tv" element={<RawMaterialAndonPage />} />
+      <Route path="/tv/raw-material" element={<Navigate to="/tv" replace />} />
+      <Route path="/tv/raw-material-queue" element={<Navigate to="/tv" replace />} />
 
       {/* Redirect /pda và /caller trực tiếp theo quyền của tài khoản */}
       <Route

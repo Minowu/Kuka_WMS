@@ -50,7 +50,7 @@ export default function RawMaterialAndonPage() {
   // Initial fetch and 3s polling fallback (works for both public and logged-in displays)
   useEffect(() => {
     loadData();
-    const pollInterval = window.setInterval(loadData, 3000);
+    const pollInterval = window.setInterval(loadData, 5000);
     return () => window.clearInterval(pollInterval);
   }, [loadData]);
 
