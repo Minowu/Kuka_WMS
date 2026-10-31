@@ -1,5 +1,4 @@
 import React, { useState } from 'react';
-import { QrCameraOverlay } from '@/components/qr-scan/QrCameraOverlay';
 import type { PartModel, RawMaterialPosition } from '@/types/pda';
 
 interface RawMaterialWizardProps {
@@ -20,7 +19,6 @@ export const RawMaterialWizard: React.FC<RawMaterialWizardProps> = ({
   const [selectedPositionName, setSelectedPositionName] = useState<string>('');
   const [selectedModel, setSelectedModel] = useState<string>('');
   const [rackId, setRackId] = useState<string>('');
-  const [isScanningCamera, setIsScanningCamera] = useState<boolean>(false);
 
   // Bước 1: 1-Chạm Chọn Vị Trí -> Chuyển ngay Bước 2 (Chỉ khi vị trí TRỐNG)
   const handleSelectPosition = (pos: RawMaterialPosition) => {
@@ -44,14 +42,6 @@ export const RawMaterialWizard: React.FC<RawMaterialWizardProps> = ({
     setSelectedModel(modelId);
     setRackId('');
     setCurrentStep(3);
-  };
-
-  // Quét QR qua Camera
-  const handleCameraScanSuccess = (text: string) => {
-    setIsScanningCamera(false);
-    const cleanText = text.trim();
-    setRackId(cleanText);
-    showToast(`Đã nhận diện: ${cleanText}`, 'success');
   };
 
   // Bước 3: Xác nhận Cấp Phôi
@@ -271,15 +261,6 @@ export const RawMaterialWizard: React.FC<RawMaterialWizardProps> = ({
             />
           </div>
 
-          <div className="mb-4">
-            <button
-              onClick={() => setIsScanningCamera(true)}
-              className="w-full min-h-[48px] bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-xl font-bold text-xs active:scale-95 flex items-center justify-center gap-2"
-            >
-              📷 Quét Camera QR Khay Phôi
-            </button>
-          </div>
-
           <div className="mt-auto pt-2">
             <button
               onClick={handleConfirmSupply}
@@ -291,13 +272,6 @@ export const RawMaterialWizard: React.FC<RawMaterialWizardProps> = ({
         </div>
       )}
 
-      {isScanningCamera && (
-        <QrCameraOverlay
-          title="Quét QR Rack Phôi"
-          onScan={handleCameraScanSuccess}
-          onClose={() => setIsScanningCamera(false)}
-        />
-      )}
     </div>
   );
 };
