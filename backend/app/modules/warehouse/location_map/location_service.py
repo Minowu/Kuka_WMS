@@ -29,16 +29,17 @@ from app.modules.warehouse.location_map.location_schema import (
     ZoneMapLayoutNode,
     ZoneMapLayoutResponse,
 )
-from app.modules.warehouse.warehouse_zone.warehouse_model import Warehouse, Zone
+from app.modules.warehouse.warehouse_zone.warehouse_model import Warehouse
 from app.modules.warehouse.item_stock.item_stock_model import (
     ItemStock,
     countable_stock_level_criterion,
 )
-from app.modules.warehouse.transaction_history.history_model import Transaction
-from app.modules.warehouse.stocktake.stocktake_model import StocktakeItemStock
-from app.modules.warehouse.inbound_order.inbound_order_model import InboundOrderDetail
-from app.modules.warehouse.outbound_order.outbound_order_model import (
-    OutboundOrderAllocation,
+from app.modules.production.production_models import (
+    FleetTask,
+    Machine,
+    ProductionRecord,
+    TransportRequest,
+    UserLocation,
 )
 from pathlib import Path
 from uuid import uuid4
@@ -68,13 +69,13 @@ NODE_NAME_MAX_LENGTH = 50
 # before retiring a location and to move them during a remap.
 LOCATION_FK_COLUMNS: tuple[tuple[type, str], ...] = (
     (ItemStock, "location_id"),
-    (StocktakeItemStock, "location_id"),
-    (Transaction, "from_location_id"),
-    (Transaction, "to_location_id"),
-    (InboundOrderDetail, "from_location_id"),
-    (InboundOrderDetail, "to_location_id"),
-    (OutboundOrderAllocation, "from_location_id"),
-    (OutboundOrderAllocation, "to_location_id"),
+    (ItemStock, "destination_location_id"),
+    (TransportRequest, "source_location_id"),
+    (TransportRequest, "destination_location_id"),
+    (FleetTask, "pickup_location_id"),
+    (FleetTask, "dropoff_location_id"),
+    (ProductionRecord, "location_id"),
+    (UserLocation, "location_id"),
 )
 
 
@@ -106,14 +107,29 @@ def _ensure_warehouse_and_zone(
     if not db.query(Warehouse).filter(Warehouse.id == warehouse_id).first():
         raise ValueError(f"Warehouse id not found: {warehouse_id}")
 
-    if zone_id is None:
-        return  # ✅ optional zone — dừng ở đây
 
-    zone = db.query(Zone).filter(Zone.id == zone_id).first()
-    if not zone:
-        raise ValueError(f"Zone id not found: {zone_id}")
-    if zone.warehouse_id != warehouse_id:
-        raise ValueError("Zone does not belong to the given warehouse")
+def _resolve_or_create_machine(
+    db: Session,
+    machine_code: Optional[str],
+    warehouse_id: int,
+) -> Optional[Machine]:
+    if not machine_code or not str(machine_code).strip():
+        return None
+    code = str(machine_code).strip()
+    machine = db.query(Machine).filter(Machine.machine_code == code).first()
+    if machine is None:
+        machine = Machine(
+            machine_code=code,
+            machine_name=f"Máy {code}",
+            warehouse_id=warehouse_id,
+            is_active=True,
+        )
+        db.add(machine)
+        db.flush()
+    else:
+        if warehouse_id and machine.warehouse_id is None:
+            machine.warehouse_id = warehouse_id
+    return machine
 
 
 def list_locations(
@@ -128,8 +144,6 @@ def list_locations(
     query = _location_query(db, include_inactive=include_inactive)
     if warehouse_id is not None:
         query = query.filter(Location.warehouse_id == warehouse_id)
-    if zone_id is not None:
-        query = query.filter(Location.zone_id == zone_id)
     if q:
         like = f"%{q.strip()}%"
         query = query.filter(
@@ -195,51 +209,101 @@ def list_locations_for_map(db: Session, warehouse_id: int) -> LocationsForMapRes
 
     items: list[MapLocationItem] = []
     location_codes: list[str] = []
-    assigned_ids = location_ids_with_assigned_qr() 
+    assigned_ids = location_ids_with_assigned_qr()
+
+    reserved_location_ids: set[int] = set()
+    in_transit_pickup_ids: set[int] = set()
+    pickup_task_map = {}
+    dropoff_task_map = {}
+    try:
+        from app.modules.production.production_models import FleetTask, TransportRequest
+        active_fleet_tasks = (
+            db.query(FleetTask)
+            .filter(FleetTask.status.in_(["created", "sent", "dispatched", "in_progress", "executing"]))
+            .all()
+        )
+        pickup_task_map = {t.pickup_location_id: t for t in active_fleet_tasks if t.pickup_location_id}
+        dropoff_task_map = {t.dropoff_location_id: t for t in active_fleet_tasks if t.dropoff_location_id}
+        reserved_location_ids = set(dropoff_task_map.keys())
+        in_transit_pickup_ids = set(pickup_task_map.keys())
+
+        active_requests = (
+            db.query(TransportRequest)
+            .filter(TransportRequest.status.in_(["queued_for_cart", "in_progress"]))
+            .all()
+        )
+        for r in active_requests:
+            if r.destination_location_id:
+                reserved_location_ids.add(r.destination_location_id)
+    except Exception:
+        pass 
 
     for loc in locations:
         stocks = [
             MapLocationStockItem(
                 sku=stock.item.sku if stock.item else "",
-                lot_number_from=stock.lot_number_from,
-                lot_number_to=stock.lot_number_to,
+                lot_number_from=getattr(stock, "lot_number_from", None),
+                lot_number_to=getattr(stock, "lot_number_to", None),
                 lot_number=format_lot_number_display(
-                    stock.lot_number_from,
-                    stock.lot_number_to,
+                    getattr(stock, "lot_number_from", None),
+                    getattr(stock, "lot_number_to", None),
                 ),
                 quantity=str(stock.quantity),
             )
             for stock in (loc.stocks or [])
-            if stock.is_active
-            and stock.quantity is not None
+            if stock.quantity is not None
             and stock.quantity > 0
             and (
-                stock.stock_level is None or stock.stock_level <= 1
+                getattr(stock, "stock_level", None) is None or getattr(stock, "stock_level", 1) <= 1
             )
         ]
-        for assigned in _assigned_stocks_for_location(loc.id):
-            stocks.append(
-                MapLocationStockItem(
-                    sku=assigned.get("item_sku") or "",
-                    lot_number=assigned.get("lot_number"),
-                    lot_number_from=assigned.get("lot_number"),
-                    lot_number_to=assigned.get("lot_number"),
-                    quantity=str(assigned.get("quantity") or 0),
-                )
-            )
-        status = loc.status or ("has_stock" if stocks else "empty")
+        active_stock = next(
+            (s for s in (loc.stocks or []) if s.quantity is not None and s.quantity > 0),
+            next((s for s in (loc.stocks or []) if s.container_code), None)
+        )
+        active_container = active_stock.container_code if active_stock else None
+        model_name = active_stock.item.sku if (active_stock and active_stock.item) else None
+        current_stage = active_stock.current_stage_level if active_stock else None
+
+        transit_target = None
+        if loc.id in dropoff_task_map:
+            status = "reserved"
+            task = dropoff_task_map[loc.id]
+            src_name = task.pickup_location.location_name if task.pickup_location else "trạm nguồn"
+            transit_target = f"Từ {src_name}"
+        elif loc.id in pickup_task_map or (active_stock and getattr(active_stock, "is_locked", False)):
+            status = "in_transit"
+            task = pickup_task_map.get(loc.id)
+            dst_name = task.dropoff_location.location_name if (task and task.dropoff_location) else "trạm đích"
+            transit_target = f"Đến {dst_name}"
+        elif stocks or active_container:
+            status = "has_stock"
+        else:
+            status = getattr(loc, "status", "empty") or "empty"
+
         status = overlay_status_with_assign_cache(status, loc.id, assigned_ids)
-        if stocks or loc.id in assigned_ids:
+        if stocks or active_container or loc.id in assigned_ids or status in ("reserved", "in_transit", "has_stock"):
             location_codes.append(loc.location_code)
+            if loc.location_label and loc.location_label not in location_codes:
+                location_codes.append(loc.location_label)
+            if loc.location_name and loc.location_name not in location_codes:
+                location_codes.append(loc.location_name)
         items.append(
             MapLocationItem(
                 id=loc.id,
                 location_code=loc.location_code,
                 location_name=loc.location_name,
-                bin_code=loc.bin_code,
-                row=loc.row,
-                column=loc.column,
-                level=loc.level,
+                location_label=getattr(loc, "location_label", None),
+                location_type=getattr(loc, "location_type", None),
+                container_code=active_container,
+                model_name=model_name,
+                current_stage_level=current_stage,
+                transit_target_name=transit_target,
+                machine_code=loc.machine.machine_code if loc.machine else None,
+                position_index=getattr(loc, "position_index", None),
+                row=getattr(loc, "row", None),
+                column=getattr(loc, "column", None),
+                level=getattr(loc, "level", None),
                 map_x=loc.map_x,
                 map_y=loc.map_y,
                 status=status,
@@ -254,148 +318,8 @@ def list_locations_for_map(db: Session, warehouse_id: int) -> LocationsForMapRes
     )
 
 def list_locations_for_zone_map(db: Session, zone_id: int) -> LocationsForMapResponse:
-    zone = db.query(Zone).filter(Zone.id == zone_id).first()
-    if not zone:
-        raise ValueError(f"Zone id not found: {zone_id}")
-
-    locations = (
-        _location_query(db, include_inactive=False)
-        .filter(Location.zone_id == zone_id)
-        .order_by(Location.id)
-        .all()
-    )
-
-    items: list[MapLocationItem] = []
-    location_codes: list[str] = []
-    assigned_ids = location_ids_with_assigned_qr() 
-
-    for loc in locations:
-        stocks = [
-            MapLocationStockItem(
-                sku=stock.item.sku if stock.item else "",
-                lot_number_from=stock.lot_number_from,
-                lot_number_to=stock.lot_number_to,
-                lot_number=format_lot_number_display(
-                    stock.lot_number_from,
-                    stock.lot_number_to,
-                ),
-                quantity=str(stock.quantity),
-            )
-            for stock in (loc.stocks or [])
-            if stock.is_active
-            and stock.quantity is not None
-            and stock.quantity > 0
-            and (
-                stock.stock_level is None or stock.stock_level <= 1
-            )
-        ]
-        for assigned in _assigned_stocks_for_location(loc.id):
-            stocks.append(
-                MapLocationStockItem(
-                    sku=assigned.get("item_sku") or "",
-                    lot_number=assigned.get("lot_number"),
-                    lot_number_from=assigned.get("lot_number"),
-                    lot_number_to=assigned.get("lot_number"),
-                    quantity=str(assigned.get("quantity") or 0),
-                )
-            )
-        status = loc.status or ("has_stock" if stocks else "empty")
-        status = overlay_status_with_assign_cache(status, loc.id, assigned_ids)
-        if stocks or loc.id in assigned_ids:
-            location_codes.append(loc.location_code)
-        items.append(
-            MapLocationItem(
-                id=loc.id,
-                location_code=loc.location_code,
-                location_name=loc.location_name,
-                bin_code=loc.bin_code,
-                row=loc.row,
-                column=loc.column,
-                level=loc.level,
-                map_x=loc.map_x,
-                map_y=loc.map_y,
-                status=status,
-                item_stock=stocks,
-            )
-        )
-
-    return LocationsForMapResponse(
-        warehouse_id=zone.warehouse_id,
-        location_codes=location_codes,
-        locations=items,
-    )
-
-def list_locations_for_zone_map(db: Session, zone_id: int) -> LocationsForMapResponse:
-    zone = db.query(Zone).filter(Zone.id == zone_id).first()
-    if not zone:
-        raise ValueError(f"Zone id not found: {zone_id}")
-
-    locations = (
-        _location_query(db, include_inactive=False)
-        .filter(Location.zone_id == zone_id)
-        .order_by(Location.id)
-        .all()
-    )
-
-    items: list[MapLocationItem] = []
-    location_codes: list[str] = []
-    assigned_ids = location_ids_with_assigned_qr() 
-
-    for loc in locations:
-        stocks = [
-            MapLocationStockItem(
-                sku=stock.item.sku if stock.item else "",
-                lot_number_from=stock.lot_number_from,
-                lot_number_to=stock.lot_number_to,
-                lot_number=format_lot_number_display(
-                    stock.lot_number_from,
-                    stock.lot_number_to,
-                ),
-                quantity=str(stock.quantity),
-            )
-            for stock in (loc.stocks or [])
-            if stock.is_active
-            and stock.quantity is not None
-            and stock.quantity > 0
-            and (
-                stock.stock_level is None or stock.stock_level <= 1
-            )
-        ]
-        for assigned in _assigned_stocks_for_location(loc.id):
-            stocks.append(
-                MapLocationStockItem(
-                    sku=assigned.get("item_sku") or "",
-                    lot_number=assigned.get("lot_number"),
-                    lot_number_from=assigned.get("lot_number"),
-                    lot_number_to=assigned.get("lot_number"),
-                    quantity=str(assigned.get("quantity") or 0),
-                )
-            )
-        status = loc.status or ("has_stock" if stocks else "empty")
-        status = overlay_status_with_assign_cache(status, loc.id, assigned_ids)
-        if stocks or loc.id in assigned_ids:
-            location_codes.append(loc.location_code)
-        items.append(
-            MapLocationItem(
-                id=loc.id,
-                location_code=loc.location_code,
-                location_name=loc.location_name,
-                bin_code=loc.bin_code,
-                row=loc.row,
-                column=loc.column,
-                level=loc.level,
-                map_x=loc.map_x,
-                map_y=loc.map_y,
-                status=status,
-                item_stock=stocks,
-            )
-        )
-
-    return LocationsForMapResponse(
-        warehouse_id=zone.warehouse_id,
-        location_codes=location_codes,
-        locations=items,
-    )
+    """Fallback to warehouse map after Zone table removal."""
+    return list_locations_for_map(db, zone_id)
 
 def _assigned_stocks_for_location(location_id: int) -> list[dict]:
     keys = cache_scan_keys(f"inbound:assign:location:{location_id}:*")
@@ -415,24 +339,24 @@ def get_location_detail(db: Session, location_id: int) -> LocationDetailResponse
     for stock in location.stocks or []:
         if not stock.is_active:
             continue
-        if stock.stock_level is not None and stock.stock_level > 1:
+        stock_level = getattr(stock, "stock_level", None)
+        if stock_level is not None and stock_level > 1:
             continue
         qty = stock.quantity if stock.quantity is not None else Decimal("0")
         if qty <= 0:
             continue
         total_qty += qty
+        lot_from = getattr(stock, "lot_number_from", None)
+        lot_to = getattr(stock, "lot_number_to", None)
         item_stock.append(
             LocationDetailStockItem(
                 id=stock.id,
                 item_id=stock.item_id,
                 sku=stock.item.sku if stock.item else "",
-                lot_number_from=stock.lot_number_from,
-                lot_number_to=stock.lot_number_to,
-                lot_number=format_lot_number_display(
-                    stock.lot_number_from,
-                    stock.lot_number_to,
-                ),
-                expiry_date=stock.expiry_date,
+                lot_number_from=lot_from,
+                lot_number_to=lot_to,
+                lot_number=format_lot_number_display(lot_from, lot_to),
+                expiry_date=getattr(stock, "expiry_date", None),
                 quantity=str(qty),
                 status=stock.status,
             )
@@ -462,6 +386,69 @@ def get_location_detail(db: Session, location_id: int) -> LocationDetailResponse
     if loc_resp.status == "empty" and any(s.status == "assigned" for s in item_stock):
         loc_resp = loc_resp.model_copy(update={"status": "has_stock"})
 
+    active_stock = next(
+        (s for s in (location.stocks or []) if s.quantity is not None and s.quantity > 0),
+        next((s for s in (location.stocks or []) if s.container_code), None)
+    )
+    container_code = active_stock.container_code if active_stock else None
+    model_name = active_stock.item.sku if (active_stock and active_stock.item) else None
+    current_stage = active_stock.current_stage_level if active_stock else None
+
+    stage_name = None
+    if active_stock:
+        if location.location_type == "RAW_MATERIAL" or current_stage == 0:
+            stage_name = "Phôi thô chờ gia công"
+        elif location.location_type == "WASHING_SLOT":
+            stage_name = "Chờ tẩy rửa thành phẩm"
+        elif location.location_type == "EMPTY_CART_BUFFER":
+            stage_name = "Xe rỗng sẵn sàng cấp phôi"
+        else:
+            # Tra cứu tên công đoạn thực tế từ RouteStep trong DB của Model này
+            try:
+                from app.modules.production.production_models import ProductionRoute, RouteStep
+                step = (
+                    db.query(RouteStep)
+                    .join(ProductionRoute, ProductionRoute.id == RouteStep.route_id)
+                    .filter(
+                        ProductionRoute.item_id == active_stock.item_id,
+                        ProductionRoute.is_active.is_(True),
+                        RouteStep.stage_level == current_stage,
+                    )
+                    .order_by(ProductionRoute.version.desc())
+                    .first()
+                )
+                if step and step.step_name:
+                    stage_name = step.step_name
+                else:
+                    stage_name = f"Công đoạn {current_stage}"
+            except Exception:
+                stage_name = f"Công đoạn {current_stage}"
+
+    machine_code = location.machine.machine_code if location.machine else None
+    machine_name = location.machine.machine_name if location.machine else None
+    position_name = f"Vị trí POS{location.position_index}" if location.position_index else None
+
+    transit_info = None
+    try:
+        from app.modules.production.production_models import FleetTask
+        active_task = (
+            db.query(FleetTask)
+            .filter(
+                (FleetTask.pickup_location_id == location_id) | (FleetTask.dropoff_location_id == location_id),
+                FleetTask.status.in_(["created", "sent", "dispatched", "in_progress", "executing"])
+            )
+            .first()
+        )
+        if active_task:
+            if active_task.pickup_location_id == location_id:
+                dest = active_task.dropoff_location.location_name if active_task.dropoff_location else "trạm đích"
+                transit_info = f"Đang chuyển đến {dest}"
+            elif active_task.dropoff_location_id == location_id:
+                src = active_task.pickup_location.location_name if active_task.pickup_location else "trạm nguồn"
+                transit_info = f"Đang chờ xe từ {src}"
+    except Exception:
+        pass
+
     return LocationDetailResponse(
         location=loc_resp,
         item_stock=item_stock,
@@ -469,11 +456,20 @@ def get_location_detail(db: Session, location_id: int) -> LocationDetailResponse
             item_stock_count=len(item_stock),
             total_quantity=str(total_qty),
         ),
+        container_code=container_code,
+        model_name=model_name,
+        quantity=str(total_qty) if total_qty > 0 else (str(active_stock.quantity) if active_stock else None),
+        current_stage_level=current_stage,
+        stage_name=stage_name,
+        machine_code=machine_code,
+        machine_name=machine_name,
+        position_name=position_name,
+        transit_info=transit_info,
     )
 
 
 def upsert_location(db: Session, body: LocationCreate) -> Location:
-    _ensure_warehouse_and_zone(db, body.warehouse_id, body.zone_id)
+    _ensure_warehouse_and_zone(db, body.warehouse_id)
 
     # bin_code is the physical identity; location_code is only the current map node.
     existing = None
@@ -506,7 +502,6 @@ def upsert_location(db: Session, body: LocationCreate) -> Location:
             level=body.level,
             node_name=body.node_name,
             warehouse_id=body.warehouse_id,
-            zone_id=body.zone_id,
             is_active=True,
         ))
     else:
@@ -519,7 +514,6 @@ def upsert_location(db: Session, body: LocationCreate) -> Location:
             level=body.level,
             node_name=body.node_name,
             warehouse_id=body.warehouse_id,
-            zone_id=body.zone_id,
             is_active=True,
         )
         db.add(location)
@@ -535,11 +529,9 @@ def update_location(
         return None
     data = body.model_dump(exclude_unset=True)
     warehouse_id = data.get("warehouse_id", location.warehouse_id)
-    zone_id = data.get("zone_id", location.zone_id)
-    if "warehouse_id" in data or "zone_id" in data:
-        _ensure_warehouse_and_zone(db, warehouse_id, zone_id)
+    if "warehouse_id" in data:
+        _ensure_warehouse_and_zone(db, warehouse_id)
         location.warehouse_id = warehouse_id
-        location.zone_id = zone_id
     if "location_code" in data:
         existing = (
             db.query(Location)
@@ -570,11 +562,35 @@ def update_location(
         location.bin_code = data["bin_code"].strip()
     if "location_name" in data:
         location.location_name = data["location_name"].strip()
-    for field in ("row", "column", "level", "node_name", "is_active", "map_x", "map_y"):
+    for field in (
+        "row",
+        "column",
+        "level",
+        "node_name",
+        "is_active",
+        "map_x",
+        "map_y",
+        "location_type",
+        "machine_code",
+        "position_index",
+        "node_label",
+    ):
         if field in data:
             setattr(location, field, data[field])
+
+    if location.machine_code:
+        machine = _resolve_or_create_machine(
+            db,
+            location.machine_code,
+            warehouse_id,
+        )
+        location.machine_id = machine.id if machine else None
+    elif "machine_code" in data and not data.get("machine_code"):
+        location.machine_id = None
+
     db.flush()
     return location
+
 
 def delete_location(db: Session, location_id: int) -> bool:
     location = get_location_by_id(db, location_id)
@@ -590,23 +606,24 @@ def delete_location(db: Session, location_id: int) -> bool:
     ):
         raise ValueError("Cannot delete location: item stocks still exist")
     if (
-        db.query(Transaction)
+        db.query(FleetTask)
         .filter(
-            (Transaction.from_location_id == location_id)
-            | (Transaction.to_location_id == location_id)
+            ((FleetTask.pickup_location_id == location_id) | (FleetTask.dropoff_location_id == location_id)),
+            FleetTask.status.in_(["created", "sent", "in_progress"]),
         )
         .first()
     ):
-        raise ValueError("Cannot delete location: transactions still exist")
+        raise ValueError("Cannot delete location: active fleet tasks still exist")
     location.is_active = False
     db.commit()
     return True
+
 
 def create_map_metadata(
     db: Session,
     body: MapCreate,
 ) -> WarehouseMap:
-    _ensure_warehouse_and_zone(db, body.warehouse_id, body.zone_id)
+    _ensure_warehouse_and_zone(db, body.warehouse_id)
 
     db.query(WarehouseMap).filter(
         WarehouseMap.warehouse_id == body.warehouse_id,
@@ -615,7 +632,6 @@ def create_map_metadata(
 
     map = WarehouseMap(
         warehouse_id=body.warehouse_id,
-        zone_id=body.zone_id,
         source=body.source,
         is_active=body.is_active,
     )
@@ -623,12 +639,16 @@ def create_map_metadata(
     db.flush()
     return map
 
-async def _save_uploaded_zip(content: bytes, warehouse_id: int) -> Path:
+async def _save_uploaded_zip(
+    content: bytes, warehouse_id: int, filename: Optional[str] = None
+) -> Path:
     STATIC_MAP_DIR.mkdir(parents=True, exist_ok=True)
     save_dir = STATIC_MAP_DIR / f"warehouse_{warehouse_id}"
     save_dir.mkdir(parents=True, exist_ok=True)
 
-    destination = save_dir / f"{warehouse_id}_{uuid4().hex}"
+    is_json = (filename and filename.lower().endswith(".json")) or content.strip().startswith(b"{")
+    ext = ".json" if is_json else ".zip"
+    destination = save_dir / f"{warehouse_id}_{uuid4().hex}{ext}"
 
     if not content:
         raise ValueError("Uploaded file is empty")
@@ -650,12 +670,12 @@ async def import_warehouse_map(
 
     shelves = extract_shelf_nodes_from_zip(content)
     if not shelves:
-        raise ValueError("ZIP không có shelf node hợp lệ")
+        raise ValueError("File bản đồ không có shelf / location node hợp lệ")
 
     source_path: Path | None = None
 
     try:
-        source_path = await _save_uploaded_zip(content, warehouse_id)
+        source_path = await _save_uploaded_zip(content, warehouse_id, upload.filename)
 
         # Single transaction: match + remap + retire + map metadata.
         # Rollback restores every location if a later step fails.
@@ -721,7 +741,7 @@ async def preview_warehouse_map_import(
 
     shelves = extract_shelf_nodes_from_zip(content)
     if not shelves:
-        raise ValueError("ZIP không có shelf node hợp lệ")
+        raise ValueError("File bản đồ không có shelf / location node hợp lệ")
 
     try:
         result = sync_locations_from_map(
@@ -738,42 +758,15 @@ async def preview_warehouse_map_import(
         db.rollback()
 
 def _dedupe_shelves(shelves: list[dict]) -> list[dict]:
-    """Keep one shelf per node number (last wins).
-
-    Duplicate bin codes are a map authoring error, not something to silently drop:
-    two nodes claiming the same bin would make the identity ambiguous forever.
-    """
+    """Keep one shelf per location_code (nodeUuid)."""
     by_code: dict[str, dict] = {}
     for shelf in shelves:
         code = str(shelf["location_code"]).strip()
-        raw_bin = shelf.get("bin_code")
-        bin_code = str(raw_bin).strip() if raw_bin else ""
         by_code[code] = {
             **shelf,
             "location_code": code,
-            "bin_code": bin_code or None,
             "location_name": str(shelf["location_name"]).strip(),
         }
-
-    first_node_for_bin: dict[str, str] = {}
-    duplicates: list[str] = []
-    for shelf in by_code.values():
-        bin_code = shelf["bin_code"]
-        if not bin_code:
-            continue
-        if bin_code in first_node_for_bin:
-            duplicates.append(
-                f"{bin_code} (node {first_node_for_bin[bin_code]} và {shelf['location_code']})"
-            )
-        else:
-            first_node_for_bin[bin_code] = shelf["location_code"]
-
-    if duplicates:
-        raise ValueError(
-            "Map có mã bin bị trùng, mỗi bin phải là duy nhất: "
-            + "; ".join(sorted(duplicates))
-        )
-
     return list(by_code.values())
 
 
@@ -825,61 +818,34 @@ def _shelf_may_take_location(shelf: dict, location: Location) -> bool:
 
 def _match_shelf_to_location(
     shelf: dict,
-    by_bin: dict[str, Location],
-    by_rcl: dict[tuple, Location],
     by_code: dict[str, Location],
     taken: set[int],
 ) -> tuple[Optional[Location], Optional[str]]:
-    shelf_bin = shelf.get("bin_code")
-    if shelf_bin:
-        location = by_bin.get(shelf_bin)
-        if location is not None and location.id not in taken:
-            return location, "bin_code"
-
-    if shelf.get("row") and shelf.get("column"):
-        location = by_rcl.get((shelf["row"], shelf["column"], shelf["level"]))
-        if (
-            location is not None
-            and location.id not in taken
-            and _shelf_may_take_location(shelf, location)
-        ):
-            return location, "row_column_level"
-
     location = by_code.get(shelf["location_code"])
-    if (
-        location is not None
-        and location.id not in taken
-        and _shelf_may_take_location(shelf, location)
-    ):
+    if location is not None and location.id not in taken:
         return location, "location_code"
-
     return None, None
 
 
 def _apply_shelf_to_location(
+    db: Session,
     location: Location,
     shelf: dict,
-    zone_id: Optional[int],
+    warehouse_id: int,
 ) -> None:
-    """Update a matched location in place. location_code is written separately."""
-    location.location_name = shelf["location_name"]
-    if shelf.get("bin_code"):
-        location.bin_code = shelf["bin_code"]
-    for field in ("row", "column", "level"):
-        if shelf.get(field) is not None:
-            setattr(location, field, shelf[field])
-    node_name = shelf.get("node_name")
-    if node_name:
-        location.node_name = node_name[:NODE_NAME_MAX_LENGTH]
-    
+    """Update a matched location in place while preserving user-assigned location_name."""
+    lbl = shelf.get("location_label") or shelf.get("location_name")
+    if lbl is not None:
+        location.location_label = lbl
+    # Neu trc do chua duoc dat ten nghiep vu (van la UNASSIGNED hoac ten cu la so node), cap nhat ten moi
+    if location.location_type == "UNASSIGNED" or not location.location_name:
+        location.location_name = shelf["location_name"]
     if shelf.get("map_x") is not None:
         location.map_x = shelf["map_x"]
     if shelf.get("map_y") is not None:
         location.map_y = shelf["map_y"]
-
-    # Import has no zone information unless the caller supplies one; never wipe it.
-    if zone_id is not None:
-        location.zone_id = zone_id
+    if shelf.get("function_type") is not None:
+        location.function_type = shelf["function_type"]
     location.is_active = True
 
 
@@ -982,13 +948,12 @@ def _orphan_lookup(orphans: list[Location]) -> dict[str, Location]:
 
 def _blocked_message(blocked: list[dict]) -> str:
     details = ", ".join(
-        f"{item['bin_code'] or item['location_name']} (SL {item['quantity']})"
+        f"Node {item['location_name'] or item['location_code']} (SL {item['quantity']})"
         for item in blocked
     )
     return (
         "Không thể import map: các vị trí sau không còn trong map mới nhưng vẫn còn "
-        f"tồn kho: {details}. Hãy chuyển tồn sang bin khác, hoặc gửi kèm remap "
-        "[{from_bin, to_bin}] để dời tham chiếu sang bin mới."
+        f"tồn kho: {details}. Hãy dời xe hàng sang vị trí khác hoặc gửi remap để dời sang node mới."
     )
 
 
@@ -1013,13 +978,7 @@ def sync_locations_from_map(
     unique_shelves = _dedupe_shelves(shelves)
 
     existing = db.query(Location).filter(Location.warehouse_id == warehouse_id).all()
-    by_bin = {loc.bin_code: loc for loc in existing if loc.bin_code}
-    by_rcl: dict[tuple, Location] = {}
-    by_code: dict[str, Location] = {}
-    for loc in existing:
-        if loc.row and loc.column:
-            by_rcl.setdefault((loc.row, loc.column, loc.level), loc)
-        by_code.setdefault(loc.location_code, loc)
+    by_code: dict[str, Location] = {loc.location_code: loc for loc in existing}
 
     taken: set[int] = set()
     matched: list[dict] = []
@@ -1028,21 +987,20 @@ def sync_locations_from_map(
 
     for index, shelf in enumerate(unique_shelves):
         location, matched_by = _match_shelf_to_location(
-            shelf, by_bin, by_rcl, by_code, taken
+            shelf, by_code, taken
         )
         if location is None:
             location = Location(
-                location_code=f"__new__{index}",
+                location_code=shelf["location_code"],
+                location_label=shelf.get("location_label") or shelf["location_name"],
                 location_name=shelf["location_name"],
-                bin_code=shelf.get("bin_code"),
-                row=shelf.get("row"),
-                column=shelf.get("column"),
-                level=shelf.get("level"),
-                node_name=(shelf.get("node_name") or "")[:NODE_NAME_MAX_LENGTH] or None,
+                function_type=shelf.get("function_type", 2),
                 map_x=shelf.get("map_x"),
                 map_y=shelf.get("map_y"),
+                location_type=shelf.get("location_type", "UNASSIGNED"),
+                machine_id=None,
+                position_index=None,
                 warehouse_id=warehouse_id,
-                zone_id=zone_id,
                 is_active=True,
             )
             db.add(location)
@@ -1050,11 +1008,10 @@ def sync_locations_from_map(
         else:
             taken.add(location.id)
             previous_code = location.location_code
-            _apply_shelf_to_location(location, shelf, zone_id)
+            _apply_shelf_to_location(db, location, shelf, warehouse_id)
             matched.append(
                 {
                     "location_id": location.id,
-                    "bin_code": location.bin_code,
                     "location_name": location.location_name,
                     "matched_by": matched_by,
                     "previous_location_code": previous_code,
@@ -1072,7 +1029,6 @@ def sync_locations_from_map(
     created = [
         {
             "location_id": location.id,
-            "bin_code": location.bin_code,
             "location_name": location.location_name,
             "location_code": location.location_code,
         }
@@ -1083,25 +1039,25 @@ def sync_locations_from_map(
     references = _reference_counts_by_location(db, orphan_ids)
     stock_totals = _active_stock_totals(db, orphan_ids)
 
-    bins_in_new_map = {loc.bin_code: loc for loc, _ in assignments if loc.bin_code}
+    nodes_in_new_map = {loc.location_code: loc for loc, _ in assignments if loc.location_code}
 
     remapped: list[dict] = []
     remapped_ids: set[int] = set()
     pending_cache_moves: list[tuple[int, dict]] = []
     for entry in remap or []:
-        source_key = str(entry.get("from_bin") or "").strip()
-        target_key = str(entry.get("to_bin") or "").strip()
+        source_key = str(entry.get("from_node") or entry.get("from_bin") or "").strip()
+        target_key = str(entry.get("to_node") or entry.get("to_bin") or "").strip()
         if not source_key or not target_key:
-            raise ValueError("Mỗi phần tử remap phải có cả from_bin và to_bin")
+            raise ValueError("Mỗi phần tử remap phải có cả from_node và to_node")
 
         source = orphan_lookup.get(source_key)
         if source is None:
             raise ValueError(
-                f"remap.from_bin không phải vị trí bị loại khỏi map mới: {source_key}"
+                f"remap.from_node không phải vị trí bị loại khỏi map mới: {source_key}"
             )
-        target = bins_in_new_map.get(target_key)
+        target = nodes_in_new_map.get(target_key)
         if target is None:
-            raise ValueError(f"remap.to_bin không có trong map mới: {target_key}")
+            raise ValueError(f"remap.to_node không có trong map mới: {target_key}")
         if target.id == source.id:
             raise ValueError(f"remap không thể trỏ về chính nó: {source_key}")
 
@@ -1109,35 +1065,24 @@ def sync_locations_from_map(
         remapped.append(
             {
                 "from_location_id": source.id,
-                "from_bin": source.bin_code or source.location_name,
+                "from_node": source.location_name or source.location_code,
                 "to_location_id": target.id,
-                "to_bin": target.bin_code or target.location_name,
+                "to_node": target.location_name or target.location_code,
                 "moved": moved,
             }
         )
         remapped_ids.add(source.id)
-        pending_cache_moves.append(
-            (
-                source.id,
-                {
-                    "id": target.id,
-                    "location_name": target.location_name,
-                    "warehouse_id": target.warehouse_id,
-                },
-            )
-        )
 
     blocked: list[dict] = []
     retired: list[dict] = []
     for location in orphans:
         payload = {
             "location_id": location.id,
-            "bin_code": location.bin_code,
             "location_name": location.location_name,
+            "location_code": location.location_code,
             "references": references.get(location.id, {}),
         }
         if location.id in remapped_ids:
-            # References were just moved away, so nothing is left pointing here.
             payload["references"] = {}
             retired.append(payload)
             location.is_active = False
@@ -1165,14 +1110,7 @@ def sync_locations_from_map(
         "retired": retired,
         "blocked": blocked,
         "freed_codes": freed_codes,
-        "nodes_without_bin_code": [
-            {
-                "location_code": shelf["location_code"],
-                "node_name": shelf.get("node_name"),
-            }
-            for shelf in unique_shelves
-            if not shelf.get("bin_code")
-        ],
+        "unnamed_nodes": [],
         "counts": {
             "matched": len(matched),
             "created": len(created),
@@ -1218,13 +1156,160 @@ def parse_shelf_node_from_map_node(node: list) -> Optional[ParsedShelfNode]:
         map_y=int(node[1]),
     )
 
+def _is_kuka_floor_map(data: dict) -> bool:
+    return (
+        isinstance(data, dict)
+        and "floorList" in data
+        and isinstance(data["floorList"], list)
+        and len(data["floorList"]) > 0
+    )
+
+
+def _read_map_raw_content(raw: bytes) -> dict:
+    """Detect and parse either raw JSON or ZIP archive containing map data."""
+    stripped = raw.strip()
+    if stripped.startswith(b"{") or stripped.startswith(b"["):
+        try:
+            return json.loads(stripped.decode("utf-8"))
+        except Exception as e:
+            raise ValueError(f"Invalid map JSON format: {e}") from e
+
+    try:
+        with zipfile.ZipFile(io.BytesIO(raw)) as zf:
+            namelist = zf.namelist()
+            # 1. Search for compress.json
+            for name in ("compress/compress.json", "compress.json"):
+                if name in namelist:
+                    return json.loads(zf.read(name).decode("utf-8"))
+
+            # 2. Search for any .json file that looks like map data
+            for name in namelist:
+                if name.endswith(".json"):
+                    try:
+                        data = json.loads(zf.read(name).decode("utf-8"))
+                        if isinstance(data, dict) and ("floorList" in data or "nodeArr" in data):
+                            return data
+                    except Exception:
+                        continue
+
+            raise ValueError("Không tìm thấy dữ liệu bản đồ hợp lệ (compress.json hoặc floorList JSON) trong file ZIP")
+    except zipfile.BadZipFile as e:
+        raise ValueError("File tải lên không phải định dạng ZIP hoặc JSON hợp lệ") from e
+
+
+def _extract_shelves_from_kuka_floor_map(data: dict) -> list[dict]:
+    """Extract location nodes from new KUKA floor format for synchronizing database locations.
+    
+    Per user specification:
+    - Only nodes with functionType == 2 (Rack nodes) are extracted.
+    - location_code stores nodeUuid (unique KUKA identity).
+    - location_name stores nodeLabel (e.g. '51', '216') for human-readable display.
+    - function_type stores 2.
+    - location_type defaults strictly to 'UNASSIGNED'. No automatic business assignment.
+    """
+    shelves = []
+    floor = data["floorList"][0]
+    for node in floor.get("nodeList", []):
+        func_list = node.get("functionList", [])
+        if not func_list:
+            continue
+        rack_func = next((f for f in func_list if f.get("functionType") == 2), None)
+        if not rack_func:
+            continue
+
+        node_uuid = str(node.get("nodeUuid"))
+        node_label = str(node.get("nodeLabel") or node.get("nodeNumber"))
+        x_mm = round(float(node.get("xCoordinate", 0)) * 1000)
+        y_mm = round(float(node.get("yCoordinate", 0)) * 1000)
+
+        shelves.append({
+            "location_code": node_uuid,
+            "location_label": node_label,
+            "location_name": node_label,
+            "function_type": 2,
+            "map_x": x_mm,
+            "map_y": y_mm,
+            "location_type": "UNASSIGNED",
+            "machine_id": None,
+            "position_index": None,
+        })
+    return shelves
+
+
+def adapt_kuka_floor_map_to_canvas(data: dict) -> MapDataResponse:
+    """Transform KUKA floorList map (meters) into standard 2D canvas MapDataResponse (millimeters)."""
+    floor = data["floorList"][0]
+    length_mm = round(float(floor.get("floorLength", 200)) * 1000)
+    width_mm = round(float(floor.get("floorWidth", 100)) * 1000)
+    nodes = floor.get("nodeList", [])
+    edges = floor.get("edgeList", [])
+
+    node_keys = ["x", "y", "type", "content", "name", "isTurn", "shelfIsTurn", "extraTypes"]
+    line_keys = ["from", "to", "leftWidth", "rightWidth", "startExpandDistance", "endExpandDistance", "path"]
+
+    node_coords: dict[str, tuple[int, int]] = {}
+    node_arr: list[list[Any]] = []
+    for n in nodes:
+        x_mm = round(float(n.get("xCoordinate", 0)) * 1000)
+        y_mm = round(float(n.get("yCoordinate", 0)) * 1000)
+        lbl = str(n.get("nodeLabel") or n.get("nodeNumber"))
+        node_coords[lbl] = (x_mm, y_mm)
+
+        func_list = n.get("functionList", [])
+        has_func = bool(func_list)
+        # Any functional node (workstation 1, rack 2, rest 3, charge 4, docking 10) is renderable station
+        is_rack = any(f.get("functionType") == 2 for f in func_list)
+        node_type = 1 if is_rack else 0
+        shelf_turn = 1 if is_rack else 0
+        extra = [f.get("functionType") for f in func_list if f.get("functionType") is not None]
+
+        name = lbl
+        if has_func:
+            devs = [f.get("deviceId") for f in func_list if f.get("deviceId")]
+            if devs:
+                name = devs[0]
+            elif any(f.get("functionType") == 2 for f in func_list):
+                name = f"RACK_{lbl}"
+            elif any(f.get("functionType") == 3 for f in func_list):
+                name = f"CHG_{lbl}"
+            elif any(f.get("functionType") == 10 for f in func_list):
+                name = f"DOCK_{lbl}"
+
+        node_arr.append([x_mm, y_mm, node_type, lbl, name, 0, shelf_turn, extra])
+
+    line_arr: list[list[Any]] = []
+    for e in edges:
+        b_lbl = str(e.get("beginNodeLabel"))
+        e_lbl = str(e.get("endNodeLabel"))
+        p1 = node_coords.get(b_lbl)
+        p2 = node_coords.get(e_lbl)
+        if p1 and p2:
+            line_arr.append([b_lbl, e_lbl, 600, 600, 1200, 1200, [[p1[0], p1[1]], [p2[0], p2[1]]]])
+
+    xs = [n[0] for n in node_arr] if node_arr else [0]
+    ys = [n[1] for n in node_arr] if node_arr else [0]
+
+    return MapDataResponse(
+        width=length_mm,
+        height=width_mm,
+        node_keys=node_keys,
+        line_keys=line_keys,
+        node_arr=node_arr,
+        line_arr=line_arr,
+        type="topo",
+        x_attr_min=min(xs),
+        y_attr_min=min(ys),
+        floor_list=data.get("floorList"),
+        node_list=nodes,
+        edge_list=edges,
+        map_format="kuka_v2",
+    )
+
+
 def extract_shelf_nodes_from_zip(raw: bytes) -> list[dict]:
-    with zipfile.ZipFile(io.BytesIO(raw)) as zf:
-        compress_name = next(
-            p for p in ("compress/compress.json", "compress.json")
-            if p in zf.namelist()
-        )
-        data = json.loads(zf.read(compress_name))
+    data = _read_map_raw_content(raw)
+    if _is_kuka_floor_map(data):
+        return _extract_shelves_from_kuka_floor_map(data)
 
     shelves = []
     for node in data.get("nodeArr", []):
@@ -1241,6 +1326,10 @@ def extract_shelf_nodes_from_zip(raw: bytes) -> list[dict]:
             "level": parsed.level,
             "map_x": parsed.map_x,
             "map_y": parsed.map_y,
+            "location_type": "CNC_SLOT",
+            "machine_code": None,
+            "position_index": None,
+            "node_label": parsed.location_code,
         })
     return shelves
 
@@ -1256,15 +1345,8 @@ def resolve_map_zip_path(source: str) -> Path:
 def _load_compress_json(zip_path: Path) -> dict:
     if not zip_path.is_file():
         raise ValueError(f"Map file not found: {zip_path}")
-
-    with zipfile.ZipFile(zip_path) as zf:
-        compress_name = next(
-            (p for p in ("compress/compress.json", "compress.json") if p in zf.namelist()),
-            None,
-        )
-        if not compress_name:
-            raise ValueError("compress.json not found in map ZIP")
-        return json.loads(zf.read(compress_name))
+    raw = zip_path.read_bytes()
+    return _read_map_raw_content(raw)
 
 
 def get_map_data(db: Session, warehouse_id: int) -> MapDataResponse:
@@ -1282,6 +1364,9 @@ def get_map_data(db: Session, warehouse_id: int) -> MapDataResponse:
     zip_path = resolve_map_zip_path(warehouse_map.source)
     data = _load_compress_json(zip_path)
 
+    if _is_kuka_floor_map(data):
+        return adapt_kuka_floor_map_to_canvas(data)
+
     # Chỉ trả field FE cần (MapData contract)
     try:
         return MapDataResponse(
@@ -1294,22 +1379,19 @@ def get_map_data(db: Session, warehouse_id: int) -> MapDataResponse:
             type=data.get("type"),
             x_attr_min=data.get("xAttrMin"),
             y_attr_min=data.get("yAttrMin"),
+            map_format="legacy",
         )
     except KeyError as e:
         raise ValueError(f"Invalid compress.json: missing field {e.args[0]}") from e
 
 def get_zone_map_layout(db: Session, zone_id: int) -> ZoneMapLayoutResponse:
-    zone = db.query(Zone).filter(Zone.id == zone_id).first()
-    if not zone:
-        raise ValueError(f"Zone id not found: {zone_id}")
-        
     locations = (
         _location_query(db, include_inactive=False)
-        .filter(Location.zone_id == zone_id)
+        .filter(Location.warehouse_id == zone_id)
         .order_by(Location.id)
         .all()
     )
-    
+
     nodes = [
         ZoneMapLayoutNode(
             id=loc.id,
@@ -1324,21 +1406,22 @@ def get_zone_map_layout(db: Session, zone_id: int) -> ZoneMapLayoutResponse:
         )
         for loc in locations
     ]
-    
+
     return ZoneMapLayoutResponse(
         zone_id=zone_id,
-        warehouse_id=zone.warehouse_id,
+        warehouse_id=zone_id,
         nodes=nodes,
     )
 
-def export_warehouse_map(db: Session, warehouse_id: int) -> tuple[bytes, str]:
+
+def export_warehouse_map(db: Session, warehouse_id: int) -> tuple[bytes, str, str]:
     warehouse_map = db.query(WarehouseMap).filter(
         WarehouseMap.warehouse_id == warehouse_id,
         WarehouseMap.is_active.is_(True),
     ).first()
     if not warehouse_map:
         raise ValueError("Warehouse map not found")
-    
+
     zip_path = resolve_map_zip_path(warehouse_map.source)
 
     if not zip_path.is_file():
@@ -1347,36 +1430,39 @@ def export_warehouse_map(db: Session, warehouse_id: int) -> tuple[bytes, str]:
     content = zip_path.read_bytes()
     if not content:
         raise ValueError("Map file is empty")
-    filename = f"warehouse-map-{warehouse_id}.zip"
-    return content, filename
 
-def get_buffer_locations(db: Session, warehouse_id: int, zone_keys: list[str]) -> list[Location]:
+    is_json = zip_path.suffix.lower() == ".json" or content.strip().startswith(b"{")
+    ext = ".json" if is_json else ".zip"
+    media_type = "application/json" if is_json else "application/zip"
+    filename = f"warehouse-map-{warehouse_id}{ext}"
+    return content, filename, media_type
+
+
+def get_locations_by_logic(db: Session, warehouse_id: int, type: str) -> list[Location]:
+    type_map = {
+        "inbound_buffer": "RAW_MATERIAL",
+        "raw_material": "RAW_MATERIAL",
+        "qc_buffer": "WASHING_SLOT",
+        "washing_slot": "WASHING_SLOT",
+        "outbound_buffer": "EMPTY_CART_BUFFER",
+        "empty_cart_buffer": "EMPTY_CART_BUFFER",
+        "storage_area": "CNC_SLOT",
+        "cnc_slot": "CNC_SLOT",
+    }
+    loc_type = type_map.get(type)
+    if not loc_type:
+        raise ValueError(f"Unsupported location type: {type}")
     return (
         db.query(Location)
-        .join(Zone, Location.zone_id == Zone.id)
         .filter(
             Location.warehouse_id == warehouse_id,
             Location.is_active.is_(True),
-            or_(Zone.name.in_(zone_keys), Zone.code.in_(zone_keys)),
+            Location.location_type == loc_type,
         )
         .order_by(Location.location_code)
         .all()
     )
 
-def get_locations_by_logic(db: Session, warehouse_id: int, type: str) -> list[Location]:
-    if type == "inbound_buffer":
-        zone_keys = settings.zone_inbound
-        return get_buffer_locations(db, warehouse_id, zone_keys)
-    elif type == "qc_buffer":
-        zone_keys = settings.zone_qc
-        return get_buffer_locations(db, warehouse_id, zone_keys)
-    elif type == "outbound_buffer":
-        zone_keys = settings.zone_outbound
-        return get_buffer_locations(db, warehouse_id, zone_keys)
-    elif type == "storage_area":
-        zone_keys = settings.zone_storage
-        return get_buffer_locations(db, warehouse_id, zone_keys)
-    raise ValueError(f"Unsupported location type: {type}")
 
 LOCATION_QR_TEMPLATE_PATH = (
     Path(__file__).resolve().parents[3] / "static" / "templates" / "template_location.html"
@@ -1401,20 +1487,13 @@ def _vcc_logo_data_uri() -> str:
     return f"data:image/webp;base64,{encoded}"
 
 
-def _is_storage_zone(zone: Zone | None) -> bool:
-    if zone is None:
-        return False
-    storage_keys = set(settings.zone_storage)
-    return zone.code in storage_keys or zone.name in storage_keys
-
-
 def _use_manual_storage_90mm_label(
     warehouse_id: int | None,
     locations: list[Location],
 ) -> bool:
     if not is_manual_warehouse(warehouse_id) or not locations:
         return False
-    return all(_is_storage_zone(location.zone) for location in locations)
+    return True
 
 
 def _location_labels_per_page(payload: dict) -> int:
@@ -1458,7 +1537,6 @@ def generate_qr_location_code(
 
     rows = (
         db.query(Location)
-        .options(joinedload(Location.zone))
         .filter(Location.id.in_(location_ids))
         .all()
     )

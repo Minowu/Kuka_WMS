@@ -1,6 +1,4 @@
-import { useMemo, useState } from "react";
-import type { AxiosError } from "axios";
-import type { ApiErrorResponse } from "@/types/apiError";
+import { useState } from "react";
 import {
   Card,
   Table,
@@ -11,26 +9,21 @@ import {
   Input,
   message,
   Select,
-  cn,
 } from "@/components/ui";
-import { Checkbox, Steps } from "antd";
-import { PlusOutlined, EditOutlined, DeleteOutlined } from "@ant-design/icons";
+import { Tag } from "antd";
+import { PlusOutlined, EditOutlined, DeleteOutlined, ClusterOutlined } from "@ant-design/icons";
 import { getApiErrorMessage } from "@/utils/apiErrorMessage";
+import StationAssignmentModal from "@/pages/components/StationAssignmentModal";
 import {
   useUser,
   useCreateUser,
   useUpdateUser,
   useDeleteUser,
 } from "@/hooks/useAuth";
-import { useWarehouses } from "@/hooks/useWarehouse";
 import {
-  MODULE_OPTIONS,
-  MODULE_ROLE_NAMES,
-  ROLE_OPTIONS,
   type CreateUserInput,
   type UpdateUserInput,
   type User,
-  type UserModule,
 } from "@/types/auth";
 import Hero from "@/components/shared/Hero";
 import dayjs from "dayjs";
@@ -43,28 +36,31 @@ type UserFormValues = {
   password_confirm?: string;
 };
 
-const ADMIN_ROLE_ID = ROLE_OPTIONS.find((r) => r.name === "admin")?.id ?? 1;
-const OPERATOR_ROLE_ID =
-  ROLE_OPTIONS.find((r) => r.name === "operator")?.id ?? 2;
-
-const STEP_ITEMS = [
-  { title: "Thông tin" },
-  { title: "Kho" },
-  { title: "Chức năng" },
-];
-
-function modulesFromRoles(user: User): UserModule[] {
-  const names = new Set(user.roles?.map((r) => r.name) ?? []);
-  return MODULE_ROLE_NAMES.filter((m) => names.has(m));
-}
+const ADMIN_ROLE_ID = 2;
 
 function isAdminUser(user: User | null): boolean {
   return !!user?.roles?.some((r) => r.name === "admin");
 }
 
+function getRoleTag(user: User) {
+  const roleNames = user.roles?.map((r) => r.name) || [];
+  if (roleNames.includes("admin")) {
+    return <Tag color="blue" className="font-semibold px-2 py-0.5">Quản trị viên (Admin)</Tag>;
+  }
+  if (roleNames.includes("operator_raw")) {
+    return <Tag color="purple" className="font-semibold px-2 py-0.5">Cấp Phôi (Nguyên Liệu)</Tag>;
+  }
+  if (roleNames.includes("operator_cnc")) {
+    return <Tag color="cyan" className="font-semibold px-2 py-0.5">Vận Hành CNC</Tag>;
+  }
+  if (roleNames.includes("operator_washing")) {
+    return <Tag color="green" className="font-semibold px-2 py-0.5">Khu Tẩy Rửa</Tag>;
+  }
+  return <Tag color="default" className="font-semibold px-2 py-0.5">Chưa phân vai trò</Tag>;
+}
+
 export default function UserSettingPage() {
-  const { data: users, isLoading, error } = useUser();
-  const { data: warehouses = [] } = useWarehouses();
+  const { data: users, isLoading } = useUser();
   const createMutation = useCreateUser();
   const updateMutation = useUpdateUser();
   const deleteMutation = useDeleteUser();
@@ -72,63 +68,40 @@ export default function UserSettingPage() {
   const [form] = Form.useForm<UserFormValues>();
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingUser, setEditingUser] = useState<User | null>(null);
-  const [step, setStep] = useState(0);
-  const [selectedWarehouseIds, setSelectedWarehouseIds] = useState<number[]>(
-    [],
-  );
-  const [selectedModules, setSelectedModules] = useState<UserModule[]>([]);
-
-  const watchedRoleId = Form.useWatch("role_id", form);
-  const isAdminFlow = watchedRoleId === ADMIN_ROLE_ID;
-
-  const allWarehouseIds = useMemo(
-    () => warehouses.map((w) => w.id),
-    [warehouses],
-  );
-
-  const resetWizard = () => {
-    setStep(0);
-    setSelectedWarehouseIds([]);
-    setSelectedModules([]);
-  };
+  const [stationModalUser, setStationModalUser] = useState<User | null>(null);
 
   const handleCloseModal = () => {
     setIsModalOpen(false);
     setEditingUser(null);
     form.resetFields();
-    resetWizard();
   };
 
   const handleOpenCreate = () => {
     setEditingUser(null);
     form.resetFields();
-    form.setFieldsValue({ role_id: ADMIN_ROLE_ID });
-    resetWizard();
+    form.setFieldsValue({ role_id: 4 }); // Mặc định là Operator CNC
     setIsModalOpen(true);
   };
 
   const handleOpenEdit = (record: User) => {
     setEditingUser(record);
-    const admin = isAdminUser(record);
+    const roleId = record.roles?.[0]?.id ?? 4;
     form.setFieldsValue({
       username: record.username,
       email: record.email,
-      role_id: admin ? ADMIN_ROLE_ID : OPERATOR_ROLE_ID,
+      role_id: roleId,
       password: undefined,
       password_confirm: undefined,
     });
-    setSelectedWarehouseIds(record.warehouses?.map((w) => w.id) ?? []);
-    setSelectedModules(modulesFromRoles(record));
-    setStep(0);
     setIsModalOpen(true);
   };
 
   const handleDelete = (id: number) => {
     Modal.confirm({
-      title: "Xác nhận xóa",
-      content: "Bạn có chắc chắn muốn xóa người dùng này không?",
+      title: "Xác nhận xóa vĩnh viễn",
+      content: "Bạn có chắc chắn muốn xóa vĩnh viễn tài khoản người dùng này khỏi hệ thống không? Thao tác này không thể hoàn tác.",
       centered: true,
-      okText: "Xóa",
+      okText: "Xóa vĩnh viễn",
       okType: "danger",
       cancelText: "Hủy",
       onOk: () => {
@@ -150,132 +123,62 @@ export default function UserSettingPage() {
     });
   };
 
-  const validateStep1 = async () => {
-    const fields: (keyof UserFormValues)[] = [
-      "username",
-      "email",
-      "role_id",
-      "password",
-      "password_confirm",
-    ];
-    await form.validateFields(fields);
-  };
-
-  const handleNext = async () => {
-    if (step === 0) {
-      await validateStep1();
-      if (isAdminFlow) return;
-      setStep(1);
-      return;
-    }
-    if (step === 1) {
-      if (selectedWarehouseIds.length === 0) {
-        message.warning("Vui lòng chọn ít nhất một kho!");
-        return;
-      }
-      setStep(2);
-    }
-  };
-
-  const handleBack = () => {
-    setStep((s) => Math.max(0, s - 1));
-  };
-
-  const submitPayload = (values: UserFormValues) => {
-    const isAdmin = values.role_id === ADMIN_ROLE_ID;
-
-    if (editingUser) {
-      const payload: UpdateUserInput = {
-        email: values.email.trim(),
-        is_admin: isAdmin,
-        role_ids: isAdmin ? [ADMIN_ROLE_ID] : [OPERATOR_ROLE_ID],
-      };
-      if (!isAdmin) {
-        payload.warehouse_ids = selectedWarehouseIds;
-        payload.modules = selectedModules;
-      } else {
-        payload.warehouse_ids = [];
-        payload.modules = [];
-      }
-      if (values.password?.trim()) {
-        payload.password = values.password;
-        payload.password_confirm = values.password_confirm ?? "";
-      }
-      updateMutation.mutate(
-        { id: editingUser.id, data: payload },
-        {
-          onSuccess: () => {
-            message.success("Cập nhật người dùng thành công!");
-            handleCloseModal();
-          },
-          onError: (err: any) => {
-            message.error(
-              getApiErrorMessage(err, "Không thể cập nhật người dùng"),
-            );
-          },
-        },
-      );
-      return;
-    }
-
-    const payload: CreateUserInput = {
-      username: values.username.trim(),
-      email: values.email.trim(),
-      password: values.password ?? "",
-      password_confirm: values.password_confirm ?? "",
-      is_admin: isAdmin,
-      role_ids: isAdmin ? [ADMIN_ROLE_ID] : [OPERATOR_ROLE_ID],
-      warehouse_ids: isAdmin ? [] : selectedWarehouseIds,
-      modules: isAdmin ? [] : selectedModules,
-    };
-
-    createMutation.mutate(payload, {
-      onSuccess: () => {
-        message.success("Thêm người dùng thành công!");
-        handleCloseModal();
-      },
-      onError: (err: any) => {
-        message.error(
-          getApiErrorMessage(err, "Không thể thêm người dùng mới"),
-        );
-      },
-    });
-  };
-
   const handleSubmit = async () => {
     try {
-      await validateStep1();
+      const values = await form.validateFields();
+      const isAdmin = values.role_id === ADMIN_ROLE_ID;
+
+      if (editingUser) {
+        const payload: UpdateUserInput = {
+          email: values.email.trim(),
+          is_admin: isAdmin,
+          role_ids: [values.role_id],
+        };
+        if (values.password?.trim()) {
+          payload.password = values.password;
+          payload.password_confirm = values.password_confirm ?? "";
+        }
+        updateMutation.mutate(
+          { id: editingUser.id, data: payload },
+          {
+            onSuccess: () => {
+              message.success("Cập nhật người dùng thành công!");
+              handleCloseModal();
+            },
+            onError: (err: any) => {
+              message.error(
+                getApiErrorMessage(err, "Không thể cập nhật người dùng"),
+              );
+            },
+          },
+        );
+        return;
+      }
+
+      const payload: CreateUserInput = {
+        username: values.username.trim(),
+        email: values.email.trim(),
+        password: values.password ?? "",
+        password_confirm: values.password_confirm ?? "",
+        is_admin: isAdmin,
+        role_ids: [values.role_id],
+      };
+
+      createMutation.mutate(payload, {
+        onSuccess: () => {
+          message.success("Thêm người dùng mới thành công!");
+          handleCloseModal();
+        },
+        onError: (err: any) => {
+          message.error(
+            getApiErrorMessage(err, "Không thể thêm người dùng mới"),
+          );
+        },
+      });
     } catch {
-      setStep(0);
-      return;
+      // Form validation failed
     }
-
-    const values = form.getFieldsValue(true) as UserFormValues;
-    const isAdmin = values.role_id === ADMIN_ROLE_ID;
-
-    if (!isAdmin) {
-      if (selectedWarehouseIds.length === 0) {
-        message.warning("Vui lòng chọn ít nhất một kho!");
-        setStep(1);
-        return;
-      }
-      if (selectedModules.length === 0) {
-        message.warning("Vui lòng chọn ít nhất một chức năng!");
-        setStep(2);
-        return;
-      }
-    }
-
-    submitPayload(values);
   };
-
-  const allWarehousesSelected =
-    allWarehouseIds.length > 0 &&
-    allWarehouseIds.every((id) => selectedWarehouseIds.includes(id));
-
-  const allModulesSelected =
-    MODULE_OPTIONS.length > 0 &&
-    MODULE_OPTIONS.every((m) => selectedModules.includes(m.key));
 
   const columns = [
     {
@@ -295,14 +198,7 @@ export default function UserSettingPage() {
     {
       title: "Vai trò",
       key: "roles",
-      render: (_: unknown, record: User) =>
-        record.roles?.map((r) => r.name).join(", ") || "—",
-    },
-    {
-      title: "Kho",
-      key: "warehouses",
-      render: (_: unknown, record: User) =>
-        record.warehouses?.map((w) => w.code).join(", ") || "—",
+      render: (_: unknown, record: User) => getRoleTag(record),
     },
     {
       title: "Ngày khởi tạo",
@@ -314,47 +210,47 @@ export default function UserSettingPage() {
     {
       title: "Thao tác",
       key: "action",
-      width: 150,
-      render: (_: unknown, record: User) => (
-        <Space size="middle">
-          <Button
-            variant="edit"
-            icon={<EditOutlined className="text-brand-primary" />}
-            onClick={() => handleOpenEdit(record)}
-            title="Sửa"
-          />
-          <Button
-            variant="dangerText"
-            icon={<DeleteOutlined />}
-            onClick={() => handleDelete(record.id)}
-            className="hover:bg-red-50 rounded-lg"
-            title="Xóa"
-          />
-        </Space>
-      ),
+      width: 260,
+      render: (_: unknown, record: User) => {
+        const isAdmin = isAdminUser(record);
+        return (
+          <Space size="small">
+            {!isAdmin ? (
+              <Button
+                variant="outline"
+                size="sm"
+                icon={<ClusterOutlined className="text-brand-primary" />}
+                onClick={() => setStationModalUser(record)}
+                title="Phân quyền trạm máy & vị trí"
+                className="!h-8 !px-2.5 !rounded-lg text-xs font-semibold text-slate-700 hover:text-brand-primary hover:border-brand-primary"
+              >
+                Phân trạm
+              </Button>
+            ) : (
+              <Tag color="blue" className="!mr-1 !px-2 !py-0.5 !font-semibold">
+                Toàn quyền
+              </Tag>
+            )}
+            <Button
+              variant="outline"
+              size="sm"
+              icon={<EditOutlined />}
+              onClick={() => handleOpenEdit(record)}
+              className="!h-8 !w-8 !p-0 !rounded-lg text-slate-600 hover:text-brand-primary hover:border-brand-primary"
+            />
+            <Button
+              variant="outline"
+              size="sm"
+              icon={<DeleteOutlined className="text-red-500" />}
+              onClick={() => handleDelete(record.id)}
+              className="!h-8 !w-8 !p-0 !rounded-lg text-red-500 hover:text-red-600 hover:border-red-400"
+            />
+          </Space>
+        );
+      },
     },
   ];
 
-  if (isLoading) {
-    return (
-      <div className="flex h-64 items-center justify-center">
-        <span className="text-brand-primary/70 font-medium">
-          Đang tải danh sách người dùng...
-        </span>
-      </div>
-    );
-  }
-
-  if (error) {
-    return (
-      <div className="p-4 bg-red-50 border border-red-200 text-red-600 rounded-xl">
-        Không thể kết nối đến máy chủ. Vui lòng tải lại trang!
-      </div>
-    );
-  }
-
-  const showSteps = !isAdminFlow;
-  const isLastStep = isAdminFlow || step === 2;
   const saving = createMutation.isPending || updateMutation.isPending;
 
   return (
@@ -377,6 +273,7 @@ export default function UserSettingPage() {
           columns={columns}
           dataSource={users}
           rowKey="id"
+          loading={isLoading}
           pagination={false}
           className="[&_.ant-table-thead_th]:!bg-slate-50 [&_.ant-table-thead_th]:!text-slate-600 [&_.ant-table-thead_th]:!font-semibold [&_.ant-table-row]:hover:bg-slate-50/50 [&_.ant-table-cell]:!text-center"
         />
@@ -389,229 +286,107 @@ export default function UserSettingPage() {
         footer={null}
         destroyOnHidden
         centered
-        width="60vw"
-        className="!max-w-[60vw] [&_.ant-modal-content]:!h-[60vh] [&_.ant-modal-content]:!flex [&_.ant-modal-content]:!flex-col [&_.ant-modal-body]:!flex-1 [&_.ant-modal-body]:!overflow-hidden [&_.ant-modal-body]:!flex [&_.ant-modal-body]:!flex-col"
+        width={520}
       >
-        {showSteps && (
-          <Steps
-            size="small"
-            current={step}
-            items={STEP_ITEMS}
-            className="mt-1 mb-4 shrink-0"
-          />
-        )}
-
         <Form
           form={form}
           layout="vertical"
-          className={cn(
-            "flex min-h-0 flex-1 flex-col",
-            !showSteps && "mt-2",
-          )}
+          className="mt-4"
         >
-          <div className="min-h-0 flex-1 overflow-y-auto pr-1">
-            <div className={cn(step !== 0 && "hidden")}>
-              <Form.Item
-                name="username"
-                label="Tên đăng nhập"
-                rules={[
-                  { required: true, message: "Vui lòng nhập tên đăng nhập!" },
-                  { min: 3, message: "Tối thiểu 3 ký tự" },
-                ]}
-              >
-                <Input placeholder="Ví dụ: admin" disabled={!!editingUser} />
-              </Form.Item>
-
-              <Form.Item
-                name="email"
-                label="Email"
-                rules={[
-                  { required: true, message: "Vui lòng nhập email!" },
-                  { type: "email", message: "Email không hợp lệ!" },
-                ]}
-              >
-                <Input placeholder="Ví dụ: example@example.com" />
-              </Form.Item>
-
-              <Form.Item
-                name="role_id"
-                label="Vai trò"
-                rules={[{ required: true, message: "Vui lòng chọn vai trò!" }]}
-              >
-                <Select
-                  placeholder="Chọn vai trò"
-                  options={[
-                    { value: ADMIN_ROLE_ID, label: "Admin" },
-                    { value: OPERATOR_ROLE_ID, label: "Nhân viên" },
-                  ]}
-                  onChange={(value) => {
-                    if (value === ADMIN_ROLE_ID) {
-                      setStep(0);
-                    }
-                  }}
-                />
-              </Form.Item>
-
-              <Form.Item
-                name="password"
-                label="Mật khẩu"
-                required={!editingUser}
-                rules={
-                  editingUser
-                    ? [{ min: 8, message: "Tối thiểu 8 ký tự" }]
-                    : [
-                      { required: true, message: "Vui lòng nhập mật khẩu!" },
-                      { min: 8, message: "Tối thiểu 8 ký tự" },
-                    ]
-                }
-              >
-                <Input.Password placeholder="Tối thiểu 8 ký tự" />
-              </Form.Item>
-
-              <Form.Item
-                name="password_confirm"
-                label="Nhập lại mật khẩu"
-                required={!editingUser}
-                dependencies={["password"]}
-                rules={
-                  editingUser
-                    ? [
-                      ({ getFieldValue }) => ({
-                        validator(_, value) {
-                          const password = getFieldValue("password");
-                          if (!password) return Promise.resolve();
-                          if (!value) {
-                            return Promise.reject(
-                              new Error("Vui lòng nhập lại mật khẩu!"),
-                            );
-                          }
-                          if (password === value) return Promise.resolve();
-                          return Promise.reject(
-                            new Error("Mật khẩu không khớp!"),
-                          );
-                        },
-                      }),
-                    ]
-                    : [
-                      {
-                        required: true,
-                        message: "Vui lòng nhập lại mật khẩu!",
-                      },
-                      ({ getFieldValue }) => ({
-                        validator(_, value) {
-                          if (!value || getFieldValue("password") === value) {
-                            return Promise.resolve();
-                          }
-                          return Promise.reject(
-                            new Error("Mật khẩu không khớp!"),
-                          );
-                        },
-                      }),
-                    ]
-                }
-              >
-                <Input.Password placeholder="Nhập lại mật khẩu" />
-              </Form.Item>
-            </div>
-
-            <div className={cn(step !== 1 && "hidden")}>
-              <div className="mb-3 space-y-2">
-                <p className="text-sm text-slate-600">
-                  Chọn kho mà người dùng được phép truy cập
-                </p>
-                <Checkbox
-                  checked={allWarehousesSelected}
-                  indeterminate={
-                    selectedWarehouseIds.length > 0 && !allWarehousesSelected
-                  }
-                  onChange={(e) => {
-                    setSelectedWarehouseIds(
-                      e.target.checked ? allWarehouseIds : [],
-                    );
-                  }}
-                >
-                  Chọn tất cả
-                </Checkbox>
-              </div>
-              <Checkbox.Group
-                className="flex w-full flex-col gap-3"
-                value={selectedWarehouseIds}
-                onChange={(vals) =>
-                  setSelectedWarehouseIds(vals.map((v) => Number(v)))
-                }
-                options={warehouses.map((w) => ({
-                  value: w.id,
-                  label: w.name ? `${w.code} — ${w.name}` : w.code,
-                }))}
-              />
-              {warehouses.length === 0 && (
-                <p className="text-sm text-slate-400">Chưa có kho nào.</p>
-              )}
-            </div>
-
-            <div className={cn(step !== 2 && "hidden")}>
-              <div className="mb-3 space-y-2">
-                <p className="text-sm text-slate-600">
-                  Chọn chức năng được phép sử dụng
-                </p>
-                <Checkbox
-                  checked={allModulesSelected}
-                  indeterminate={
-                    selectedModules.length > 0 && !allModulesSelected
-                  }
-                  onChange={(e) => {
-                    setSelectedModules(
-                      e.target.checked
-                        ? MODULE_OPTIONS.map((m) => m.key)
-                        : [],
-                    );
-                  }}
-                >
-                  Chọn tất cả
-                </Checkbox>
-              </div>
-              <Checkbox.Group
-                className="flex w-full flex-col gap-3"
-                value={selectedModules}
-                onChange={(vals) => setSelectedModules(vals as UserModule[])}
-                options={MODULE_OPTIONS.map((m) => ({
-                  value: m.key,
-                  label: m.label,
-                }))}
-              />
-            </div>
-          </div>
-
-          <Form.Item className="mb-0 mt-4 shrink-0 flex justify-end border-t border-gray-100 pt-4">
-            <Space>
-              {step > 0 && !isAdminFlow && (
-                <Button onClick={handleBack}>Quay lại</Button>
-              )}
-              <Button onClick={handleCloseModal}>Hủy</Button>
-              {!isLastStep ? (
-                <Button
-                  onClick={() => {
-                    void handleNext().catch(() => undefined);
-                  }}
-                  className="!bg-brand-primary hover:!bg-stripe-primary-deep !border-none"
-                >
-                  Tiếp theo
-                </Button>
-              ) : (
-                <Button
-                  loading={saving}
-                  onClick={() => {
-                    void handleSubmit();
-                  }}
-                  className="!bg-brand-primary hover:!bg-stripe-primary-deep !border-none"
-                >
-                  {editingUser ? "Cập nhật" : "Lưu lại"}
-                </Button>
-              )}
-            </Space>
+          <Form.Item
+            name="username"
+            label="Tên đăng nhập"
+            rules={[
+              { required: true, message: "Vui lòng nhập tên đăng nhập!" },
+              { min: 3, message: "Tối thiểu 3 ký tự" },
+            ]}
+          >
+            <Input placeholder="Ví dụ: operator_cnc01" disabled={!!editingUser} />
           </Form.Item>
+
+          <Form.Item
+            name="email"
+            label="Email"
+            rules={[
+              { required: true, message: "Vui lòng nhập email!" },
+              { type: "email", message: "Email không hợp lệ!" },
+            ]}
+          >
+            <Input placeholder="Ví dụ: operator@factory.com" />
+          </Form.Item>
+
+          <Form.Item
+            name="role_id"
+            label="Vai trò & Phân khu"
+            rules={[{ required: true, message: "Vui lòng chọn vai trò!" }]}
+          >
+            <Select
+              placeholder="Chọn vai trò"
+              options={[
+                { value: 2, label: "🛡️ Quản trị viên (Admin / Quản đốc)" },
+                { value: 4, label: "⚙️ Operator CNC (Khu Máy CNC)" },
+                { value: 3, label: "📦 Operator Cấp Phôi (Khu Nguyên Liệu)" },
+                { value: 5, label: "🧼 Operator Tẩy Rửa (Khu Tẩy Rửa)" },
+              ]}
+            />
+          </Form.Item>
+
+          <Form.Item
+            name="password"
+            label="Mật khẩu"
+            required={!editingUser}
+            rules={
+              editingUser
+                ? [{ min: 8, message: "Tối thiểu 8 ký tự (để trống nếu không đổi)" }]
+                : [
+                    { required: true, message: "Vui lòng nhập mật khẩu!" },
+                    { min: 8, message: "Tối thiểu 8 ký tự" },
+                  ]
+            }
+          >
+            <Input.Password placeholder={editingUser ? "Để trống nếu không đổi mật khẩu" : "Tối thiểu 8 ký tự"} />
+          </Form.Item>
+
+          <Form.Item
+            name="password_confirm"
+            label="Nhập lại mật khẩu"
+            required={!editingUser}
+            dependencies={["password"]}
+            rules={[
+              ({ getFieldValue }) => ({
+                validator(_, value) {
+                  const password = getFieldValue("password");
+                  if (!password && editingUser) return Promise.resolve();
+                  if (!value && password) {
+                    return Promise.reject(new Error("Vui lòng nhập lại mật khẩu!"));
+                  }
+                  if (password === value) return Promise.resolve();
+                  return Promise.reject(new Error("Mật khẩu không khớp!"));
+                },
+              }),
+            ]}
+          >
+            <Input.Password placeholder="Nhập lại mật khẩu" />
+          </Form.Item>
+
+          <div className="flex justify-end gap-2 border-t border-gray-100 pt-4 mt-6">
+            <Button onClick={handleCloseModal}>Hủy</Button>
+            <Button
+              loading={saving}
+              onClick={handleSubmit}
+              className="!bg-brand-primary hover:!bg-stripe-primary-deep !border-none font-semibold text-white"
+            >
+              {editingUser ? "Cập nhật" : "Lưu lại"}
+            </Button>
+          </div>
         </Form>
       </Modal>
+
+      <StationAssignmentModal
+        open={!!stationModalUser}
+        onClose={() => setStationModalUser(null)}
+        user={stationModalUser}
+      />
     </div>
   );
 }

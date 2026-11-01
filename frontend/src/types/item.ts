@@ -2,15 +2,13 @@ export interface Item {
   id: number
   sku: string
   name: string
-  description: string | null
-  base_unit: string
-  base_quantity: number
-  max_quantity: number
-  min_quantity: number
+  description?: string | null
+  base_unit?: string | null
+  standard_quantity_per_cart?: number
   warehouse_id: number
-  supplier: string
-  details: Record<string, unknown>
-  is_active: boolean
+  supplier?: string | null
+  details?: Record<string, unknown>
+  is_active?: boolean
   quantity: number
   total_price: number
   created_at: string
@@ -40,10 +38,8 @@ export type CreateItemInput = {
   sku: string
   name: string
   description?: string | null
-  base_unit: number
-  base_quantity?: number
-  max_quantity: number
-  min_quantity: number
+  base_unit?: number | null
+  standard_quantity_per_cart?: number
   warehouse_id: number
   supplier?: string
   details?: Record<string, unknown>
@@ -52,18 +48,20 @@ export type CreateItemInput = {
 export type UpdateItemInput = Partial<
   Omit<CreateItemInput, 'sku' | 'warehouse_id'> & {
     warehouse_id?: number
-    is_active: boolean
+    is_active?: boolean
   }
 >
 
 export interface ItemStock {
   id: number
   item_id: number
-  location_id: number
+  location_id?: number | null
+  container_code?: string | null
+  current_stage_level?: number
   location_code?: string | null
   location_name?: string | null
-  lot_number: string | null
-  expiry_date: string | null
+  lot_number?: string | null
+  expiry_date?: string | null
   quantity: number
   status: string
   created_at?: string | null

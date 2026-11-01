@@ -74,8 +74,15 @@ class ItemStockResponse(BaseModel):
     id: int
     stock_code: UUID
     item_id: int
-    location_id: int
-    unit_id: int
+    location_id: Optional[int] = None
+    destination_location_id: Optional[int] = None
+    container_code: Optional[str] = None
+    current_stage_level: int = 0
+    is_locked: bool = False
+    locked_by_mission_code: Optional[str] = None
+    locked_by_mission_code: Optional[str] = None
+    fleet_registered: bool = False
+    unit_id: Optional[int] = None
     quantity: Decimal
     lot_number_from: Optional[str] = None
     lot_number_to: Optional[str] = None

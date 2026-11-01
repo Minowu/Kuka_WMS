@@ -6,13 +6,18 @@ from app.modules.warehouse.lot_number_utils import apply_lot_display_fields
 
 
 class LocationCreate(BaseModel):
-    location_code: str = Field(..., min_length=1, max_length=50)
+    location_code: str = Field(..., min_length=1, max_length=100)
+    function_type: Optional[int] = 2
     location_name: str = Field(..., min_length=1, max_length=100)
-    bin_code: Optional[str] = Field(None, max_length=50)
     row: Optional[str] = Field(None, max_length=10)
     column: Optional[str] = Field(None, max_length=10)
     level: Optional[str] = Field(None, max_length=10)
     node_name: Optional[str] = Field(None, max_length=50)
+    location_type: Optional[str] = "UNASSIGNED"
+    machine_id: Optional[int] = None
+    machine_code: Optional[str] = None
+    position_index: Optional[int] = None
+    default_stage_level: Optional[int] = None
     map_x: Optional[int] = None
     map_y: Optional[int] = None
     warehouse_id: int
@@ -20,13 +25,18 @@ class LocationCreate(BaseModel):
 
 
 class LocationUpdate(BaseModel):
-    location_code: Optional[str] = Field(None, min_length=1, max_length=50)
+    location_code: Optional[str] = Field(None, min_length=1, max_length=100)
+    function_type: Optional[int] = None
     location_name: Optional[str] = Field(None, min_length=1, max_length=100)
-    bin_code: Optional[str] = Field(None, max_length=50)
     row: Optional[str] = Field(None, max_length=10)
     column: Optional[str] = Field(None, max_length=10)
     level: Optional[str] = Field(None, max_length=10)
     node_name: Optional[str] = Field(None, max_length=50)
+    location_type: Optional[str] = None
+    machine_id: Optional[int] = None
+    machine_code: Optional[str] = None
+    position_index: Optional[int] = None
+    default_stage_level: Optional[int] = None
     map_x: Optional[int] = None
     map_y: Optional[int] = None
     warehouse_id: Optional[int] = None
@@ -37,12 +47,18 @@ class LocationUpdate(BaseModel):
 class LocationResponse(BaseModel):
     id: int
     location_code: str
+    location_label: Optional[str] = None
     location_name: str
-    bin_code: Optional[str] = None
+    function_type: Optional[int] = 2
     row: Optional[str] = None
     column: Optional[str] = None
     level: Optional[str] = None
     node_name: Optional[str] = None
+    location_type: Optional[str] = None
+    machine_id: Optional[int] = None
+    machine_code: Optional[str] = None
+    position_index: Optional[int] = None
+    default_stage_level: Optional[int] = None
     map_x: Optional[int] = None
     map_y: Optional[int] = None
     warehouse_id: int
@@ -69,7 +85,6 @@ class LocationsByLogicResponse(BaseModel):
 class MapCreate(BaseModel):
     source: str = Field(..., min_length=1, max_length=255)
     warehouse_id: int
-    zone_id: Optional[int] = None
     is_active: bool = Field(default=True)
 
 
@@ -82,7 +97,6 @@ class MapRemapEntry(BaseModel):
 
 class MapSyncMatchedItem(BaseModel):
     location_id: int
-    bin_code: Optional[str] = None
     location_name: Optional[str] = None
     matched_by: str
     previous_location_code: Optional[str] = None
@@ -91,7 +105,6 @@ class MapSyncMatchedItem(BaseModel):
 
 class MapSyncCreatedItem(BaseModel):
     location_id: int
-    bin_code: Optional[str] = None
     location_name: Optional[str] = None
     location_code: str
 
@@ -106,7 +119,6 @@ class MapSyncRemappedItem(BaseModel):
 
 class MapSyncRetiredItem(BaseModel):
     location_id: int
-    bin_code: Optional[str] = None
     location_name: Optional[str] = None
     references: dict[str, int] = {}
     quantity: Optional[str] = None
@@ -114,7 +126,6 @@ class MapSyncRetiredItem(BaseModel):
 
 class MapSyncFreedCode(BaseModel):
     location_id: int
-    bin_code: Optional[str] = None
     released_location_code: str
 
 
@@ -156,6 +167,10 @@ class MapDataResponse(BaseModel):
     type: Optional[str] = None
     x_attr_min: Optional[int] = Field(None, alias="xAttrMin")
     y_attr_min: Optional[int] = Field(None, alias="yAttrMin")
+    floor_list: Optional[list[dict[str, Any]]] = Field(None, alias="floorList")
+    node_list: Optional[list[dict[str, Any]]] = Field(None, alias="nodeList")
+    edge_list: Optional[list[dict[str, Any]]] = Field(None, alias="edgeList")
+    map_format: Optional[str] = Field("legacy", alias="mapFormat")
     model_config = ConfigDict(populate_by_name=True)
 
 
@@ -163,7 +178,6 @@ class ZoneMapLayoutNode(BaseModel):
     id: int
     location_code: str
     location_name: Optional[str] = None
-    bin_code: Optional[str] = None
     row: Optional[str] = None
     column: Optional[str] = None
     level: Optional[str] = None
@@ -199,10 +213,18 @@ class MapLocationStockItem(BaseModel):
 
 
 class MapLocationItem(BaseModel):
+    model_config = ConfigDict(protected_namespaces=())
     id: int
     location_code: str
     location_name: Optional[str] = None
-    bin_code: Optional[str] = None
+    location_label: Optional[str] = None
+    location_type: Optional[str] = None
+    container_code: Optional[str] = None
+    model_name: Optional[str] = None
+    current_stage_level: Optional[int] = None
+    transit_target_name: Optional[str] = None
+    machine_code: Optional[str] = None
+    position_index: Optional[int] = None
     row: Optional[str] = None
     column: Optional[str] = None
     level: Optional[str] = None
@@ -248,9 +270,19 @@ class LocationDetailSummary(BaseModel):
 
 
 class LocationDetailResponse(BaseModel):
+    model_config = ConfigDict(protected_namespaces=())
     location: LocationResponse
     item_stock: list[LocationDetailStockItem]
     summary: LocationDetailSummary
+    container_code: Optional[str] = None
+    model_name: Optional[str] = None
+    quantity: Optional[str] = None
+    current_stage_level: Optional[int] = None
+    stage_name: Optional[str] = None
+    machine_code: Optional[str] = None
+    machine_name: Optional[str] = None
+    position_name: Optional[str] = None
+    transit_info: Optional[str] = None
 
 
 class LocationQrPrintRequest(BaseModel):

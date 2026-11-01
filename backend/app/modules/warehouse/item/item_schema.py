@@ -1,10 +1,8 @@
 from datetime import datetime
 from decimal import Decimal
-from typing import Any, Literal, Optional
+from typing import Any, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
-
-from app.modules.warehouse.lot_number_utils import apply_lot_display_fields
 
 
 def _price_from_item_details(details: dict | None) -> Decimal:
@@ -35,21 +33,21 @@ def _serialize_item_for_response(data: Any) -> Any:
     from app.modules.warehouse.item.item_model import Item
 
     if isinstance(data, Item):
+        details = data.details if isinstance(data.details, dict) else {}
         return {
             "id": data.id,
             "sku": data.sku,
             "name": data.name,
-            "description": data.description,
-            "base_unit": data.unit.name if data.unit else "",
-            "base_quantity": data.base_quantity,
-            "max_quantity": data.max_quantity,
-            "min_quantity": data.min_quantity,
+            "category": details.get("category"),
+            "description": data.description if getattr(data, "description", None) is not None else details.get("description"),
+            "base_unit": str(details.get("base_unit")) if details.get("base_unit") else None,
+            "standard_quantity_per_cart": getattr(data, "standard_quantity_per_cart", None) or 120,
             "warehouse_id": data.warehouse_id,
-            "supplier": data.supplier,
-            "details": data.details or {},
-            "is_active": data.is_active,
+            "supplier": str(getattr(data, "supplier", None) or details.get("supplier")) if (getattr(data, "supplier", None) or details.get("supplier")) else None,
+            "details": details,
+            "is_active": getattr(data, "is_active", True),
             "quantity": data.quantity,
-            "total_price": _compute_item_total_price(data.quantity, data.details or {}),
+            "total_price": _compute_item_total_price(data.quantity, details),
             "created_at": data.created_at,
             "updated_at": data.updated_at,
         }
@@ -57,61 +55,42 @@ def _serialize_item_for_response(data: Any) -> Any:
 
 
 class ItemCreate(BaseModel):
-    sku: str = Field(..., min_length=1, max_length=50)
+    sku: str = Field(..., min_length=1, max_length=100)
     name: str = Field(..., min_length=1, max_length=255)
+    category: Optional[str] = None
     description: Optional[str] = None
-    base_unit: int = Field(..., gt=0)
-    base_quantity: int = Field(default=1, gt=0)
-    max_quantity: int = Field(..., ge=0)
-    min_quantity: int = Field(..., ge=0)
+    base_unit: Optional[int] = None
+    standard_quantity_per_cart: int = Field(default=120, gt=0)
     warehouse_id: int
-    supplier: str = Field(default="", max_length=50)
+    supplier: Optional[str] = Field(default=None, max_length=100)
     details: Optional[dict[str, Any]] = None
-
-    @model_validator(mode="after")
-    def validate_quantity_bounds(self) -> "ItemCreate":
-        if self.min_quantity > self.max_quantity:
-            raise ValueError("min_quantity must be less than or equal to max_quantity")
-        return self
 
 
 class ItemUpdate(BaseModel):
-    sku: Optional[str] = Field(None, min_length=1, max_length=50)
+    sku: Optional[str] = Field(None, min_length=1, max_length=100)
     name: Optional[str] = Field(None, min_length=1, max_length=255)
+    category: Optional[str] = None
     description: Optional[str] = None
-    base_unit: Optional[int] = Field(None, gt=0)
-    base_quantity: Optional[int] = Field(None, gt=0)
-    max_quantity: Optional[int] = Field(None, ge=0)
-    min_quantity: Optional[int] = Field(None, ge=0)
+    base_unit: Optional[int] = None
+    standard_quantity_per_cart: Optional[int] = Field(None, gt=0)
     warehouse_id: Optional[int] = None
-    supplier: Optional[str] = Field(None, min_length=1, max_length=50)
+    supplier: Optional[str] = Field(None, max_length=100)
     details: Optional[dict[str, Any]] = None
     is_active: Optional[bool] = None
-
-    @model_validator(mode="after")
-    def validate_quantity_bounds(self) -> "ItemUpdate":
-        if (
-            self.max_quantity is not None
-            and self.min_quantity is not None
-            and self.min_quantity > self.max_quantity
-        ):
-            raise ValueError("min_quantity must be less than or equal to max_quantity")
-        return self
 
 
 class ItemResponse(BaseModel):
     id: int
     sku: str
     name: str
+    category: Optional[str] = None
     description: Optional[str] = None
-    base_unit: str
-    base_quantity: int
-    max_quantity: int
-    min_quantity: int
+    base_unit: Optional[str] = None
+    standard_quantity_per_cart: Optional[int] = 120
     warehouse_id: int
-    supplier: str
+    supplier: Optional[str] = None
     details: dict[str, Any] = Field(default_factory=dict)
-    is_active: bool
+    is_active: bool = True
     quantity: Optional[Decimal] = None
     total_price: Decimal = Decimal("0")
     created_at: Optional[datetime] = None
@@ -142,30 +121,15 @@ class ItemAnalyzeResponse(BaseModel):
 class ItemStockInDetail(BaseModel):
     id: int
     item_id: int
-    location_id: int
-    unit_id: int
+    location_id: Optional[int] = None
+    container_code: Optional[str] = None
+    current_stage_level: int = 0
     location_code: Optional[str] = None
     location_name: Optional[str] = None
-    lot_number_from: Optional[str] = None
-    lot_number_to: Optional[str] = None
-    lot_number: Optional[str] = None
-    expiry_date: Optional[str] = None
     quantity: Decimal
     status: str
 
     model_config = ConfigDict(from_attributes=True)
-
-    @model_validator(mode="after")
-    def set_lot_display(self) -> "ItemStockInDetail":
-        disp_from, disp_to, disp_lot = apply_lot_display_fields(
-            lot_number_from=self.lot_number_from,
-            lot_number_to=self.lot_number_to,
-            lot_number=self.lot_number,
-        )
-        self.lot_number_from = disp_from
-        self.lot_number_to = disp_to
-        self.lot_number = disp_lot
-        return self
 
 
 class ItemDetailResponse(BaseModel):
@@ -173,73 +137,6 @@ class ItemDetailResponse(BaseModel):
     stocks: list[ItemStockInDetail]
     available_quantity: Decimal = Decimal("0")
     split_quantity: Decimal = Decimal("0")
-
-
-# --- QR Code ---
-
-QrType = Literal["item", "transit", "pack"]
-
-
-class QRCodeCreate(BaseModel):
-    code: str = Field(..., min_length=1, max_length=50)
-    item_id: int = Field(..., gt=0)
-    item_stock_id: Optional[int] = Field(None, gt=0)
-    qr_type: QrType = "item"
-
-
-class QRCodePrintCreateBody(BaseModel):
-    qr_ids: list[str] = Field(..., min_length=1)
-    display_codes: list[str] = Field(..., min_length=1)
-    qr_type: QrType = "item"
-
-
-class QRCodeUpdate(BaseModel):
-    code: Optional[str] = Field(None, min_length=1, max_length=50)
-    item_id: Optional[int] = Field(None, gt=0)
-    item_stock_id: Optional[int] = None
-    qr_type: Optional[QrType] = None
-
-
-class QRCodeResponse(BaseModel):
-    id: int
-    code: str
-    item_id: int
-    item_stock_id: Optional[int] = None
-    qr_type: str = "item"
-    created_at: Optional[datetime] = None
-
-    model_config = ConfigDict(from_attributes=True)
-
-
-class QRCodeListResponse(BaseModel):
-    items: list[QRCodeResponse]
-    total: int
-    page: int
-    page_size: int
-
-
-QRCodeStatus = Literal["expired", "stocked", "available"]
-
-
-class QRCodeRecentResponse(BaseModel):
-    id: int
-    code: str
-    item_id: int
-    item_sku: Optional[str] = None
-    item_name: Optional[str] = None
-    item_stock_id: Optional[int] = None
-    qr_type: str = "item"
-    created_at: Optional[datetime] = None
-    status: QRCodeStatus
-
-    model_config = ConfigDict(from_attributes=True)
-
-
-class QRCodeRecentListResponse(BaseModel):
-    items: list[QRCodeRecentResponse]
-    total: int
-    page: int
-    page_size: int
 
 
 class ItemImportErrorItem(BaseModel):

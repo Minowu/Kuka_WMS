@@ -20,6 +20,7 @@ export default function WarehouseSettingPage() {
   const [form] = Form.useForm();
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingWarehouse, setEditingWarehouse] = useState<Warehouse | null>(null);
+  const hasExistingWarehouse = (warehouses || []).length >= 1;
 
   const handleOpenCreate = () => {
     setEditingWarehouse(null);
@@ -125,15 +126,24 @@ export default function WarehouseSettingPage() {
             variant="edit"
             icon={<EditOutlined className="text-brand-primary" />}
             onClick={() => handleOpenEdit(record)}
-            title="Sửa"
+            title="Sửa thông tin xưởng"
           />
-          <Button
-            variant="dangerText"
-            icon={<DeleteOutlined />}
-            onClick={() => handleDelete(record.id)}
-            className="hover:bg-red-50 rounded-lg"
-            title="Xóa"
-          />
+          {hasExistingWarehouse ? (
+            <span
+              className="text-xs text-slate-400 italic cursor-not-allowed select-none px-2 py-1 bg-slate-100 rounded"
+              title="Không thể xóa kho duy nhất của hệ thống"
+            >
+              Kho mặc định
+            </span>
+          ) : (
+            <Button
+              variant="dangerText"
+              icon={<DeleteOutlined />}
+              onClick={() => handleDelete(record.id)}
+              className="hover:bg-red-50 rounded-lg"
+              title="Xóa"
+            />
+          )}
         </Space>
       ),
     },
@@ -162,13 +172,19 @@ export default function WarehouseSettingPage() {
       <Hero
         title="Quản lý Kho Hàng"
         extra={
-          <Button
-            onClick={handleOpenCreate}
-            icon={<PlusOutlined />}
-            className="!bg-brand-primary hover:!bg-stripe-primary-deep !border-none !h-10 !rounded-lg font-semibold flex items-center"
-          >
-            Thêm Kho Mới
-          </Button>
+          hasExistingWarehouse ? (
+            <span className="text-xs font-semibold px-3 py-1.5 bg-blue-50 text-brand-primary border border-blue-200/60 rounded-lg">
+              🏭 Hệ thống vận hành tập trung 1 Xưởng duy nhất
+            </span>
+          ) : (
+            <Button
+              onClick={handleOpenCreate}
+              icon={<PlusOutlined />}
+              className="!bg-brand-primary hover:!bg-stripe-primary-deep !border-none !h-10 !rounded-lg font-semibold flex items-center"
+            >
+              Thêm Kho Mới
+            </Button>
+          )
         }
       />
 

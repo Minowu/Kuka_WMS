@@ -389,21 +389,13 @@ def upsert_staging_to_item(db: Session, job_id: str, warehouse_id: int) -> dict[
                 """
                 WITH upserted AS (
                     INSERT INTO item (
-                        sku, name, base_unit, base_quantity,
-                        min_quantity, max_quantity,
+                        sku, name, base_unit,
                         warehouse_id, supplier, description, details, is_active
                     )
                     SELECT
                         btrim(s.sku),
                         btrim(s.name),
                         u.id,
-                        CASE
-                            WHEN NULLIF(btrim(s.base_quantity), '') IS NULL THEN 1
-                            WHEN btrim(s.base_quantity)::bigint < 1 THEN 1
-                            ELSE btrim(s.base_quantity)::bigint
-                        END,
-                        COALESCE(NULLIF(btrim(s.min_quantity), '')::int, %s),
-                        COALESCE(NULLIF(btrim(s.max_quantity), '')::int, %s),
                         %s,
                         COALESCE(NULLIF(btrim(s.supplier), ''), ''),
                         NULLIF(btrim(s.description), ''),
@@ -415,7 +407,6 @@ def upsert_staging_to_item(db: Session, job_id: str, warehouse_id: int) -> dict[
                     ON CONFLICT (sku) DO UPDATE SET
                         name = EXCLUDED.name,
                         base_unit = EXCLUDED.base_unit,
-                        base_quantity = EXCLUDED.base_quantity,
                         warehouse_id = EXCLUDED.warehouse_id,
                         updated_at = NOW()
                     RETURNING (xmax = 0) AS inserted
@@ -426,8 +417,6 @@ def upsert_staging_to_item(db: Session, job_id: str, warehouse_id: int) -> dict[
                 FROM upserted
                 """,
                 (
-                    DEFAULT_IMPORT_MIN_QUANTITY,
-                    DEFAULT_IMPORT_MAX_QUANTITY,
                     warehouse_id,
                     job_id,
                 ),

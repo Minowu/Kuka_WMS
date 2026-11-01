@@ -8,13 +8,17 @@ export interface MapData {
   type?: string;
   xAttrMin?: number;
   yAttrMin?: number;
+  floorList?: Record<string, any>[];
+  nodeList?: Record<string, any>[];
+  edgeList?: Record<string, any>[];
+  mapFormat?: string;
 }
 
 export interface ZoneMapLayoutNode {
   id: number;
   location_code: string;
-  location_name: string | null;
-  bin_code: string | null;
+  bin_code?: string | null;
+  location_name?: string | null;
   row: string | null;
   column: string | null;
   level: string | null;
@@ -34,35 +38,77 @@ export interface MapRemapEntry {
   to_bin: string;
 }
 
-export interface LocationSyncSummary {
+export interface MapSyncMatchedItem {
+  location_id: number;
+  bin_code?: string | null;
+  location_name?: string | null;
+  matched_by: string;
+  previous_location_code: string;
+  location_code: string;
+}
+
+export interface MapSyncCreatedItem {
+  location_id: number;
+  bin_code?: string | null;
+  location_name?: string | null;
+  location_code: string;
+}
+
+export interface MapSyncRemappedItem {
+  from_location_id: number;
+  from_bin: string;
+  to_location_id: number;
+  to_bin: string;
+  moved: Record<string, number>;
+}
+
+export interface MapSyncRetiredItem {
+  location_id: number;
+  bin_code?: string | null;
+  location_name?: string | null;
+  references: Record<string, number>;
+  quantity?: string | null;
+}
+
+export interface MapSyncFreedCode {
+  location_id: number;
+  bin_code?: string | null;
+  location_name?: string | null;
+  released_location_code: string;
+}
+
+export interface MapSyncUnnamedNode {
+  location_code: string;
+  node_name?: string | null;
+}
+
+export interface MapSyncCounts {
+  matched: number;
   created: number;
-  updated: number;
-  unchanged: number;
-  reactivated: number;
-  deactivated: number;
+  remapped: number;
+  retired: number;
+  blocked: number;
 }
 
 export interface WarehouseMapImportResult {
-  id: number;
-  zone_id: number;
-  source_sha256: string;
-  original_filename: string;
-  zip_sha256: string;
-  zip_size_bytes: number;
-  download_url: string;
-  map_type: string | null;
-  width: number;
-  height: number;
-  node_count: number;
-  shelf_count: number;
-  waypoint_count: number;
-  line_count: number;
-  is_active: boolean;
-  created_at: string;
-  activated_at: string;
-  location_sync: LocationSyncSummary;
+  total_shelves: number;
+  matched: MapSyncMatchedItem[];
+  created: MapSyncCreatedItem[];
+  remapped: MapSyncRemappedItem[];
+  retired: MapSyncRetiredItem[];
+  blocked: MapSyncRetiredItem[];
+  freed_codes: MapSyncFreedCode[];
+  nodes_without_bin_code: MapSyncUnnamedNode[];
+  counts: MapSyncCounts;
+  warehouse_map_id?: number | null;
+  source?: string | null;
+  moved_cache_entries?: number | null;
+  // Backward compatibility fields if needed
+  id?: number;
+  zone_id?: number;
   message?: string;
 }
+
 
 export interface WarehouseMapMetadata {
   id: number;
@@ -135,6 +181,14 @@ export interface FullLocationDetail {
   id: number;
   location_code: string;
   location_name?: string | null;
+  location_label?: string | null;
+  location_type?: string | null;
+  container_code?: string | null;
+  model_name?: string | null;
+  current_stage_level?: number | null;
+  transit_target_name?: string | null;
+  machine_code?: string | null;
+  position_index?: number | null;
   bin_code?: string | null;
   row: string | null;
   column: string | null;
@@ -154,8 +208,8 @@ export interface FullLocationsResponse {
 export interface WarehouseLocationCell {
   id: number;
   location_code: string;
-  location_name: string;
-  bin_code: string | null;
+  bin_code?: string | null;
+  location_name?: string | null;
   node_name: string | null;
   warehouse_id: number;
   zone_id: number | null;
@@ -188,4 +242,13 @@ export interface WarehouseLocationItemStockDetail {
     item_stock_count: number;
     total_quantity: string;
   };
+  container_code?: string | null;
+  model_name?: string | null;
+  quantity?: string | null;
+  current_stage_level?: number | null;
+  stage_name?: string | null;
+  machine_code?: string | null;
+  machine_name?: string | null;
+  position_name?: string | null;
+  transit_info?: string | null;
 }

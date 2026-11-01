@@ -1,74 +1,52 @@
 from sqlalchemy import (
-    Boolean, Column, DateTime, ForeignKey, Index, Integer, String, UniqueConstraint, func,
-    select, case, exists, or_, text,
+    Boolean,
+    Column,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    UniqueConstraint,
+    case,
+    exists,
+    func,
+    select,
+    text,
 )
-from sqlalchemy.orm import relationship, column_property
+from sqlalchemy.orm import column_property, relationship
+
 from app.core.database import Base
 from app.modules.warehouse.item_stock.item_stock_model import (
     ItemStock,
     countable_stock_level_criterion,
     positive_stock_quantity_criterion,
 )
-from app.modules.warehouse.inbound_order.inbound_order_model import InboundOrderDetail
-from app.modules.warehouse.outbound_order.outbound_order_model import OutboundOrderAllocation
-
-MAPPING_LOCATION_STATUS = {
-    "in_progress": "in_transit",
-    "issued": "in_transit",
-    "initialize": "reserved",
-    "reserved": "reserved",
-}
-
-
-def _detail_at_location_exists(detail_cls, detail_statuses, location_id_col):
-    return exists(
-        select(1)
-        .where(
-            detail_cls.status.in_(detail_statuses),
-            or_(
-                detail_cls.to_location_id == location_id_col,
-                detail_cls.from_location_id == location_id_col,
-            ),
-        )
-        # Without this the EXISTS auto-correlates its own table away, leaving no FROM
-        # clause whenever the expression is rendered outside a SELECT on location.
-        .correlate_except(detail_cls)
-    )
 
 
 def _location_status_expression(location_id_col):
-    statuses_by_location_status: dict[str, list[str]] = {}
-    for detail_status, location_status in MAPPING_LOCATION_STATUS.items():
-        statuses_by_location_status.setdefault(location_status, []).append(detail_status)
-
-    case_whens = [
-        (
-            or_(
-                _detail_at_location_exists(
-                    InboundOrderDetail, detail_statuses, location_id_col
-                ),
-                _detail_at_location_exists(
-                    OutboundOrderAllocation, detail_statuses, location_id_col
-                ),
-            ),
-            location_status,
-        )
-        for location_status, detail_statuses in statuses_by_location_status.items()
-    ]
     return case(
-        *case_whens,
         (
             exists(
                 select(1)
                 .where(
                     ItemStock.location_id == location_id_col,
-                    ItemStock.quantity > 0,
                     ItemStock.is_active.is_(True),
-                    countable_stock_level_criterion(),
                 )
                 .correlate_except(ItemStock)
             ),
             "has_stock",
+        ),
+        (
+            exists(
+                select(1)
+                .where(
+                    ItemStock.destination_location_id == location_id_col,
+                    ItemStock.is_locked.is_(True),
+                    ItemStock.is_active.is_(True),
+                )
+                .correlate_except(ItemStock)
+            ),
+            "reserved",
         ),
         else_="empty",
     )
@@ -84,25 +62,29 @@ class Location(Base):
             "location_code",
             name="uq_location_warehouse_code",
         ),
-        Index(
-            "uq_location_warehouse_bin",
-            "warehouse_id",
-            "bin_code",
-            unique=True,
-            postgresql_where=text("bin_code IS NOT NULL"),
-        ),
     )
 
     id = Column(Integer, primary_key=True, index=True)
-    # Map node number. Rewritten on every import because map editors renumber nodes.
-    location_code = Column(String(50), nullable=False, index=True)
+    # Map nodeUuid from KUKA floor map.
+    location_code = Column(String(100), nullable=False, index=True)
+    # Map nodeLabel (e.g. '51', '216').
+    location_label = Column(String(50), nullable=True, index=True)
+    # Station business name (e.g. 'VT-01', 'CNC01-POS1', 'WASH-01').
     location_name = Column(String(100), nullable=False, index=True)
-    # Physical bin label (e.g. KH1.13). Stable identity used to match across imports.
-    bin_code = Column(String(50), nullable=True, index=True)
-    row = Column(String(10))  # Mapped from DB 'row' column
-    column = Column("column", String(10))  # 'column' is SQL keyword, use mapped name
-    level = Column(String(10))
-    node_name = Column(String(50))  # Additional node identifier
+    function_type = Column(Integer, nullable=True, default=2)  # 2: Rack node
+    location_type = Column(
+        String(30),
+        nullable=False,
+        default="UNASSIGNED",
+        server_default="UNASSIGNED",
+    )  # UNASSIGNED, RAW_MATERIAL, CNC_SLOT, WASHING_SLOT, EMPTY_CART_BUFFER
+    machine_id = Column(
+        Integer,
+        ForeignKey("machine.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    position_index = Column(Integer, nullable=True)  # 1, 2, or 3 for CNC stations
     map_x = Column(Integer, nullable=True)
     map_y = Column(Integer, nullable=True)
     warehouse_id = Column(
@@ -111,23 +93,12 @@ class Location(Base):
         nullable=False,
         index=True,
     )
-    zone_id = Column(
-        Integer,
-        ForeignKey("zone.id"),
-        nullable=True,
-        index=True,
-    )
     is_active = Column(Boolean, default=True, nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
     occupied_quantity = column_property(
-        select(
-            func.coalesce(
-                func.sum(ItemStock.quantity),
-                0
-            )
-        )
+        select(func.coalesce(func.sum(ItemStock.quantity), 0))
         .where(
             ItemStock.location_id == id,
             ItemStock.is_active.is_(True),
@@ -141,12 +112,35 @@ class Location(Base):
     status = column_property(_location_status_expression(id))
 
     warehouse = relationship("Warehouse", lazy="joined")
-    zone = relationship("Zone", lazy="joined")
+    machine = relationship("Machine", back_populates="locations", lazy="joined")
     stocks = relationship(
         "ItemStock",
+        primaryjoin="Location.id == ItemStock.location_id",
+        foreign_keys="[ItemStock.location_id]",
         back_populates="location",
-        lazy="selectin"
+        lazy="selectin",
     )
+
+    @property
+    def zone_id(self):
+        return None
+
+    @property
+    def node_label(self):
+        return self.location_label
+
+    @node_label.setter
+    def node_label(self, value):
+        self.location_label = value
+
+    @property
+    def machine_code(self):
+        return self.machine.machine_code if self.machine else None
+
+    @machine_code.setter
+    def machine_code(self, value):
+        # Read-only property derived from machine.machine_code; setter provided for legacy init compatibility
+        pass
 
 
 class WarehouseMap(Base):
@@ -159,15 +153,16 @@ class WarehouseMap(Base):
         nullable=False,
         index=True,
     )
-    zone_id = Column(
-        Integer,
-        ForeignKey("zone.id"),
-        nullable=True,
-        index=True,
-    )
     source = Column(String(255), nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     is_active = Column(Boolean, default=True, nullable=False)
 
-    zone = relationship("Zone", lazy="joined")
     warehouse = relationship("Warehouse", lazy="joined")
+
+    @property
+    def zone_id(self):
+        return None
+
+    @property
+    def machine_code(self):
+        return self.machine.machine_code if self.machine else None

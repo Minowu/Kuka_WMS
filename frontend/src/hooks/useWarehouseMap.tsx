@@ -148,11 +148,13 @@ export const useDownloadWarehouseMap = () => {
     { warehouseId: number }
   >({
     mutationFn: async ({ warehouseId }) => {
-      const blob = await downloadActiveMapApi(warehouseId);
+      const { blob, filename } = await downloadActiveMapApi(warehouseId);
+      const isJson = blob.type.includes('json') || filename?.endsWith('.json');
+      const fallbackName = `warehouse-map-${warehouseId}${isJson ? '.json' : '.zip'}`;
       const url = URL.createObjectURL(blob);
       const anchor = document.createElement('a');
       anchor.href = url;
-      anchor.download = `warehouse-map-${warehouseId}.zip`;
+      anchor.download = filename || fallbackName;
       anchor.click();
       URL.revokeObjectURL(url);
     },

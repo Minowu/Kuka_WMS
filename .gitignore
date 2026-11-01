@@ -7,6 +7,9 @@ backend/logs/
 Map_VCC_temp/
 Map_VCC.zip
 scratch/
+backend/app/static/warehouse_maps/
+uploads/
+backend/uploads/
 
 # Environments & secrets
 .env
@@ -35,3 +38,7 @@ build/
 *.swo
 .DS_Store
 Thumbs.db
+
+# Vault symlink
+vault-docs
+AGENTS.md

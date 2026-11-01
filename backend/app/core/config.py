@@ -1,4 +1,5 @@
 import json
+import os
 
 from pydantic_settings import BaseSettings
 from pydantic import field_validator
@@ -31,6 +32,11 @@ class Settings(BaseSettings):
 
     #Database
     database_url: str = "postgresql://postgres:thado123@localhost:5432/masan_wms"
+    db_role: str = "backend"  # "backend" | "celery"
+    db_pool_size: int = 20
+    db_max_overflow: int = 20
+    db_pool_timeout: int = 10
+    db_pool_recycle: int = 1800
 
     #JWT
     secret_key: str = "no_secret_key"
@@ -38,17 +44,15 @@ class Settings(BaseSettings):
     access_token_expire_minutes: int = 60
     refresh_token_expire_minutes: int = 10080
 
-    #ICS
-    ics_base_url: str = "Your RCS Server path"
-    inbound_process_code: str = "to_storage"
-    outbound_process_code: str = "out_storage"
-
-    # Zone
-    zone_inbound: list[str] = ["Zone_1.1", "Zone_2.2"]
-    zone_outbound: list[str] = ["Zone_7"]
-    zone_storage: list[str] = ["Zone_3"]
-    zone_qc: list[str] = ["Zone_2.1"]
-    zone_split: list[str] = ["Zone_split"]
+    # KUKA Fleet Manager (Real KUKA ICS Protocol)
+    kuka_base_url: str = "http://192.168.1.71:10870/interfaces/api"
+    kuka_access_token: str = "1726185d4d777843ff5eb65171f11b12f9fb364ef2bd2d7c265e36e3389f18c1"
+    kuka_org_id: str = "TDS_KUKA_ORG"
+    kuka_container_model_code: str = "1001"
+    kuka_robot_type: str = "LIFT"
+    kuka_mission_type: str = "RACK_MOVE"
+    kuka_http_timeout_seconds: float = 5.0
+    kuka_submit_max_retries: int = 3
 
     # Warehouses using manual (full-form) print templates — JSON array or comma list, e.g. [2]
     manual_warehouse_ids: list[int] = []
@@ -72,8 +76,7 @@ class Settings(BaseSettings):
         return _parse_int_id_list(value)
 
     class Config:
-        env_file = ".env"
+        env_file = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), ".env")
         case_sensitive = False
 
 settings = Settings()
-

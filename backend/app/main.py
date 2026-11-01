@@ -8,27 +8,19 @@ from app.modules.warehouse.warehouse_zone.warehouse_api import router as warehou
 from app.modules.warehouse.location_map.location_api import router as location_router
 from app.modules.warehouse.item.item_api import router as item_router
 from app.modules.warehouse.item_stock.item_stock_api import router as item_stock_router
-from app.modules.warehouse.transaction_history.history_api import router as transaction_router
-from app.modules.warehouse.unit.unit_api import router as unit_router
-from app.modules.warehouse.inbound_order.inbound_order_api import router as inbound_order_router
-from app.modules.warehouse.outbound_order.outbound_order_api import router as outbound_order_router
-from app.modules.warehouse.stocktake.stocktake_api import router as stocktake_router
-from app.modules.robot.robot_api import router as robot_router
-from app.modules.masan.masan_api import router as masan_router
 from app.modules.warehouse.notificcation.notification_api import router as notification_router
 from app.modules.warehouse.dashboard.dashboard_api import router as dashboard_router
-from app.core.logger import setup_logger
+from app.modules.production.route_api import router as production_router
+from app.core.logger import configure_logging, get_logger
 from app.core.cache import close_redis, get_redis
-from app.socket.ws_manager import ws_manager
+from app.socket.ws_manager import ws_manager, ws_router
+from app.core.observability import RequestLoggingMiddleware, install_exception_handlers
+from app.modules.client_logs.client_logs_api import router as client_logs_router
 import redis
 from prometheus_fastapi_instrumentator import Instrumentator
 
-logger = setup_logger(
-    name="main",
-    log_level="INFO",
-    service_name=settings.app_name,
-    log_dir="logs/main"
-)
+configure_logging()
+logger = get_logger("wms.system")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -47,12 +39,16 @@ async def lifespan(app: FastAPI):
     except redis.RedisError as e:
         logger.error("Redis connection failed: %s", e)
         raise RuntimeError("Cannot connect to Redis") from e
-    yield
-    # stop app
-    close_redis()
-    logger.info("Stopping app")
-    await ws_manager.stop()
-    logger.info("Websocket manager stopped")
+    try:
+        yield
+    finally:
+        try:
+            close_redis()
+            logger.info("Stopping app")
+            await ws_manager.stop()
+            logger.info("Websocket manager stopped")
+        except Exception as e:
+            logger.warning("Error during lifespan shutdown: %s", e)
 
 app = FastAPI(
     title=settings.app_name,
@@ -67,25 +63,25 @@ app.add_middleware(
     allow_credentials=False,
     allow_methods=["*"],   # allow all methods
     allow_headers=["*"],   # allow all headers
+    expose_headers=["X-Request-ID"],
     max_age=3600,
 )
 
+app.add_middleware(RequestLoggingMiddleware)
+install_exception_handlers(app)
+
 Instrumentator().instrument(app).expose(app)
 
-app.include_router(inbound_order_router, prefix="/api/v1")
-app.include_router(outbound_order_router, prefix="/api/v1")
-app.include_router(stocktake_router, prefix="/api/v1")
 app.include_router(auth_router, prefix="/api/v1")
 app.include_router(warehouse_router, prefix="/api/v1")
 app.include_router(location_router, prefix="/api/v1")
 app.include_router(item_router, prefix="/api/v1")
 app.include_router(item_stock_router, prefix="/api/v1")
-app.include_router(transaction_router, prefix="/api/v1")
-app.include_router(unit_router, prefix="/api/v1")
-app.include_router(robot_router, prefix="/api/v1")
-app.include_router(masan_router, prefix="/api/v1")
 app.include_router(notification_router, prefix="/api/v1")
 app.include_router(dashboard_router, prefix="/api/v1")
+app.include_router(production_router, prefix="/api/v1")
+app.include_router(ws_router, prefix="/api/v1")
+app.include_router(client_logs_router, prefix="/api/v1")
 
 @app.get("/")
 async def root():

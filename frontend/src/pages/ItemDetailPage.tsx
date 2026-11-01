@@ -20,6 +20,7 @@ import {
   message,
   Select,
 } from "@/components/ui";
+import { Tag } from "antd";
 import {
   useDeactivateItem,
   useItemById,
@@ -29,7 +30,6 @@ import type { ItemStock } from "@/types/item";
 import { useAppStore } from "@/store/useAppStore";
 import { getApiErrorMessage } from "@/utils/apiErrorMessage";
 import { useWarehouses } from "@/hooks/useWarehouse";
-import { useUnits } from "@/hooks/useUnit";
 import { DetailView } from "@/components/ui/DetailView";
 import dayjs from "dayjs";
 import type { Item } from "@/types/item";
@@ -68,13 +68,13 @@ export const ITEM_DETAIL_PRIMARY_FIELD_COUNT = 6;
 export const itemDetailFields: DetailFieldSchema<Item>[] = [
   {
     key: "quantity",
-    label: "Số lượng",
+    label: "Số lượng tồn",
     render: (item) => {
       const amount = parseQuantity(item.quantity);
       return (
         <span
           className={
-            amount < item.min_quantity
+            amount === 0
               ? "font-semibold text-orange-500"
               : "font-semibold"
           }
@@ -85,25 +85,11 @@ export const itemDetailFields: DetailFieldSchema<Item>[] = [
     },
   },
   {
-    key: "min_quantity",
-    label: "Số lượng tối thiểu",
-    accessor: (item) => item.min_quantity,
+    key: "standard_quantity_per_cart",
+    label: "Tiêu chuẩn phôi / xe gá",
+    accessor: (item) => `${item.standard_quantity_per_cart ?? 120} chi tiết/xe`,
   },
-  {
-    key: "max_quantity",
-    label: "Số lượng tối đa",
-    accessor: (item) => item.max_quantity,
-  },
-  {
-    key: "base_quantity",
-    label: "Số lượng cơ sở",
-    accessor: (item) => item.base_quantity,
-  },
-  {
-    key: "base_unit",
-    label: "Đơn vị",
-    accessor: (item) => item.base_unit,
-  },
+
   {
     key: "description",
     label: "Mô tả",
@@ -129,11 +115,8 @@ export const itemDetailFields: DetailFieldSchema<Item>[] = [
 type ItemFormValues = {
   name: string;
   sku: string;
-  base_unit: number;
-  base_quantity: number;
-  description: string;
-  min_quantity: number;
-  max_quantity: number;
+  standard_quantity_per_cart: number;
+  description?: string;
   quantity: number;
   detailEntries?: { key: string; value: string }[];
 };
@@ -148,14 +131,40 @@ const TABLE_CLASS =
 
 const locationColumns: ColumnsType<ItemStock> = [
   {
-    title: "Tên vị trí",
+    title: "Mã Xe Gá (WIP)",
+    dataIndex: "container_code",
+    key: "container_code",
+    render: (code: string | null | undefined) =>
+      code ? (
+        <Tag color="cyan" className="font-semibold text-sm">
+          {code}
+        </Tag>
+      ) : (
+        <span className="text-gray-400">—</span>
+      ),
+  },
+  {
+    title: "Vị Trí Đỗ Hiện Tại",
     dataIndex: "location_name",
     key: "location_name",
     render: (name: string | null | undefined, row) =>
-      name || (row.location_id ? `#${row.location_id}` : "—"),
+      name || row.location_code || (row.location_id ? `#${row.location_id}` : "—"),
   },
   {
-    title: "Số lượng",
+    title: "Công Đoạn Hiện Tại",
+    dataIndex: "current_stage_level",
+    key: "current_stage_level",
+    align: "center",
+    render: (level: number | undefined) => {
+      const stage = Number(level ?? 0);
+      if (stage === 0) {
+        return <Tag color="default">CĐ 0: Phôi Thô</Tag>;
+      }
+      return <Tag color="blue">{`CĐ ${stage}: Hoàn Thành B1-${stage}`}</Tag>;
+    },
+  },
+  {
+    title: "Số Lượng Phôi",
     dataIndex: "quantity",
     key: "quantity",
     align: "center",
@@ -166,27 +175,19 @@ const locationColumns: ColumnsType<ItemStock> = [
     ),
   },
   {
-    title: "Số Lot",
-    dataIndex: "lot_number",
-    key: "lot_number",
-    align: "center",
-    render: (lotNumber: string | null) => (
-      <span className="font-semibold text-brand-dark">{lotNumber || "—"}</span>
-    ),
-  },
-  {
-    title: "Hạn sử dụng",
-    dataIndex: "expiry_date",
-    key: "expiry_date",
-    align: "center",
-    render: (date: string | null) => (
-      <span className="font-semibold text-brand-dark">{formatDate(date)}</span>
-    ),
-  },
-  {
-    title: "Trạng thái",
+    title: "Trạng Thái",
     dataIndex: "status",
     key: "status",
+    align: "center",
+    render: (status: string) => {
+      if (status === "available") {
+        return <Tag color="success">Sẵn sàng</Tag>;
+      }
+      if (status === "locked" || status === "in_transit") {
+        return <Tag color="warning">Đang điều phối AGV</Tag>;
+      }
+      return <Tag>{status}</Tag>;
+    },
   },
 ];
 
@@ -194,7 +195,6 @@ export default function ItemDetailPage() {
   const navigate = useNavigate();
   const { selectedWarehouseId } = useAppStore();
   const { data: warehouses = [] } = useWarehouses();
-  const { data: units = [], isLoading: isUnitsLoading } = useUnits();
   const [isEditOpen, setIsEditOpen] = useState(false);
   const [form] = Form.useForm<ItemFormValues>();
   const { id } = useParams<{ id: string }>();
@@ -213,11 +213,8 @@ export default function ItemDetailPage() {
     form.setFieldsValue({
       name: item.name,
       sku: item.sku,
-      base_unit: units.find((u) => u.name === item.base_unit)?.id,
-      base_quantity: item.base_quantity,
+      standard_quantity_per_cart: item.standard_quantity_per_cart ?? 120,
       description: item.description ?? "",
-      min_quantity: item.min_quantity,
-      max_quantity: item.max_quantity,
       quantity: parseQuantity(item.quantity),
       detailEntries: Object.entries(item.details ?? {}).map(([key, value]) => ({
         key,
@@ -244,11 +241,8 @@ export default function ItemDetailPage() {
         id: item.id,
         data: {
           name: values.name.trim(),
-          description: values.description?.trim() ?? "",
-          base_unit: Number(values.base_unit),
-          base_quantity: Number(values.base_quantity),
-          min_quantity: Number(values.min_quantity),
-          max_quantity: Number(values.max_quantity),
+          description: values.description?.trim() || null,
+          standard_quantity_per_cart: Number(values.standard_quantity_per_cart ?? 120),
           details,
         },
       },
@@ -426,59 +420,21 @@ export default function ItemDetailPage() {
             <InputNumber disabled min={0} precision={0} />
           </Form.Item>
           <Form.Item
-            name="base_quantity"
-            label="Số lượng cơ sở"
+            name="standard_quantity_per_cart"
+            label="Tiêu chuẩn phôi / xe gá (chi tiết/xe)"
             rules={[
-              { required: true, message: "Vui lòng nhập số lượng cơ sở!" },
+              { required: true, message: "Vui lòng nhập số lượng tiêu chuẩn/xe!" },
               { type: "number", min: 1, message: "Giá trị phải >= 1" },
             ]}
           >
-            <InputNumber min={1} precision={0} />
+            <InputNumber min={1} precision={0} placeholder="Ví dụ: 120" className="w-full" />
           </Form.Item>
-          <div className="grid grid-cols-2 gap-4">
-            <Form.Item
-              name="min_quantity"
-              label="Số lượng tối thiểu"
-              rules={[
-                { required: true, message: "Vui lòng nhập số lượng tối thiểu!" },
-                { type: "number", min: 0, message: "Giá trị phải >= 0" },
-              ]}
-            >
-              <InputNumber min={0} precision={0} />
-            </Form.Item>
-            <Form.Item
-              name="max_quantity"
-              label="Số lượng tối đa"
-              rules={[
-                { required: true, message: "Vui lòng nhập số lượng tối đa!" },
-                { type: "number", min: 0, message: "Giá trị phải >= 0" },
-              ]}
-            >
-              <InputNumber min={0} precision={0} />
-            </Form.Item>
-          </div>
-          <Form.Item
-            name="base_unit"
-            label="Đơn vị"
-            rules={[{ required: true, message: "Vui lòng chọn đơn vị!" }]}
-          >
-            <Select
-              showSearch
-              placeholder="Chọn đơn vị"
-              optionFilterProp="label"
-              loading={isUnitsLoading}
-              options={units.map((unit) => ({
-                value: unit.id,
-                label: unit.name,
-              }))}
-            />
-          </Form.Item>
+
           <Form.Item
             name="description"
-            label="Mô tả"
-            rules={[{ required: true, message: "Vui lòng nhập mô tả!" }]}
+            label="Mô tả kỹ thuật"
           >
-            <Input />
+            <Input placeholder="Mô tả kỹ thuật (tùy chọn)" />
           </Form.Item>
           <Form.Item label="Thông tin bổ sung (tùy chọn)">
             <Form.List name="detailEntries">
@@ -492,7 +448,6 @@ export default function ItemDetailPage() {
                       <Form.Item
                         {...restField}
                         name={[name, "key"]}
-                        rules={[{ required: true, message: "Nhập tên trường" }]}
                         className="!mb-0 flex-1"
                       >
                         <Input placeholder="Tên (vd: cavity_number)" />
@@ -500,7 +455,6 @@ export default function ItemDetailPage() {
                       <Form.Item
                         {...restField}
                         name={[name, "value"]}
-                        rules={[{ required: true, message: "Nhập giá trị" }]}
                         className="!mb-0 flex-1"
                       >
                         <Input placeholder="Giá trị (vd: 1, 2, 3)" />

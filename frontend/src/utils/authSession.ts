@@ -15,8 +15,41 @@ export function isRefreshApiUrl(url?: string): boolean {
 
 export function getHomePathFromUser(user: User | null): string {
   if (!user) return '/login';
-  if (user.access.is_admin) return '/overview';
-  return '/report';
+  if (user.access?.is_admin) return '/dashboard';
+
+  // Định tuyến thẳng vào đúng phân xưởng được phân quyền
+  const roleNames = (user.roles || []).map((r) => (r.name || '').toLowerCase());
+  const uname = (user.username || '').toLowerCase();
+
+  if (
+    roleNames.some((r) => r.includes('raw')) ||
+    roleNames.includes('raw_material') ||
+    roleNames.includes('nguyenlieu') ||
+    uname.includes('raw') ||
+    uname.includes('nguyenlieu')
+  ) {
+    return '/pda/raw-material';
+  }
+
+  if (
+    roleNames.some((r) => r.includes('wash')) ||
+    roleNames.includes('washing') ||
+    roleNames.includes('tayrua') ||
+    uname.includes('wash') ||
+    uname.includes('tayrua')
+  ) {
+    return '/pda/washing';
+  }
+
+  if (
+    roleNames.some((r) => r.includes('cnc')) ||
+    uname.includes('cnc')
+  ) {
+    return '/pda/cnc';
+  }
+
+  // Mặc định tài khoản đứng máy gia công CNC
+  return '/pda/cnc';
 }
 
 export function hasModuleAccess(

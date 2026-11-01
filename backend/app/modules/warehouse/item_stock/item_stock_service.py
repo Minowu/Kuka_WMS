@@ -20,9 +20,6 @@ from app.modules.warehouse.item_stock.item_stock_schema import (
     ItemStockUpdate,
 )
 from app.modules.warehouse.location_map.location_model import Location
-from app.modules.warehouse.transaction_history.history_model import Transaction
-from app.modules.warehouse.unit.unit_model import Unit
-from app.modules.warehouse.warehouse_zone.warehouse_model import Zone
 
 
 def _stock_query(db: Session, *, include_inactive: bool = False):
@@ -50,15 +47,6 @@ def _ensure_item_and_location(db: Session, item_id: int, location_id: int) -> It
     return item
 
 
-def _ensure_unit_exists(db: Session, unit_id: int) -> None:
-    if not db.query(Unit).filter(Unit.id == unit_id).first():
-        raise ValueError(f"Unit id not found: {unit_id}")
-
-
-def _resolve_stock_unit_id(db: Session, item: Item, unit_id: Optional[int]) -> int:
-    resolved = unit_id if unit_id is not None else item.base_unit_id
-    _ensure_unit_exists(db, resolved)
-    return resolved
 
 
 def list_item_stocks(
@@ -112,11 +100,7 @@ def create_item_stock(db: Session, body: ItemStockCreate) -> ItemStock:
     stock = ItemStock(
         item_id=body.item_id,
         location_id=body.location_id,
-        unit_id=_resolve_stock_unit_id(db, item, body.unit_id),
         quantity=body.quantity,
-        lot_number_from=body.lot_number_from,
-        lot_number_to=body.lot_number_to,
-        expiry_date=body.expiry_date,
         status=body.status,
         is_active=True,
     )
@@ -139,26 +123,15 @@ def update_item_stock(
     data = body.model_dump(exclude_unset=True)
     item_id = data.get("item_id", stock.item_id)
     location_id = data.get("location_id", stock.location_id)
-    item: Optional[Item] = None
     if "item_id" in data or "location_id" in data:
-        item = _ensure_item_and_location(db, item_id, location_id)
+        _ensure_item_and_location(db, item_id, location_id)
         stock.item_id = item_id
         stock.location_id = location_id
-    if "unit_id" in data:
-        if item is None:
-            item = (
-                db.query(Item)
-                .filter(Item.id == stock.item_id, Item.is_active.is_(True))
-                .first()
-            )
-            if not item:
-                raise ValueError(f"Item id not found: {stock.item_id}")
-        stock.unit_id = _resolve_stock_unit_id(db, item, data["unit_id"])
     if "quantity" in data:
         if data["quantity"] is not None and data["quantity"] < 0:
             raise ValueError("Quantity must be >= 0")
         stock.quantity = data["quantity"]
-    for field in ("lot_number_from", "lot_number_to", "expiry_date", "status", "is_active"):
+    for field in ("status", "is_active"):
         if field in data:
             setattr(stock, field, data[field])
     try:
@@ -174,12 +147,8 @@ def delete_item_stock(db: Session, stock_id: int) -> bool:
     stock = get_item_stock_by_id(db, stock_id)
     if not stock:
         return False
-    if (
-        db.query(Transaction)
-        .filter(Transaction.item_stock_id == stock_id)
-        .first()
-    ):
-        raise ValueError("Cannot delete item stock: transactions still exist")
+    if stock.is_locked:
+        raise ValueError("Cannot delete item stock: cart is currently locked in an active transport task")
     stock.is_active = False
     db.commit()
     return True
@@ -188,11 +157,10 @@ def get_stock_split(db: Session, item_id: int) -> ItemStockSplitListResponse:
     stocks = (
         _stock_query(db)
         .join(Location, Location.id == ItemStock.location_id)
-        .join(Zone, Zone.id == Location.zone_id)
         .filter(
             ItemStock.item_id == item_id,
             ItemStock.status == "split",
-            Zone.code.in_(settings.zone_storage),
+            Location.is_active.is_(True),
             ItemStock.available_quantity > 0,
             positive_stock_quantity_criterion(),
             countable_stock_level_criterion(),

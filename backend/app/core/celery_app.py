@@ -6,7 +6,8 @@ from celery.schedules import crontab
 from celery.signals import worker_process_init
 
 from app.core.config import settings
-from app.core.logger import setup_logger
+from app.core.logger import configure_logging
+from app.core.observability import install_celery_signals
 
 
 from typing import Any
@@ -16,18 +17,14 @@ CELERY_LOGIC_TIMEOUT = 120
 
 QUEUE_LOGIC = "logic"
 QUEUE_STATUS = "status"
+QUEUE_FLEET = "fleet"
 
 celery_app = Celery(
     "wms",
     broker=settings.celery_broker_url,
     backend=settings.celery_broker_result_url,
     include=[
-        "app.modules.robot.robot_celery_task",
-        "app.modules.warehouse.inbound_order.inbound_celery_task",
-        "app.modules.warehouse.outbound_order.outbound_celery_task",
-        "app.modules.warehouse.item.item_celery_task",
-        "app.modules.warehouse.notificcation.notification_celery_task",
-        "app.modules.warehouse.dashboard.dashboard_celery_task",
+        "app.modules.production.production_celery_task",
     ],
 )
 
@@ -44,10 +41,10 @@ celery_app.conf.update(
     task_reject_on_worker_lost=True, 
     broker_connection_retry_on_startup=True,
 
-
     task_time_limit=300,              
     task_soft_time_limit=270,        
 
+    task_ignore_result=True,
     result_expires=3600,             
     task_track_started=True,         
 
@@ -55,24 +52,22 @@ celery_app.conf.update(
     task_queues={
         QUEUE_LOGIC: {},
         QUEUE_STATUS: {},
+        QUEUE_FLEET: {},
     },
     task_routes={
-        "robot.push_task_to_ics": {"queue": QUEUE_LOGIC},
-        "robot.persist_task_status": {"queue": QUEUE_STATUS},
-        "inbound.*": {"queue": QUEUE_LOGIC},
-        "outbound.*": {"queue": QUEUE_LOGIC},
-        "item.*": {"queue": QUEUE_LOGIC},
-        "notification.*": {"queue": QUEUE_LOGIC},
-        "dashboard.*": {"queue": QUEUE_LOGIC},
+        "production.submit_fleet_task": {"queue": QUEUE_FLEET},
+        "production.sweep_fleet_tasks": {"queue": QUEUE_FLEET},
+        "production.*": {"queue": QUEUE_LOGIC},
+        "robot.*": {"queue": QUEUE_STATUS},
     },
     beat_schedule={
-        "check-long-holding-stock-daily": {
-            "task": "notification.check_long_holding_stock",
-            "schedule": crontab(hour=11, minute=59),
+        "always-scan-transport-queue": {
+            "task": "production.scan_transport_queue",
+            "schedule": 5.0,
         },
-        "snapshot-inventory-daily": {
-            "task": "dashboard.snapshot_inventory_daily",
-            "schedule": crontab(hour=11, minute=59),
+        "sweep-fleet-tasks": {
+            "task": "production.sweep_fleet_tasks",
+            "schedule": 15.0,
         },
     },
 )
@@ -80,18 +75,10 @@ celery_app.conf.update(
 
 @worker_process_init.connect
 def init_worker_logging(**_kwargs):
-    """Worker không import main.py → phải setup logger riêng."""
-    setup_logger(
-        name="main",
-        log_level="INFO",
-        service_name="celery",
-        log_dir="logs/celery",
-    )
+    """Worker không import main.py → setup logger và gán vai trò DB Celery."""
+    import os
+    os.environ["WMS_DB_ROLE"] = "celery"
+    configure_logging()
 
-def run_logic_task(task: Task, /, **kwargs: Any) -> Any:
-    if settings.debug:  
-        return task.apply(kwargs=kwargs).get(propagate=True)
-    return task.apply_async(kwargs=kwargs).get(
-        timeout=CELERY_LOGIC_TIMEOUT,
-        propagate=True,
-    )
+
+install_celery_signals()

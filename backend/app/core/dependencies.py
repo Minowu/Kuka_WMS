@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.core.database import get_db
 from app.core.security import decode_access_token
+from app.core.logger import bind_context
 from app.modules.auth.auth_model import User, Role
 
 security = HTTPBearer()
@@ -55,6 +56,7 @@ def get_current_user(
             detail="Inactive user"
         )
     
+    bind_context(user=user.username)
     return user
 
 
@@ -110,4 +112,5 @@ def get_dev_admin_user(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Dev admin user not found (expected username 'admin')",
         )
+    bind_context(user=user.username)
     return user

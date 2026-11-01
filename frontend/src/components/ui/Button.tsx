@@ -5,6 +5,8 @@ import { cn } from './utils/cn'
 export type ButtonVariant =
     | 'primary'
     | 'secondary'
+    | 'outline'
+    | 'default'
     | 'ghost'
     | 'danger'
     | 'text'
@@ -14,7 +16,7 @@ export type ButtonVariant =
     
 
 export interface ButtonProps extends Omit<AntButtonProps, 'type' | 'variant'> {
-    variant?: ButtonVariant
+    variant?: ButtonVariant | string
 }
 
 const variantConfig: Record<
@@ -27,6 +29,16 @@ const variantConfig: Record<
             '!bg-brand-primary hover:!bg-stripe-primary-deep !border-none !h-10 !rounded-lg font-semibold',
     },
     secondary: {
+        type: 'default',
+        className:
+            '!rounded-lg !h-10 !border-stripe-hairline !text-brand-dark hover:!border-brand-primary hover:!text-brand-primary',
+    },
+    outline: {
+        type: 'default',
+        className:
+            '!rounded-lg !h-10 !border-slate-300 !text-slate-700 hover:!border-brand-primary hover:!text-brand-primary',
+    },
+    default: {
         type: 'default',
         className:
             '!rounded-lg !h-10 !border-stripe-hairline !text-brand-dark hover:!border-brand-primary hover:!text-brand-primary',
@@ -65,7 +77,7 @@ const variantConfig: Record<
 
 export const Button = forwardRef<HTMLButtonElement | HTMLAnchorElement, ButtonProps>(
     ({ variant = 'primary', className, ...props }, ref) => {
-        const config = variantConfig[variant]
+        const config = (variant && (variantConfig as Record<string, any>)[variant]) || variantConfig.primary
 
         return (
             <AntButton

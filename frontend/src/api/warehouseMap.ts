@@ -126,15 +126,24 @@ export const importWarehouseMapApi = async (
 
 export const downloadActiveMapApi = async (
   warehouseId: number,
-): Promise<Blob> => {
+): Promise<{ blob: Blob; filename?: string }> => {
   const response = await axiosInstance.get(
     `/api/v1/warehouse-maps/${warehouseId}/export`,
     {
       responseType: 'blob',
     },
   );
-  return response.data;
+  let filename: string | undefined;
+  const disposition = response.headers?.['content-disposition'] as string | undefined;
+  if (disposition) {
+    const match = disposition.match(/filename="?([^";]+)"?/);
+    if (match && match[1]) {
+      filename = match[1];
+    }
+  }
+  return { blob: response.data, filename };
 };
+
 
 export const getLocationDetailByIdApi = async (
   locationId: number,

@@ -187,10 +187,18 @@ def _parse_remap_form(remap: Optional[str]) -> Optional[list[dict]]:
 
 
 def _require_zip(file: UploadFile) -> None:
-    if not file.filename or not file.filename.lower().endswith(".zip"):
+    fn = (file.filename or "").lower()
+    ct = (file.content_type or "").lower()
+    if not (
+        fn.endswith(".zip")
+        or fn.endswith(".json")
+        or "zip" in ct
+        or "json" in ct
+        or ct == "application/octet-stream"
+    ):
         raise HTTPException(
             status_code=400,
-            detail="Invalid file format. Please upload a .zip file.",
+            detail="Chỉ chấp nhận file bản đồ định dạng .zip hoặc .json",
         )
 
 
@@ -291,7 +299,7 @@ def get_zone_map_data(zone_id: int, db: DbSession):
 )
 def export_warehouse_map(warehouse_id: int, db: DbSession):
     try:
-        content, filename = location_service.export_warehouse_map(db, warehouse_id)
+        content, filename, media_type = location_service.export_warehouse_map(db, warehouse_id)
     except ValueError as e:
         msg = str(e)
         status_code = (
@@ -300,11 +308,13 @@ def export_warehouse_map(warehouse_id: int, db: DbSession):
         raise HTTPException(status_code=status_code, detail=msg) from e
     return Response(
         content=content,
-        media_type="application/zip",
+        media_type=media_type,
         headers={
             "Content-Disposition": f'attachment; filename="{filename}"',
+            "Access-Control-Expose-Headers": "Content-Disposition",
         },
     )
+
 
 @router.get(
     "/locations/by-logic/storage-area",
