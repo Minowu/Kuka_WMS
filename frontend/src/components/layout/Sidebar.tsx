@@ -1,6 +1,5 @@
 import { useEffect, useState } from "react";
 import { matchPath, Navigate, NavLink, useLocation } from "react-router-dom";
-import logo_thado from "@/assets/logo_thadorobot.png";
 import { useLogout } from "@/hooks/useAuth";
 import { useAuthStore } from "@/store/useAuthStore";
 import { useAppStore } from "@/store/useAppStore";
@@ -222,22 +221,21 @@ export default function Sidebar() {
       <div
         className={`flex h-16 shrink-0 items-center border-b border-slate-800 font-bold transition-all duration-300 ${collapsed ? "justify-center px-2" : "px-6"}`}
       >
-        <a
-          className="flex items-center gap-2"
-          href="http://thadorobot.com"
+        <div
+          className="flex items-center gap-2 select-none"
           data-no-collapse
         >
-          <img
-            src={logo_thado}
-            className="w-8 h-8 shrink-0"
-            alt="Thadorobot Logo"
-          />
           <span
-            className={`text-brand-primary font-extrabold text-base tracking-widest transition-all duration-300 overflow-hidden whitespace-nowrap ${collapsed ? "opacity-0 max-w-0" : "opacity-100 max-w-[180px]"}`}
+            className="text-brand-primary font-black text-xl tracking-wider transition-all duration-300 overflow-hidden whitespace-nowrap"
           >
-            THADOROBOT
+            {collapsed ? "K" : "KUKA"}
           </span>
-        </a>
+          {!collapsed && (
+            <span className="text-[11px] font-bold text-slate-400 bg-slate-800/80 px-1.5 py-0.5 rounded tracking-wider border border-slate-700/60">
+              WMS
+            </span>
+          )}
+        </div>
       </div>
 
       <nav className="flex flex-col gap-1 flex-1 overflow-y-auto mt-6 px-3 overflow-x-hidden">
@@ -313,6 +311,21 @@ export default function Sidebar() {
         >
           <LogoutOutlined className="text-base" />
         </button>
+      </div>
+
+      <div
+        className={`border-t border-slate-800/80 bg-slate-950/40 transition-all duration-300 text-center select-none ${collapsed ? "py-2 px-1 text-[9px]" : "py-2.5 px-3 text-[11px]"}`}
+      >
+        <a
+          href="http://thadorobot.com"
+          target="_blank"
+          rel="noreferrer"
+          data-no-collapse
+          className="text-slate-500 hover:text-brand-primary transition-colors block overflow-hidden text-ellipsis whitespace-nowrap"
+          title="Thado Robot Solution"
+        >
+          {collapsed ? "© TR" : "© 2026 THADOROBOT"}
+        </a>
       </div>
     </aside>
   );

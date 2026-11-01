@@ -1152,9 +1152,9 @@
     "semantic_hash": ""
   },
   "docker-compose.yml": {
-    "mtime": 1793440435.3310523,
-    "seen": 1793440697.5305645,
-    "ast_hash": "2396a868872be03aeda1a70f6fb3459d",
+    "mtime": 1793522147.380584,
+    "seen": 1793548096.4476554,
+    "ast_hash": "3606123a4a4f637890a8e323c5f7581e",
     "semantic_hash": ""
   },
   "frontend/eslint.config.js": {
@@ -1338,9 +1338,9 @@
     "semantic_hash": "22a0226d7e54197cd639b2eb7ac53041"
   },
   "frontend/src/components/layout/Sidebar.tsx": {
-    "mtime": 1793421774.118662,
-    "seen": 1793428235.8704262,
-    "ast_hash": "5fde3c9a5944b2f4f911faa640025a95",
+    "mtime": 1793548039.4083183,
+    "seen": 1793548096.4476554,
+    "ast_hash": "ae7f5c5b6a63c0123e32bf7af2784583",
     "semantic_hash": ""
   },
   "frontend/src/components/layout/UserLayout.tsx": {
@@ -2124,9 +2124,9 @@
     "semantic_hash": "1fa6e1d693971e207f400cdaac68d815"
   },
   "opt/monitoring/docker-compose.yml": {
-    "mtime": 1793419283.097008,
-    "seen": 1793419469.3271427,
-    "ast_hash": "1f3188965f52d6d93d6a073f992d358f",
+    "mtime": 1793440940.737669,
+    "seen": 1793548096.4476554,
+    "ast_hash": "0a4770846551ea283f610adcc9f8a758",
     "semantic_hash": ""
   },
   "opt/monitoring/grafana/provisioning/dashboards/default.yml": {
@@ -2592,9 +2592,9 @@
     "semantic_hash": ""
   },
   "opt/monitoring/grafana/provisioning/dashboards/wms-logs.json": {
-    "mtime": 1793419255.5797448,
-    "seen": 1793419469.3271427,
-    "ast_hash": "2383b7b71fd86d68c4d41a4a9a0ca45d",
+    "mtime": 1793441290.433647,
+    "seen": 1793548096.4476554,
+    "ast_hash": "670a1dc9f335dcfdb3dc3872b68c532d",
     "semantic_hash": ""
   },
   "opt/monitoring/grafana/provisioning/datasources/loki.yml": {
@@ -2667,6 +2667,12 @@
     "mtime": 1793439131.0195959,
     "seen": 1793440697.5305645,
     "ast_hash": "e79391cc06d673a2a3e047cb1c9e275a",
+    "semantic_hash": ""
+  },
+  "backend/scripts/create_admin.py": {
+    "mtime": 1793440556.8657691,
+    "seen": 1793548096.4476554,
+    "ast_hash": "93e42900dac2b87c8370cea334ba5df0",
     "semantic_hash": ""
   },
   "frontend/package-lock.json": {
