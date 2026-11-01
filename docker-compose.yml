@@ -50,6 +50,7 @@ services:
     volumes:
       - ./backend/app:/app/app
       - ./backend/logs:/app/logs
+      - ./backend/scripts:/app/scripts
       - ./backend/uploads:/app/uploads
       - ./backend/app/static/file_import_item:/app/app/static/file_import_item
     depends_on:
@@ -81,6 +82,7 @@ services:
     volumes:
       - ./backend/app:/app/app
       - ./backend/logs:/app/logs
+      - ./backend/scripts:/app/scripts
       - ./backend/uploads:/app/uploads
       - ./backend/app/static/file_import_item:/app/app/static/file_import_item
     depends_on:
@@ -112,6 +114,7 @@ services:
     volumes:
       - ./backend/app:/app/app
       - ./backend/logs:/app/logs
+      - ./backend/scripts:/app/scripts
       - ./backend/uploads:/app/uploads
     depends_on:
       db:
@@ -142,6 +145,7 @@ services:
     volumes:
       - ./backend/app:/app/app
       - ./backend/logs:/app/logs
+      - ./backend/scripts:/app/scripts
       - ./backend/uploads:/app/uploads
     depends_on:
       db:
@@ -168,6 +172,7 @@ services:
     volumes:
       - ./backend/app:/app/app
       - ./backend/logs:/app/logs
+      - ./backend/scripts:/app/scripts
       - celerybeat_data:/data
     depends_on:
       db:
