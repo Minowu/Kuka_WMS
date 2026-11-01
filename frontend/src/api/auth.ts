@@ -4,6 +4,7 @@ import type {
   LoginApiResponse,
   LoginRequest,
   LoginResponse,
+  RoleBrief,
   UpdateUserInput,
   User,
   UserListResponse,
@@ -45,6 +46,12 @@ export const getStaffUsernamesApi = async (): Promise<string[]> => {
     '/api/v1/users/staff-usernames',
   );
   return response.data.usernames;
+};
+
+/** Lấy danh sách toàn bộ các Role trong hệ thống */
+export const getRolesApi = async (): Promise<RoleBrief[]> => {
+  const response = await axiosInstance.get<RoleBrief[]>('/api/v1/auth/roles');
+  return response.data;
 };
 
 /** @deprecated use getUsersApi — kept for older callers expecting an array */
