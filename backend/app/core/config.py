@@ -26,20 +26,20 @@ def _parse_int_id_list(raw: object) -> list[int]:
 
 
 class Settings(BaseSettings):
-    #App
-    app_name: str = "Warehouse Management System"
+    # App
+    app_name: str = "KUKA Warehouse Management System"
     debug: bool = False
 
-    #Database
-    database_url: str = "postgresql://postgres:thado123@localhost:5432/masan_wms"
+    # Database (PostgreSQL 16)
+    database_url: str = "postgresql://postgres:thado123@localhost:5433/kuka"
     db_role: str = "backend"  # "backend" | "celery"
     db_pool_size: int = 20
     db_max_overflow: int = 20
     db_pool_timeout: int = 10
     db_pool_recycle: int = 1800
 
-    #JWT
-    secret_key: str = "no_secret_key"
+    # JWT Authentication Security
+    secret_key: str = "kuka_wms_default_secret_key_change_in_production"
     algorithm: str = "HS256"
     access_token_expire_minutes: int = 60
     refresh_token_expire_minutes: int = 10080
@@ -58,17 +58,13 @@ class Settings(BaseSettings):
     manual_warehouse_ids: list[int] = []
 
     # Redis (cache)
-    redis_url: str = "redis://192.168.50.200:6379/0"
+    redis_url: str = "redis://localhost:6379/0"
     redis_cache_ttl: int = 300
     redis_key_prefix: str = "wms"
 
     # Redis Celery
-    celery_broker_url: str = "redis://192.168.50.200:6379/1"
-    celery_broker_result_url: str = "redis://192.168.50.200:6379/2"
-
-    # Expired configuration
-    manual_expired_days: int = 60
-    auto_expired_days: int = 30
+    celery_broker_url: str = "redis://localhost:6379/1"
+    celery_broker_result_url: str = "redis://localhost:6379/2"
 
     @field_validator("manual_warehouse_ids", mode="before")
     @classmethod
