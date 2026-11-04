@@ -1,4 +1,3 @@
-
 import { useAppStore } from '@/store/useAppStore';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
@@ -8,6 +7,7 @@ import {
   deleteUserApi,
   createUserApi,
   updateUserApi,
+  getRolesApi,
 } from '@/api/auth';
 import { useAuthStore } from '@/store/useAuthStore';
 import { getHomePathFromUser } from '@/utils/authSession';
@@ -15,6 +15,7 @@ import type {
   CreateUserInput,
   LoginRequest,
   LoginResponse,
+  RoleBrief,
   UpdateUserInput,
   User,
   UserListResponse,
@@ -60,6 +61,14 @@ export const useUser = () => {
       return data.items;
     },
     staleTime: 5 * 60 * 1000,
+  });
+};
+
+export const useRoles = () => {
+  return useQuery<RoleBrief[], Error>({
+    queryKey: ['roles'],
+    queryFn: getRolesApi,
+    staleTime: 10 * 60 * 1000,
   });
 };
 

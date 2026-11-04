@@ -16,6 +16,7 @@ import { getApiErrorMessage } from "@/utils/apiErrorMessage";
 import StationAssignmentModal from "@/pages/components/StationAssignmentModal";
 import {
   useUser,
+  useRoles,
   useCreateUser,
   useUpdateUser,
   useDeleteUser,
@@ -36,7 +37,28 @@ type UserFormValues = {
   password_confirm?: string;
 };
 
-const ADMIN_ROLE_ID = 2;
+const ROLE_CONFIG: Record<string, { label: string; tagColor: string; tagText: string }> = {
+  admin: {
+    label: "🛡️ Quản trị viên (Admin / Quản đốc)",
+    tagColor: "blue",
+    tagText: "Quản trị viên (Admin)",
+  },
+  operator_cnc: {
+    label: "⚙️ Operator CNC (Khu Máy CNC)",
+    tagColor: "cyan",
+    tagText: "Vận Hành CNC",
+  },
+  operator_raw: {
+    label: "📦 Operator Cấp Phôi (Khu Nguyên Liệu)",
+    tagColor: "purple",
+    tagText: "Cấp Phôi (Nguyên Liệu)",
+  },
+  operator_washing: {
+    label: "🧼 Operator Tẩy Rửa (Khu Tẩy Rửa)",
+    tagColor: "green",
+    tagText: "Khu Tẩy Rửa",
+  },
+};
 
 function isAdminUser(user: User | null): boolean {
   return !!user?.roles?.some((r) => r.name === "admin");
@@ -44,23 +66,21 @@ function isAdminUser(user: User | null): boolean {
 
 function getRoleTag(user: User) {
   const roleNames = user.roles?.map((r) => r.name) || [];
-  if (roleNames.includes("admin")) {
-    return <Tag color="blue" className="font-semibold px-2 py-0.5">Quản trị viên (Admin)</Tag>;
-  }
-  if (roleNames.includes("operator_raw")) {
-    return <Tag color="purple" className="font-semibold px-2 py-0.5">Cấp Phôi (Nguyên Liệu)</Tag>;
-  }
-  if (roleNames.includes("operator_cnc")) {
-    return <Tag color="cyan" className="font-semibold px-2 py-0.5">Vận Hành CNC</Tag>;
-  }
-  if (roleNames.includes("operator_washing")) {
-    return <Tag color="green" className="font-semibold px-2 py-0.5">Khu Tẩy Rửa</Tag>;
+  for (const name of roleNames) {
+    if (ROLE_CONFIG[name]) {
+      return (
+        <Tag color={ROLE_CONFIG[name].tagColor} className="font-semibold px-2 py-0.5">
+          {ROLE_CONFIG[name].tagText}
+        </Tag>
+      );
+    }
   }
   return <Tag color="default" className="font-semibold px-2 py-0.5">Chưa phân vai trò</Tag>;
 }
 
 export default function UserSettingPage() {
   const { data: users, isLoading } = useUser();
+  const { data: roles = [], isLoading: isRolesLoading } = useRoles();
   const createMutation = useCreateUser();
   const updateMutation = useUpdateUser();
   const deleteMutation = useDeleteUser();
@@ -79,13 +99,16 @@ export default function UserSettingPage() {
   const handleOpenCreate = () => {
     setEditingUser(null);
     form.resetFields();
-    form.setFieldsValue({ role_id: 4 }); // Mặc định là Operator CNC
+    const defaultRole = roles.find((r) => r.name === "operator_cnc") || roles[0];
+    if (defaultRole) {
+      form.setFieldsValue({ role_id: defaultRole.id });
+    }
     setIsModalOpen(true);
   };
 
   const handleOpenEdit = (record: User) => {
     setEditingUser(record);
-    const roleId = record.roles?.[0]?.id ?? 4;
+    const roleId = record.roles?.[0]?.id ?? roles.find((r) => r.name === "operator_cnc")?.id ?? roles[0]?.id;
     form.setFieldsValue({
       username: record.username,
       email: record.email,
@@ -126,7 +149,8 @@ export default function UserSettingPage() {
   const handleSubmit = async () => {
     try {
       const values = await form.validateFields();
-      const isAdmin = values.role_id === ADMIN_ROLE_ID;
+      const selectedRole = roles.find((r) => r.id === values.role_id);
+      const isAdmin = selectedRole?.name === "admin";
 
       if (editingUser) {
         const payload: UpdateUserInput = {
@@ -253,6 +277,11 @@ export default function UserSettingPage() {
 
   const saving = createMutation.isPending || updateMutation.isPending;
 
+  const roleSelectOptions = roles.map((r) => ({
+    value: r.id,
+    label: ROLE_CONFIG[r.name]?.label || `👤 ${r.name}`,
+  }));
+
   return (
     <div className="space-y-6">
       <Hero
@@ -321,13 +350,9 @@ export default function UserSettingPage() {
             rules={[{ required: true, message: "Vui lòng chọn vai trò!" }]}
           >
             <Select
-              placeholder="Chọn vai trò"
-              options={[
-                { value: 2, label: "🛡️ Quản trị viên (Admin / Quản đốc)" },
-                { value: 4, label: "⚙️ Operator CNC (Khu Máy CNC)" },
-                { value: 3, label: "📦 Operator Cấp Phôi (Khu Nguyên Liệu)" },
-                { value: 5, label: "🧼 Operator Tẩy Rửa (Khu Tẩy Rửa)" },
-              ]}
+              placeholder={isRolesLoading ? "Đang tải danh sách vai trò..." : "Chọn vai trò"}
+              loading={isRolesLoading}
+              options={roleSelectOptions}
             />
           </Form.Item>
 

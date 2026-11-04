@@ -1,17 +1,17 @@
 # Graph Report - KUKA_WMS  (2026-11-01)
 
 ## Corpus Check
-- 415 files · ~273,399 words
+- 415 files · ~273,840 words
 - Verdict: corpus is large enough that graph structure adds value.
 - Unclassified: 74 file(s) not represented in the graph (top: (none) 52, .csv 3, .css 2)
 
 ## Summary
-- 3737 nodes · 9427 edges · 191 communities (151 shown, 40 thin omitted)
-- Extraction: 91% EXTRACTED · 9% INFERRED · 0% AMBIGUOUS · INFERRED: 850 edges (avg confidence: 0.94)
+- 3740 nodes · 9446 edges · 203 communities (146 shown, 57 thin omitted)
+- Extraction: 91% EXTRACTED · 9% INFERRED · 0% AMBIGUOUS · INFERRED: 852 edges (avg confidence: 0.94)
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `2396a25f`
+- Built from commit: `12b27b5b`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -20,11 +20,11 @@
 - index.tsx
 - Warehouse Domain (2)
 - auth_api.py
-- dependencies.py
+- sqlalchemy_orm
 - NotificationPage.tsx
 - ItemDetailPage.tsx
 - Location
-- get_pda_cnc_stations
+- route_api.py
 - logger.py
 - Production Dispatch & AMR Flow (10)
 - splitProductConfig.ts
@@ -51,30 +51,30 @@
 - Inbound Order Service Module (32)
 - get_redis
 - Stocktake Service Module (34)
-- create_machine
+- axiosInstance.ts
 - local-config.yaml
 - SkuSearchSelect.tsx
-- auth_service.py
+- inbound_celery_task.py
 - root
 - grafana
-- CartSelector
+- Location
 - Session
 - outbound_order_api.py
 - notification_api.py
 - useAuth.ts
-- Warehouse
+- QrCodePrintPreviewModal.tsx
 - devDependencies
 - Bảng Kiểm Kê Cổng WMS & Ma Trận Xung Đột Với KUKA Fleet Manager
-- route_api.py
+- RawMaterialAndonPage.tsx
 - Frontend UI Components (50)
-- apiMessages.vi.ts
+- useQrCodePrint.ts
 - Warehouse Inbound Operations (52)
 - detailProgress.ts
 - Warehouse Domain (54)
 - Warehouse Domain (55)
 - RequestLoggingMiddleware
 - Warehouse Location & Storage (57)
-- Base
+- zustand
 - ProductionRoutePage.tsx
 - install_db_events
 - legacyLotNumber.ts
@@ -96,37 +96,38 @@
 - OperatorMapCanvas.tsx
 - station_api.py
 - dependencies
-- useQrCodePrint.ts
+- 20260728_1036_428622398633_create_auth_tables.py
 - Operational Workflow And Api Design
 - Frontend React Hooks & State (83)
 - sqlalchemy_orm
 - package.json
 - Git Commit
 - Docker Compose Module (87)
-- route_service.py
+- 20260729_2222_3f630eda8a3f_add_is_active_to_item_stock.py
 - useWarehouse.tsx
 - config.py
 - Tsconfig.Node Module (91)
 - 3.2. Phân tích theo 2 kịch bản triển khai
 - Docker Compose Module (93)
 - 6. Khởi Chạy Hệ Thống & Khôi Phục Dữ Liệu Trên Linux
-- robot_celery_task.py
+- 20260804_0040_3f81006dff3b_add_unit_and_item_unit_tables.py
 - 2. Sao Chép Mã Nguồn & Xử Lý Định Dạng Ký Tự (CRLF to LF)
-- axiosInstance.ts
+- App.tsx
 - 9. Vận Hành, Giới Hạn Dung Lượng Log & Sao Lưu Tự Động
-- _ensure_user_can_access_location
-- ws_manager.py
+- 20260805_1320_dc77a404581d_add_map_table.py
+- 20260806_2358_c1d2e3f4a5b6_add_user_warehouses_table.py
 - WarehouseMapImportDialog.tsx
 - useAppStore
 - detect_process
 - Docker Compose Module (104)
 - Kuka Fleet Migration Plan
 - install_celery_signals
-- apiErrorMessage.ts
+- 20260811_0837_f0ae84ed312e_add_status_to_robot_task.py
+- typing
 - configure_logging
 - backend
 - Review Khoi 3 Production Routes And Steps
-- OperatorPageHeader.tsx
+- Sidebar.tsx
 - celery_app.py
 - Default Module (114)
 - Prometheus Module (115)
@@ -136,17 +137,20 @@
 - Database Pruning And Cleanup Audit
 - Kuka Backend Deep Dive Manual
 - get_context
-- apiError.ts
+- 20260811_1536_be65937ad4e3_change_status_robottask.py
 - install_exception_handlers
 - Docker Compose Module (124)
 - New Map Format And Grouping Specification
 - Review Khoi 2 Product Models Items
-- downloadBlobFromResponse
+- 20260812_1420_a7c31d9be420_add_item_id_to_inbound_order_allocation.py
+- 20260813_1101_e2f3a4b5c6d7_add_unit_id_to_item_stock.py
 - Prometheus Module (129)
+- 20260814_1239_c08112bbdbe0_update_outbound_allocation_robot_task.py
 - Database Architecture Design
 - Plan Review Khoi 5 Amr Dispatch
 - Plan Review Pda Cnc Flow
 - Production Station And Workshop Partition Architecture
+- 20260819_1135_145027db3d7f_add_qr_code_table.py
 - Todo
 - Outbound Order Model Module (137)
 - Docker Compose Module (138)
@@ -169,23 +173,34 @@
 - Kuka Full System Review Plan
 - Review Khoi 4 Users And Station Rbac
 - postgres-exporter
+- 20260822_1051_05ee581abd1e_change_stocktake_status.py
 - redis-exporter
 - Warehouse Domain (162)
 - 02 Legacy Archived Modules Reference
 - Readme
 - loki
+- 20260825_1601_13f3b26a2411_add_qr_type.py
 - Plan
+- 20260827_0848_7ff8e8ad6409_add_itemstock_relation_and_additional_.py
+- 20260827_0903_24a5b14caaf9_add_field_for_itemstock.py
+- 20260921_1642_b3775d08063f_add_map_x_map_y_to_location.py
+- 20260921_2359_72c7929396b3_add_notification_table.py
 - 01 Core Modules And Functions Reference
 - Core Database Architecture Specification
+- 20260922_0020_63e34052639c_add_more_field_to_notification.py
 - Vite Env.D Module (175)
 - Tsconfig Module (176)
 - Question
 - Readme
 - Handoff Summary
 - Pyproject Module (194)
+- 20260922_0052_747d1f476051_add_more_field_to_notification2.py
+- 20261016_1600_d6e7f8a9b0c1_add_default_stage_level_to_location.py
 - 5. Thiết Lập Mạng Dùng Chung & Cấu Hình Môi Trường (.env)
 - database.py
-- RobotTask
+- 20261019_0015_e7f8a9b0c1d2_normalize_3nf_machine_drop_zone_and_add_task_status.py
+- 20261020_1515_f9a0b1c2d3e4_add_location_label_column.py
+- 20261021_0930_a7b8c9d0e1f2_drop_is_active_from_machine_and_item.py
 
 ## God Nodes (most connected - your core abstractions)
 1. `Location` - 116 edges
@@ -208,57 +223,57 @@
   DOCS/deployment/03-pre-migration-checklist.md → backend/app/modules/production/production_celery_task.py
 - `Giai đoạn 5: Kiểm tra nghiệm thu sau triển khai (Verification Gate)` --references--> `scan_transport_queue()`  [INFERRED]
   DOCS/deployment/03-pre-migration-checklist.md → backend/app/modules/production/production_celery_task.py
-- `_location_status_expression()` --uses--> `ItemStock`  [INFERRED]
-  backend/app/modules/warehouse/location_map/location_model.py → backend/app/modules/warehouse/item_stock/item_stock_model.py
+- `get_current_user()` --uses--> `Role`  [INFERRED]
+  backend/app/core/dependencies.py → backend/app/modules/auth/auth_model.py
 
 ## Import Cycles
 - None detected.
 
-## Communities (191 total, 40 thin omitted)
+## Communities (203 total, 57 thin omitted)
 
 ### Community 0 - "sqlalchemy"
-Cohesion: 0.02
-Nodes (73): upgrade(), upgrade(), upgrade(), upgrade(), downgrade(), upgrade(), downgrade(), upgrade() (+65 more)
+Cohesion: 0.05
+Nodes (40): downgrade(), upgrade(), downgrade(), upgrade(), downgrade(), upgrade(), downgrade(), upgrade() (+32 more)
 
 ### Community 1 - "index.tsx"
-Cohesion: 0.11
-Nodes (28): AdminRoute(), ProtectedRoute(), PublicRoute(), RoleGatePage(), RoleHomeRedirect(), AdminLayout(), Header(), MainLayout() (+20 more)
+Cohesion: 0.21
+Nodes (16): AdminRoute(), ProtectedRoute(), PublicRoute(), RoleGatePage(), RoleHomeRedirect(), MainLayout(), BlankPage(), BlankPageProps (+8 more)
 
 ### Community 2 - "Warehouse Domain (2)"
 Cohesion: 0.04
-Nodes (60): AGV_TONE_DOT, AGV_TONE_TEXT, AgvStatusRow, BufferSlotLegend, BufferSlotLegendPanel(), GoodsStatusLegend, GoodsStatusLegendPanel(), PanelShell() (+52 more)
+Nodes (55): OperatorMetricItem, OperatorPageHeader(), OperatorPageHeaderProps, useOperatorShell(), AGV_TONE_DOT, AGV_TONE_TEXT, AgvStatusRow, BufferSlotLegend (+47 more)
 
 ### Community 3 - "auth_api.py"
-Cohesion: 0.09
-Nodes (31): build_user_access_summary(), resolve_accessible_warehouses(), resolve_user_modules(), resolve_warehouse_scope(), user_is_admin(), user_to_response(), delete_user(), get_me() (+23 more)
+Cohesion: 0.07
+Nodes (64): require_permission(), create_access_token(), create_refresh_token(), decode_refresh_token(), get_password_hash(), verify_password(), build_user_access_summary(), resolve_accessible_warehouses() (+56 more)
 
-### Community 4 - "dependencies.py"
+### Community 4 - "sqlalchemy_orm"
 Cohesion: 0.06
-Nodes (16): get_db(), get_current_user(), get_dev_admin_user(), require_permission(), require_role(), ClientLogBatch, ClientLogEntry, ingest_client_logs() (+8 more)
+Nodes (13): close_redis(), get_db(), get_current_user(), require_role(), decode_access_token(), lifespan(), RolePermission, ClientLogBatch (+5 more)
 
 ### Community 5 - "NotificationPage.tsx"
-Cohesion: 0.22
-Nodes (12): listNotificationsApi(), resolveNotificationApi(), NOTIFICATION_POLL_INTERVAL_MS, useNotifications(), useNotificationUnsolvedCount(), useResolveNotification(), GetNotificationsParams, Notification (+4 more)
+Cohesion: 0.13
+Nodes (19): axiosInstance, listNotificationsApi(), resolveNotificationApi(), NOTIFICATION_POLL_INTERVAL_MS, useNotifications(), useNotificationUnsolvedCount(), useResolveNotification(), formatDate() (+11 more)
 
 ### Community 6 - "ItemDetailPage.tsx"
-Cohesion: 0.09
-Nodes (47): Button, Card(), DetailFieldSchema, DetailRow(), DetailView(), formatDetailValue(), Form, Input (+39 more)
+Cohesion: 0.12
+Nodes (43): Button, Card(), DetailFieldSchema, DetailRow(), DetailView(), formatDetailValue(), Form, Input (+35 more)
 
 ### Community 7 - "Location"
-Cohesion: 0.12
-Nodes (25): check_pos_buffer_rule(), _describe(), ensure_location_has_no_stock(), find_map_node(), release_location(), resolve_warehouse_id(), AvailableMachineResponse, MachineCreateRequest (+17 more)
+Cohesion: 0.11
+Nodes (20): release_location(), create_machine(), delete_machine(), get_machine(), list_available_machines(), update_machine(), AvailableMachineResponse, MachineCreateRequest (+12 more)
 
-### Community 8 - "get_pda_cnc_stations"
-Cohesion: 0.14
-Nodes (13): activate_production_route(), create_production_route(), delete_production_route(), get_pda_cnc_stations(), get_pda_models(), get_pda_raw_materials(), get_pda_washing_slots(), get_production_route() (+5 more)
+### Community 8 - "route_api.py"
+Cohesion: 0.07
+Nodes (51): ProductionRoute, activate_production_route(), call_material(), complete_machining_stage(), create_production_route(), delete_production_route(), _ensure_user_can_access_location(), get_pda_cnc_stations() (+43 more)
 
 ### Community 9 - "logger.py"
-Cohesion: 0.07
-Nodes (7): bind_context(), clear_context(), DispatchCore, DispatchService, FleetTask, TransportRequest, publish_event()
+Cohesion: 0.09
+Nodes (4): bind_context(), clear_context(), DispatchCore, TransportRequest
 
 ### Community 10 - "Production Dispatch & AMR Flow (10)"
-Cohesion: 0.07
-Nodes (44): get_report_kpis(), get_report_stock_aging_bucket(), get_report_stock_aging_overview(), get_report_top_products(), get_report_trends(), snapshot_inventory_daily_task(), ReportKpiResponse, ReportStockAgingBucketResponse (+36 more)
+Cohesion: 0.06
+Nodes (48): get_report_kpis(), get_report_stock_aging_bucket(), get_report_stock_aging_overview(), get_report_top_products(), get_report_trends(), ReportKpiResponse, ReportStockAgingBucketResponse, ReportStockAgingOverviewResponse (+40 more)
 
 ### Community 11 - "splitProductConfig.ts"
 Cohesion: 0.15
@@ -266,7 +281,7 @@ Nodes (17): canUseSplitProductForQrType(), isSplitProductQrType(), isSplitProduc
 
 ### Community 12 - "Warehouse Location & Storage (12)"
 Cohesion: 0.06
-Nodes (57): buildLocationMapParams(), buildMapImportFormData(), DEFAULT_MAP_LOCATION_TYPE, downloadActiveMapApi(), getActiveMapApi(), getActiveMapMetadataApi(), getActiveWarehouseMapApi(), getFullLocationsApi() (+49 more)
+Nodes (58): buildLocationMapParams(), buildMapImportFormData(), DEFAULT_MAP_LOCATION_TYPE, downloadActiveMapApi(), getActiveMapApi(), getActiveMapMetadataApi(), getActiveWarehouseMapApi(), getFullLocationsApi() (+50 more)
 
 ### Community 13 - "Frontend API & Data Services (13)"
 Cohesion: 0.08
@@ -274,11 +289,11 @@ Nodes (42): convert_item_quantity(), create_item_unit(), create_unit(), delete_i
 
 ### Community 14 - "Warehouse Domain (14)"
 Cohesion: 0.05
-Nodes (62): analyze_items(), create_item(), delete_item(), download_last_import_item_file(), get_import_items_job(), get_item(), import_items_masan(), list_items() (+54 more)
+Nodes (64): analyze_items(), create_item(), delete_item(), download_last_import_item_file(), get_import_items_job(), get_item(), import_items_masan(), list_items() (+56 more)
 
 ### Community 15 - "history_schema.py"
 Cohesion: 0.07
-Nodes (32): create_history(), create_transaction(), get_history(), get_transaction(), get_transaction_history(), list_histories(), list_transactions(), History (+24 more)
+Nodes (31): create_history(), create_transaction(), get_history(), get_transaction(), get_transaction_history(), list_histories(), list_transactions(), Transaction (+23 more)
 
 ### Community 16 - "Hướng Dẫn Di Chuyển Hệ Thống KUKA_WMS Sang Linux Server"
 Cohesion: 0.17
@@ -289,8 +304,8 @@ Cohesion: 0.08
 Nodes (47): getReportKpisApi(), getReportStockAgingBucketApi(), getReportStockAgingOverviewApi(), getReportTopProductsApi(), getReportTrendsApi(), REPORT_KPI_POLL_INTERVAL_MS, useReportKpis(), useReportStockAging() (+39 more)
 
 ### Community 19 - "Production Dispatch & AMR Flow (19)"
-Cohesion: 0.07
-Nodes (3): _ics_configured(), KukaFleetClient, WebhookHandler
+Cohesion: 0.06
+Nodes (4): DispatchService, _ics_configured(), KukaFleetClient, WebhookHandler
 
 ### Community 20 - "InboundStatusTag.tsx"
 Cohesion: 0.19
@@ -310,51 +325,51 @@ Nodes (6): KeyValueDetailsEditor(), KeyValueDetailsEditorProps, createEmptyKeyVa
 
 ### Community 24 - "Warehouse Location & Storage (24)"
 Cohesion: 0.09
-Nodes (37): getAllItemStockByZoneApi(), getAllLocationsByZoneApi(), getItemStockByZoneApi(), getLocationsByZoneApi(), listStorageLocationsApi(), listStorageRelocateCommandsApi(), relocateStorageStockApi(), itemStockByZoneQueryKey() (+29 more)
+Nodes (38): getAllItemStockByZoneApi(), getAllLocationsByZoneApi(), getItemStockByZoneApi(), getLocationsByZoneApi(), listStorageLocationsApi(), listStorageRelocateCommandsApi(), relocateStorageStockApi(), itemStockByZoneQueryKey() (+30 more)
 
 ### Community 25 - "inbound_order_schema.py"
-Cohesion: 0.07
-Nodes (37): release_inbound_locations(), relocate_assigned_stocks(), AssignedItemStockResponse, AssignItemStockMetaResponse, AssignOrGetItemStockResponse, AssignPackingToItemRequest, CacheForPackingUserRequest, InboundCallerResponse (+29 more)
+Cohesion: 0.06
+Nodes (38): apply_lot_display_fields(), format_lot_part_for_display(), format_lot_value_for_display(), normalize_lot_number(), resolve_lot_number_fields(), AssignedItemStockResponse, AssignItemStockMetaResponse, AssignPackingToItemRequest (+30 more)
 
 ### Community 26 - "inbound_order_api.py"
 Cohesion: 0.12
-Nodes (25): accept_inbound_task_task(), caller_inbound_order_task(), create_inbound_order_task(), _dump(), get_inbound_order_details_task(), update_inbound_order_task(), accept_inbound_task(), assign_or_get_item_stocks() (+17 more)
+Nodes (23): get_dev_admin_user(), accept_inbound_task(), assign_or_get_item_stocks(), _assign_or_get_item_stocks(), assign_or_get_item_stocks_by_location(), assign_packing_to_item(), cache_for_packing_user(), caller_inbound_order() (+15 more)
 
 ### Community 27 - "Outbound Order Service Module (27)"
-Cohesion: 0.12
-Nodes (43): OutboundOrder, OutboundOrderAllocation, OutboundOrderDetail, _build_allocation_response(), _build_detail_response(), _build_manual_allocation_task_from_group(), _build_outbound_list_summary(), calculate_outbound_order() (+35 more)
+Cohesion: 0.11
+Nodes (44): OutboundOrder, OutboundOrderAllocation, OutboundOrderDetail, DetailForCalculate, OutboundRobotTaskCreate, OutboundRobotTaskResponse, _build_allocation_response(), _build_detail_response() (+36 more)
 
 ### Community 28 - "Context Chuyen Giao Du An Tich Hop Amr Chi Tiet"
 Cohesion: 0.04
 Nodes (46): 0. Cách đọc tài liệu và nguyên tắc quan trọng, 10. Nguyên tắc thiết kế để tránh lỗi, 11.1 Ba câu hỏi ưu tiên, 11.2 Checklist kỹ thuật tiếp theo, 11. Tích hợp AMR — cần xác minh với nhà cung cấp, 12. Câu hỏi nghiệp vụ còn mở, 13. Những điều làm rõ gần nhất, 14. Demo HTML hiện có và giới hạn (+38 more)
 
 ### Community 29 - "StationSettingPage.tsx"
-Cohesion: 0.11
-Nodes (35): createMachineApi(), deleteMachineApi(), getMachinesApi(), getUserLocationsApi(), updateMachineApi(), updateUserLocationsApi(), createStationLocationApi(), deleteStationLocationApi() (+27 more)
+Cohesion: 0.09
+Nodes (40): @tanstack/react-query@^5.101.0, createMachineApi(), deleteMachineApi(), getMachinesApi(), getUserLocationsApi(), updateMachineApi(), updateUserLocationsApi(), createStationLocationApi() (+32 more)
 
 ### Community 30 - "Frontend UI Components (30)"
-Cohesion: 0.10
-Nodes (40): ADR-0002, refreshAccessTokenApi(), CallMaterialPayload, callMaterialToCncApi(), completeMachiningStageApi(), CompleteStagePayload, getPdaCncStationsApi(), getPdaModelsApi() (+32 more)
+Cohesion: 0.11
+Nodes (37): ADR-0002, CallMaterialPayload, callMaterialToCncApi(), completeMachiningStageApi(), CompleteStagePayload, getPdaCncStationsApi(), getPdaModelsApi(), getPdaRawMaterialsApi() (+29 more)
 
 ### Community 31 - "Frontend React Hooks & State (31)"
 Cohesion: 0.09
-Nodes (42): analyzeItemsApi(), createItemApi(), createQrCodesApi(), deactivateItemApi(), downloadLastImportItemFileApi(), generateQrCodesApi, getItemByIdApi(), getItemImportJobApi() (+34 more)
+Nodes (45): analyzeItemsApi(), createItemApi(), createQrCodesApi(), deactivateItemApi(), downloadLastImportItemFileApi(), generateQrCodesApi, getItemByIdApi(), getItemImportJobApi() (+37 more)
 
 ### Community 32 - "Inbound Order Service Module (32)"
 Cohesion: 0.14
 Nodes (30): cache_delete(), InboundOrder, InboundOrderAllocation, InboundOrderDetail, _build_allocation_response(), _build_detail_response(), _build_inbound_list_summary(), caller_inbound_order() (+22 more)
 
 ### Community 33 - "get_redis"
-Cohesion: 0.10
-Nodes (39): cache_delete_pattern(), cache_exists(), cache_get(), cache_scan_keys(), cache_set(), close_redis(), get_redis(), _log_redis_errors() (+31 more)
+Cohesion: 0.12
+Nodes (38): cache_delete_pattern(), cache_exists(), cache_get(), cache_scan_keys(), cache_set(), get_redis(), _log_redis_errors(), _prefixed_key() (+30 more)
 
 ### Community 34 - "Stocktake Service Module (34)"
-Cohesion: 0.10
-Nodes (36): lot_string_to_date(), update_stocktake(), Stocktake, _stocktake_all_items_status(), _stocktake_has_any_item(), _stocktake_has_item_status(), _stocktake_item_exists(), StocktakeItemStock (+28 more)
+Cohesion: 0.07
+Nodes (43): confirm_stocktake_item_quantity(), create_stocktake(), delete_stocktake(), get_stocktake(), get_stocktake_item_form_data(), list_stocktake_items(), list_stocktakes(), record_stocktake_item_count() (+35 more)
 
-### Community 35 - "create_machine"
-Cohesion: 0.17
-Nodes (5): create_machine(), delete_machine(), get_machine(), list_available_machines(), update_machine()
+### Community 35 - "axiosInstance.ts"
+Cohesion: 0.19
+Nodes (13): refreshAccessTokenApi(), refreshClient, CustomAxiosRequestConfig, failedQueue, useAuthBootstrap(), RefreshResponse, AUTH_API_PATHS, decodeJwtExp() (+5 more)
 
 ### Community 36 - "local-config.yaml"
 Cohesion: 0.05
@@ -364,9 +379,9 @@ Nodes (39): analytics, reporting_enabled, auth_enabled, common, instance_addr, p
 Cohesion: 0.26
 Nodes (10): closeOtherSkuSelects(), formatQuantityHint(), ItemQueryParams, openSkuSelectRegistry, registerOpenSkuSelect(), SkuSearchOption, SkuSearchSelect(), SkuSearchSelectProps (+2 more)
 
-### Community 38 - "auth_service.py"
-Cohesion: 0.15
-Nodes (33): create_access_token(), create_refresh_token(), decode_refresh_token(), get_password_hash(), verify_password(), Permission, Role, RolePermission (+25 more)
+### Community 38 - "inbound_celery_task.py"
+Cohesion: 0.35
+Nodes (7): accept_inbound_task_task(), caller_inbound_order_task(), create_inbound_order_task(), _dump(), get_inbound_order_details_task(), update_inbound_order_task(), InboundOrderCreate
 
 ### Community 39 - "root"
 Cohesion: 0.18
@@ -376,9 +391,9 @@ Nodes (8): health(), root(), 1. Mục Tiêu & Phạm Vi (Scope & Objectives), 2.
 Cohesion: 0.18
 Nodes (11): GF_SECURITY_ADMIN_PASSWORD, GF_SECURITY_ADMIN_USER, GF_USERS_ALLOW_SIGN_UP, container_name, depends_on, environment, image, ports (+3 more)
 
-### Community 41 - "CartSelector"
-Cohesion: 0.08
-Nodes (3): CartSelector, QueueService, TestCartSelectorSameMachine
+### Community 41 - "Location"
+Cohesion: 0.06
+Nodes (13): log_context(), CartSelector, QueueService, compute_live_total_inventory_value(), compute_live_total_quantity(), run_daily_snapshots_for_all_warehouses(), _storage_stock_filters(), upsert_daily_snapshot() (+5 more)
 
 ### Community 42 - "Session"
 Cohesion: 0.11
@@ -393,12 +408,12 @@ Cohesion: 0.13
 Nodes (20): create_notification(), delete_notification(), get_notification(), list_notifications(), resolve_notification(), update_notification(), check_long_holding_stock_task(), NotificationCreate (+12 more)
 
 ### Community 45 - "useAuth.ts"
-Cohesion: 0.10
-Nodes (29): @tanstack/react-query@^5.101.0, createUserApi(), deleteUserApi(), getUserApi(), getUsersApi(), loginApi(), updateUserApi(), refreshClient (+21 more)
+Cohesion: 0.14
+Nodes (22): createUserApi(), deleteUserApi(), getRolesApi(), getUserApi(), getUsersApi(), loginApi(), updateUserApi(), useLogin() (+14 more)
 
-### Community 46 - "Warehouse"
-Cohesion: 0.19
-Nodes (15): create_warehouse(), delete_warehouse(), get_warehouse(), list_warehouses(), update_warehouse(), Warehouse, WarehouseCreate, WarehouseListResponse (+7 more)
+### Community 46 - "QrCodePrintPreviewModal.tsx"
+Cohesion: 0.38
+Nodes (7): QrCodePrintPreviewModal(), QrCodePrintPreviewModalProps, buildPrintHtml(), createQrDataUrl(), escapeHtml(), printQrCodeLabels(), QrCodePrintLabel
 
 ### Community 47 - "devDependencies"
 Cohesion: 0.11
@@ -408,25 +423,25 @@ Nodes (19): devDependencies, autoprefixer@^10.5.0, postcss@^8.5.15, prettier@^3.
 Cohesion: 0.29
 Nodes (7): 1.1. Bảng tổng hợp cổng từ cấu hình mã nguồn và Docker Compose, 1.2. Hiện trạng lắng nghe thực tế trên máy Windows (Live Listeners Audit), 1. Bảng Kiểm Kê Toàn Bộ Cổng Mạng Của KUKA_WMS, 2. Danh Sách Cổng Của KUKA Fleet Manager Cần Tránh, 4. Kế Hoạch Phân Bổ Cổng Chuẩn Hóa Trên Linux Production, 5. Tóm Tắt Quy Tắc Vàng Khi Cấu Hình Cổng (Golden Rules), Bảng Kiểm Kê Cổng WMS & Ma Trận Xung Đột Với KUKA Fleet Manager
 
-### Community 49 - "route_api.py"
-Cohesion: 0.19
-Nodes (17): CallMaterialRequest, CompleteStageRequest, ContainerActionRequest, PdaCncStation, PdaCncStationRack, PdaCncSupportedModel, PdaModelItem, PdaRawMaterialSlot (+9 more)
+### Community 49 - "RawMaterialAndonPage.tsx"
+Cohesion: 0.42
+Nodes (6): getRawMaterialAndonQueueApi(), getWebSocketUrl(), RawMaterialAndonPage(), AndonRawMaterialDemand, AndonRawMaterialResponse, AndonRawSlotStatus
 
 ### Community 50 - "Frontend UI Components (50)"
-Cohesion: 0.17
-Nodes (21): assignZoneLocationsApi(), createZoneApi(), deleteZoneApi(), listLocationsApi(), listZonesApi(), printLocationQrCodesApi(), updateZoneApi(), useAssignZoneLocations() (+13 more)
+Cohesion: 0.12
+Nodes (29): assignZoneLocationsApi(), createZoneApi(), deleteZoneApi(), listLocationsApi(), listZonesApi(), printLocationQrCodesApi(), updateZoneApi(), useAssignZoneLocations() (+21 more)
 
-### Community 51 - "apiMessages.vi.ts"
-Cohesion: 0.20
-Nodes (16): API_MESSAGE_ENTRIES, API_MESSAGES_VI, applyDictionary(), translateAnchorPackItemMismatch(), translateApiMessage(), translateInvalidCavity(), translateItemNotFound(), translateOnlyItemQrLocationAssign() (+8 more)
+### Community 51 - "useQrCodePrint.ts"
+Cohesion: 0.09
+Nodes (38): isManualPrintWarehouse(), resolveQrPrintLabelsPerPage(), useCreateQrCodes(), usePreviewQrCodes(), getErrorMessage(), QR_PRINT_LABELS_PER_PAGE, QR_PRINT_MAX_QUANTITY, QR_TYPE_OPTIONS (+30 more)
 
 ### Community 52 - "Warehouse Inbound Operations (52)"
-Cohesion: 0.13
-Nodes (31): apply_lot_display_fields(), format_lot_number_display(), format_lot_part_for_display(), format_lot_value_for_display(), resolve_lot_number_input(), AssignOrGetItemStockAction, _apply_split_flag_to_cache_payload(), assign_for_packing_user() (+23 more)
+Cohesion: 0.18
+Nodes (27): format_lot_number_display(), resolve_lot_number_input(), AssignOrGetItemStockAction, _apply_split_flag_to_cache_payload(), assign_for_packing_user(), assign_or_get_item_stock(), assign_packing_to_item(), assign_stock_to_location() (+19 more)
 
 ### Community 54 - "Warehouse Domain (54)"
-Cohesion: 0.15
-Nodes (21): create_item_stock(), delete_item_stock(), get_item_stock(), get_stock_split(), list_item_stocks(), update_item_stock(), ItemStockCreate, ItemStockListResponse (+13 more)
+Cohesion: 0.19
+Nodes (19): create_item_stock(), delete_item_stock(), get_item_stock(), get_stock_split(), list_item_stocks(), update_item_stock(), ItemStockCreate, ItemStockListResponse (+11 more)
 
 ### Community 55 - "Warehouse Domain (55)"
 Cohesion: 0.10
@@ -435,6 +450,10 @@ Nodes (34): WarehouseMapCanvas(), WarehouseMapCanvasProps, LEGEND_ITEMS, Warehou
 ### Community 57 - "Warehouse Location & Storage (57)"
 Cohesion: 0.16
 Nodes (20): delete_location(), export_warehouse_map(), get_location(), get_location_detail(), get_map_data(), get_zone_map_data(), import_warehouse_map(), list_locations() (+12 more)
+
+### Community 58 - "zustand"
+Cohesion: 0.40
+Nodes (4): zustand@^5.0.14, NotificationState, useNotificationStore, zustand
 
 ### Community 59 - "ProductionRoutePage.tsx"
 Cohesion: 0.18
@@ -457,8 +476,8 @@ Cohesion: 0.20
 Nodes (8): @tailwindcss/vite@^4.3.1, vite@8.1.5, vite-plugin-node-polyfills@^0.28.0, @vitejs/plugin-react@6.0.4, @tailwindcss/vite, vite, vite-plugin-node-polyfills, @vitejs/plugin-react
 
 ### Community 65 - "outbound_order_schema.py"
-Cohesion: 0.11
-Nodes (26): AllocationOutboundTaskExecute, AllocationResult, CalculateOutboundDetail, CalculateOutboundResponse, DetailForCalculate, ExecuteQrManualRequest, ExecuteQrManualResponse, LackedDetailResponse (+18 more)
+Cohesion: 0.12
+Nodes (23): AllocationOutboundTaskExecute, AllocationResult, CalculateOutboundDetail, CalculateOutboundResponse, ExecuteQrManualRequest, ExecuteQrManualResponse, LackedDetailResponse, OutboundConfirmNoQrRequest (+15 more)
 
 ### Community 66 - "Warehouse Domain (66)"
 Cohesion: 0.12
@@ -493,24 +512,20 @@ Cohesion: 0.33
 Nodes (6): 2. Danh Mục Kiểm Tra Từng Bước (Migration Checklist), Giai đoạn 1: Chuẩn bị mã nguồn & Sửa cấu hình (Pre-flight Config Fixes), Giai đoạn 2: Chuẩn bị máy chủ đích Linux (Server Preparation), Giai đoạn 3: Sao chép & Chuyển đổi dữ liệu (Data & Source Transfer), Giai đoạn 4: Triển khai & Khôi phục CSDL (Deployment & Restore), Giai đoạn 6: Thiết lập vận hành tự động (Maintenance Setup)
 
 ### Community 77 - "db_session"
-Cohesion: 0.45
-Nodes (11): db_session(), calculate_outbound_order_task(), create_outbound_order_task(), _dump(), execute_outbound_task_task(), get_outbound_lacked_details_task(), get_outbound_manual_allocation_tasks_task(), get_outbound_order_by_id_task() (+3 more)
+Cohesion: 0.26
+Nodes (13): db_session(), calculate_outbound_order_task(), create_outbound_order_task(), _dump(), execute_outbound_task_task(), get_outbound_lacked_details_task(), get_outbound_manual_allocation_tasks_task(), get_outbound_order_by_id_task() (+5 more)
 
 ### Community 78 - "OperatorMapCanvas.tsx"
-Cohesion: 0.07
-Nodes (36): formatEmptyLocationLabel(), formatStorageLocationLabel(), getZoneMapStatusApi(), BufferCellClickPayload, BufferMapCanvasTuning, computeMapSizeFromNodes(), drawInboundSeparator(), drawSelectedHighlight() (+28 more)
+Cohesion: 0.11
+Nodes (26): formatEmptyLocationLabel(), formatStorageLocationLabel(), getZoneMapStatusApi(), BufferCellClickPayload, BufferMapCanvasTuning, computeMapSizeFromNodes(), drawInboundSeparator(), drawSelectedHighlight() (+18 more)
 
 ### Community 79 - "station_api.py"
-Cohesion: 0.17
-Nodes (13): create_station_location(), delete_station_location(), get_available_map_nodes(), get_station_catalog(), update_station_location(), MachineCatalogGroup, MapAvailableNodeResponse, StationCatalogItem (+5 more)
+Cohesion: 0.12
+Nodes (22): check_pos_buffer_rule(), _describe(), ensure_location_has_no_stock(), find_map_node(), resolve_warehouse_id(), create_station_location(), delete_station_location(), get_available_map_nodes() (+14 more)
 
 ### Community 80 - "dependencies"
-Cohesion: 0.09
-Nodes (22): dependencies, @ant-design/icons@^6.2.5, antd@^6.4.4, axios@^1.18.0, date-fns@^4.4.0, dayjs@^1.11.21, @hookform/resolvers@^5.4.0, jsqr@^1.4.0 (+14 more)
-
-### Community 81 - "useQrCodePrint.ts"
-Cohesion: 0.13
-Nodes (20): INBOUND_MANUAL_WAREHOUSE_IDS, INBOUND_TYPE, isManualPrintWarehouse(), OUTBOUND_MANUAL_WAREHOUSE_IDS, OUTBOUND_TYPE, QR_PRINT_LABELS_PER_PAGE_AUTO, QR_PRINT_LABELS_PER_PAGE_MANUAL, resolveInboundLotValidation() (+12 more)
+Cohesion: 0.10
+Nodes (21): dependencies, @ant-design/icons@^6.2.5, antd@^6.4.4, axios@^1.18.0, dayjs@^1.11.21, html5-qrcode@^2.3.8, jsqr@^1.4.0, react@^19.2.6 (+13 more)
 
 ### Community 82 - "Operational Workflow And Api Design"
 Cohesion: 0.11
@@ -522,11 +537,11 @@ Nodes (16): createNodeApi(), deleteNodeApi(), listNodesApi(), updateNodeApi(), i
 
 ### Community 84 - "sqlalchemy_orm"
 Cohesion: 0.07
-Nodes (17): get_logger(), log_context(), fail_and_release(), IcsError, enqueue_fleet_submit(), persist_task_status(), scan_transport_queue(), submit_fleet_task() (+9 more)
+Nodes (15): get_logger(), fail_and_release(), IcsError, enqueue_fleet_submit(), persist_task_status(), scan_transport_queue(), submit_fleet_task(), sweep_fleet_tasks() (+7 more)
 
 ### Community 85 - "package.json"
 Cohesion: 0.18
-Nodes (10): html5-qrcode@^2.3.8, react-dom@^19.2.6, xlsx-js-style@^1.2.0, name, private, type, version, html5-qrcode (+2 more)
+Nodes (10): date-fns@^4.4.0, @hookform/resolvers@^5.4.0, xlsx-js-style@^1.2.0, name, private, type, version, date-fns (+2 more)
 
 ### Community 86 - "Git Commit"
 Cohesion: 0.11
@@ -536,16 +551,12 @@ Nodes (19): Also check status, Best Practices, BREAKING CHANGE footer, Breaking 
 Cohesion: 0.20
 Nodes (11): VITE_API_URL, build, args, context, dockerfile, build, container_name, depends_on (+3 more)
 
-### Community 88 - "route_service.py"
-Cohesion: 0.30
-Nodes (13): ItemSummary, ProductionRouteDetailResponse, ProductionRouteResponse, RouteStepResponse, activate_route(), create_route(), delete_route(), _get_or_create_machine() (+5 more)
-
 ### Community 89 - "useWarehouse.tsx"
-Cohesion: 0.16
-Nodes (21): createWarehouseApi(), deleteWarehouseApi(), listWarehousesApi(), updateWarehouseApi(), CardItem, Hero(), HeroProps, warehouseLabel() (+13 more)
+Cohesion: 0.28
+Nodes (11): createWarehouseApi(), deleteWarehouseApi(), listWarehousesApi(), updateWarehouseApi(), useCreateWarehouse(), useDeleteWarehouse(), useUpdateWarehouse(), CreateWarehouseInput (+3 more)
 
 ### Community 90 - "config.py"
-Cohesion: 0.29
+Cohesion: 0.33
 Nodes (3): _parse_int_id_list(), Settings, Config
 
 ### Community 91 - "Tsconfig.Node Module (91)"
@@ -568,29 +579,21 @@ Nodes (5): 6.1. Khởi động CSDL PostgreSQL và Redis trước, 6.2. Khôi ph
 Cohesion: 0.50
 Nodes (4): 2.1. Đóng gói mã nguồn từ máy Windows, 2.2. Chuyển file sang máy chủ Linux và giải nén, 2.3. Chuyển đổi định dạng ký tự kết thúc dòng (CRLF sang LF), 2. Sao Chép Mã Nguồn & Xử Lý Định Dạng Ký Tự (CRLF to LF)
 
-### Community 97 - "axiosInstance.ts"
-Cohesion: 0.06
-Nodes (33): getRawMaterialAndonQueueApi(), axiosInstance, CustomAxiosRequestConfig, failedQueue, App(), AppContent(), queryClient, ErrorBoundary (+25 more)
+### Community 97 - "App.tsx"
+Cohesion: 0.13
+Nodes (14): App(), AppContent(), queryClient, ErrorBoundary, Props, State, ClientLogPayload, LogEntry (+6 more)
 
 ### Community 98 - "9. Vận Hành, Giới Hạn Dung Lượng Log & Sao Lưu Tự Động"
 Cohesion: 0.50
 Nodes (4): 9.1. Giới hạn dung lượng Log của Docker Daemon (Log Rotation), 9.2. Tự động dọn dẹp file log ứng dụng (`backend/logs/*.jsonl`), 9.3. Kịch bản sao lưu CSDL tự động hằng ngày (Automated Backup Script), 9. Vận Hành, Giới Hạn Dung Lượng Log & Sao Lưu Tự Động
 
-### Community 99 - "_ensure_user_can_access_location"
-Cohesion: 0.15
-Nodes (7): call_material(), complete_machining_stage(), _ensure_user_can_access_location(), _get_recent_location_error(), receive_task_status(), register_rack_at_raw_material(), return_empty_cart_from_washing()
-
-### Community 100 - "ws_manager.py"
-Cohesion: 0.20
-Nodes (3): decode_access_token(), _authenticate_ws_token(), websocket_endpoint()
-
 ### Community 101 - "WarehouseMapImportDialog.tsx"
-Cohesion: 0.29
-Nodes (10): binLabel(), extractErrorDetail(), referenceSummary(), totalReferences(), WarehouseMapImportDialog(), WarehouseMapImportDialogProps, useImportWarehouseMap(), usePreviewWarehouseMapImport() (+2 more)
+Cohesion: 0.15
+Nodes (18): LOCATION_TYPE_LABELS, NodeInfo, WarehouseMapDrawer(), WarehouseMapDrawerProps, binLabel(), extractErrorDetail(), referenceSummary(), totalReferences() (+10 more)
 
 ### Community 102 - "useAppStore"
-Cohesion: 0.16
-Nodes (14): resolveInboundType(), resolveOutboundType(), syncWarehouseOperationTypes(), WarehouseOperationType, formatDate(), NotificationPage(), renderSeverityTag(), rowClassName() (+6 more)
+Cohesion: 0.12
+Nodes (19): warehouseLabel(), WarehouseSelector(), WarehouseSelectorProps, INBOUND_MANUAL_WAREHOUSE_IDS, INBOUND_TYPE, OUTBOUND_MANUAL_WAREHOUSE_IDS, OUTBOUND_TYPE, QR_PRINT_LABELS_PER_PAGE_AUTO (+11 more)
 
 ### Community 103 - "detect_process"
 Cohesion: 0.22
@@ -608,9 +611,9 @@ Nodes (20): 0. CÁC QUYẾT ĐỊNH ĐÃ CHỐT, 10. THỨ TỰ THỰC HIỆN & 
 Cohesion: 0.36
 Nodes (8): request_scope(), install_celery_signals(), _beat_init(), _chan(), _failure(), _postrun(), _prerun(), _retry()
 
-### Community 107 - "apiErrorMessage.ts"
-Cohesion: 0.39
-Nodes (8): isQrTypeLocationConflictMessage(), cleanMessage(), extractDetailMessages(), extractRawDetailMessage(), FIELD_LABELS, fieldLabelFromLoc(), formatValidationItem(), isQrTypeLocationConflictError()
+### Community 108 - "typing"
+Cohesion: 0.03
+Nodes (10): upgrade(), upgrade(), upgrade(), downgrade(), upgrade(), downgrade(), upgrade(), upgrade() (+2 more)
 
 ### Community 109 - "configure_logging"
 Cohesion: 0.29
@@ -624,9 +627,9 @@ Nodes (8): command, container_name, env_file, image, ports, restart, volumes, ba
 Cohesion: 0.18
 Nodes (11): 🗺️ 1. SƠ ĐỒ LUỒNG ĐI TỔNG THỂ (FULL-STACK FLOW), 1. Tắt active toàn bộ các route khác của cùng Model, 2. Bật active cho route này, 📂 2. TỔNG HỢP CÁC FILE THAM GIA TRONG KHỐI 3 (INVOLVED FILES), 🔍 3. CHI TIẾT CÁC LUỒNG THAO TÁC CỤ THỂ, 🗄️ 4. TỪ ĐIỂN DỮ LIỆU & KIẾN TRÚC 3NF (DATA DICTIONARY), ⚙️ 5. CƠ CHẾ KẾT NỐI VỚI LÕI ĐIỀU PHỐI AMR (DISPATCH ENGINE INTEGRATION), ⚠️ 6. ĐÁNH GIÁ CHẤT LƯỢNG MÃ NGUỒN & CÁC ĐIỂM CẦN CHUẨN HÓA (+3 more)
 
-### Community 112 - "OperatorPageHeader.tsx"
-Cohesion: 0.32
-Nodes (6): OperatorMetricItem, OperatorPageHeader(), OperatorPageHeaderProps, OperatorShellContext, OperatorShellContextValue, useOperatorShell()
+### Community 112 - "Sidebar.tsx"
+Cohesion: 0.10
+Nodes (25): AdminLayout(), Header(), OperatorShellContext, OperatorShellContextValue, OperatorShellProvider, isGroupActive(), Sidebar(), SidebarGroup() (+17 more)
 
 ### Community 114 - "Default Module (114)"
 Cohesion: 0.18
@@ -641,8 +644,8 @@ Cohesion: 0.18
 Nodes (10): apiVersion, datasources, access, editable, jsonData, name, type, uid (+2 more)
 
 ### Community 117 - "parse_legacy_lot_number"
-Cohesion: 0.60
-Nodes (4): parse_legacy_lot_number(), slash_to_compact(), to_compact(), validate_ddmmyy()
+Cohesion: 0.25
+Nodes (9): lot_string_to_date(), parse_legacy_lot_number(), slash_to_compact(), to_compact(), validate_ddmmyy(), _get_fixed_quantity(), _lot_as_date(), _lot_sort_key() (+1 more)
 
 ### Community 118 - "Docker Compose Module (118)"
 Cohesion: 0.56
@@ -660,10 +663,6 @@ Nodes (10): CẨM NANG GIẢI PHẪU TOÀN DIỆN KIẾN TRÚC BACKEND & CƠ CH�
 Cohesion: 0.40
 Nodes (3): _channel_overrides(), get_context(), _before_publish()
 
-### Community 122 - "apiError.ts"
-Cohesion: 0.50
-Nodes (4): ApiErrorResponse, ApiValidationErrorItem, formatApiErrorDetail(), getApiErrorDetail()
-
 ### Community 124 - "Docker Compose Module (124)"
 Cohesion: 0.33
 Nodes (9): depends_on, depends_on, depends_on, depends_on, depends_on, condition, db, redis (+1 more)
@@ -675,10 +674,6 @@ Nodes (9): 1. FIFO cho Level 0: Ưu tiên xe nạp vào sàn sớm nhất, 1. T�
 ### Community 126 - "Review Khoi 2 Product Models Items"
 Cohesion: 0.22
 Nodes (9): 🗺️ 1. SƠ ĐỒ LUỒNG ĐI TỔNG THỂ (FULL-STACK FLOW), 📂 2. TỔNG HỢP CÁC FILE THAM GIA TRONG KHỐI 2 (INVOLVED FILES), 🔍 3. CHI TIẾT CÁC LUỒNG THAO TÁC CỤ THỂ, 🗄️ 4. TỪ ĐIỂN DỮ LIỆU & RÀNG BUỘC CƠ SỞ DỮ LIỆU (DATA DICTIONARY), 🔗 5. MA TRẬN LIÊN KẾT GIỮA CÁC KHỐI TRONG HỆ THỐNG, ⚠️ 6. ĐÁNH GIÁ CHẤT LƯỢNG MÃ NGUỒN & CÁC ĐIỂM CẦN CHUẨN HÓA, 🧪 7. MA TRẬN KIỂM THỬ & TIÊU CHÍ NGHIỆM THU (TEST CRITERIA), Review Khoi 2 Product Models Items (+1 more)
-
-### Community 127 - "downloadBlobFromResponse"
-Cohesion: 0.83
-Nodes (3): downloadBlobFromResponse(), parseFilenameFromContentDisposition(), triggerBlobDownload()
 
 ### Community 129 - "Prometheus Module (129)"
 Cohesion: 0.22
@@ -817,28 +812,28 @@ Cohesion: 0.67
 Nodes (3): 5.1. Tạo mạng Docker dùng chung (External Bridge Network), 5.2. Chuẩn bị file `.env` chuẩn hóa cho Linux Production, 5. Thiết Lập Mạng Dùng Chung & Cấu Hình Môi Trường (.env)
 
 ### Community 198 - "database.py"
-Cohesion: 0.09
-Nodes (14): run_migrations_offline(), run_migrations_online(), FleetApiCall, ProductionRecord, RouteStepMachine, TaskStatus, TransportQueue, UserLocation (+6 more)
+Cohesion: 0.11
+Nodes (17): run_migrations_offline(), run_migrations_online(), FleetApiCall, FleetTask, ProductionRecord, RouteStep, RouteStepMachine, TaskStatus (+9 more)
 
 ## Knowledge Gaps
 - **276 isolated node(s):** `masan-wms`, `ADR-0002`, `0. CÁC QUYẾT ĐỊNH ĐÃ CHỐT`, `10. THỨ TỰ THỰC HIỆN & COMMIT`, `1. CẤU HÌNH (`backend/app/core/config.py`)` (+271 more)
   These have ≤1 connection - possible missing edges or undocumented components. (Counts symbols only; 1235 node(s) total have ≤1 connection when file, concept and rationale nodes are included.)
-- **40 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
+- **57 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_
 
-- **Why does `root()` connect `root` to `README.md`, `get_redis`?**
-  _High betweenness centrality (0.022) - this node is a cross-community bridge._
+- **Why does `root()` connect `root` to `README.md`, `sqlalchemy_orm`?**
+  _High betweenness centrality (0.023) - this node is a cross-community bridge._
 - **Are the 66 inferred relationships involving `Location` (e.g. with `get_raw_material_andon_queue()` and `CartSelector`) actually correct?**
   _`Location` has 66 INFERRED edges - model-reasoned connections that need verification._
 - **What connects `masan-wms`, `ADR-0002`, `0. CÁC QUYẾT ĐỊNH ĐÃ CHỐT` to the rest of the system?**
   _276 weakly-connected nodes found - possible documentation gaps or missing edges._
 - **Should `sqlalchemy` be split into smaller, more focused modules?**
-  _Cohesion score 0.020029573867455304 - nodes in this community are weakly interconnected._
-- **Why does `react` connect `Frontend UI Components (30)` to `index.tsx`, `Warehouse Domain (2)`, `ItemDetailPage.tsx`, `Warehouse Location & Storage (12)`, `ReportPage.tsx`, `Warehouse Location & Storage (24)`, `StationSettingPage.tsx`, `SkuSearchSelect.tsx`, `useAuth.ts`, `Warehouse Domain (55)`, `ProductionRoutePage.tsx`, `OperatorMapCanvas.tsx`, `dependencies`, `useQrCodePrint.ts`, `package.json`, `useWarehouse.tsx`, `axiosInstance.ts`, `WarehouseMapImportDialog.tsx`, `useAppStore`, `OperatorPageHeader.tsx`?**
-  _High betweenness centrality (0.021) - this node is a cross-community bridge._
+  _Cohesion score 0.05109126984126984 - nodes in this community are weakly interconnected._
+- **Why does `Tài Liệu Triển Khai & Di Chuyển Hệ Thống KUKA_WMS Sang Linux` connect `root` to `README.md`?**
+  _High betweenness centrality (0.022) - this node is a cross-community bridge._
 - **Are the 69 inferred relationships involving `ItemStock` (e.g. with `get_raw_material_andon_queue()` and `CartSelector`) actually correct?**
   _`ItemStock` has 69 INFERRED edges - model-reasoned connections that need verification._
-- **Should `index.tsx` be split into smaller, more focused modules?**
-  _Cohesion score 0.10853658536585366 - nodes in this community are weakly interconnected._
+- **Should `Warehouse Domain (2)` be split into smaller, more focused modules?**
+  _Cohesion score 0.040293040293040296 - nodes in this community are weakly interconnected._
