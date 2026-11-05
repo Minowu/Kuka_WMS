@@ -11,8 +11,6 @@ import {
 } from '@ant-design/icons'
 import { loginSchema, LoginRequest } from '@/types/auth'
 import { useLogin } from '@/hooks/useAuth'
-import thadoLogo from '@/assets/logos/thado_logo.svg'
-import loginBg from '@/assets/images/login_bg.jpg'
 
 export default function LoginPage() {
   const [showPassword, setShowPassword] = useState(false)
@@ -37,31 +35,31 @@ export default function LoginPage() {
   }
 
   return (
-    <div
-      className="relative flex h-screen w-full items-center justify-center overflow-hidden bg-cover bg-center"
-      style={{ backgroundImage: `url(${loginBg})` }}
-    >
-      {/* Background Overlay */}
-      <div className="absolute inset-0 z-10 bg-canvas/35" />
+    <div className="relative flex h-screen w-full items-center justify-center overflow-hidden bg-linear-to-br from-slate-900 via-slate-800 to-slate-950">
+      {/* Subtle KUKA orange ambient glow */}
+      <div className="pointer-events-none absolute -top-32 -left-32 z-10 h-96 w-96 rounded-full bg-brand-primary/15 blur-3xl" />
+      <div className="pointer-events-none absolute -right-32 -bottom-32 z-10 h-96 w-96 rounded-full bg-tech-accent/10 blur-3xl" />
 
       {/* Industrial Pattern Overlay */}
-      <div className="bg-industrial-pattern pointer-events-none absolute inset-0 z-20" />
+      <div className="bg-industrial-pattern pointer-events-none absolute inset-0 z-20 opacity-40" />
 
       <div className="relative z-30 w-full max-w-[420px] px-4 md:max-w-[90%] lg:max-w-[420px]">
-        <div className="rounded-[10px] bg-panel px-6 py-8 shadow-stripe-2 sm:px-9 sm:pt-10 sm:pb-8">
-          <div className="mb-5 flex justify-center">
-            <img
-              src={thadoLogo}
-              alt="thado_logo"
-              className="h-auto w-auto object-contain"
-            />
+        <div className="rounded-[12px] border border-slate-700/40 bg-panel px-6 py-8 shadow-2xl sm:px-9 sm:pt-10 sm:pb-7">
+          {/* KUKA WMS Brand Logo */}
+          <div className="mb-5 flex items-center justify-center gap-2.5 select-none">
+            <span className="text-brand-primary text-3xl font-black tracking-wider sm:text-4xl">
+              KUKA
+            </span>
+            <span className="rounded border border-slate-700 bg-slate-900 px-2 py-0.5 text-xs font-bold tracking-widest text-slate-200">
+              WMS
+            </span>
           </div>
 
           <h1 className="mb-1 text-center text-2xl font-bold text-brand-dark sm:text-[26px]">
             Đăng nhập
           </h1>
           <p className="mb-8 text-center text-sm text-gray-500">
-            Chào mừng đến hệ thống quản lý kho
+            Chào mừng đến hệ thống quản lý kho & điều phối AMR
           </p>
 
           {error && (
@@ -149,9 +147,21 @@ export default function LoginPage() {
               Quên mật khẩu
             </a>
           </div>
+
+          {/* Copyright Footer inside card */}
+          <div className="mt-6 border-t border-slate-100 pt-4 text-center select-none">
+            <a
+              href="http://thadorobot.com"
+              target="_blank"
+              rel="noreferrer"
+              className="text-xs font-medium tracking-wider text-slate-400 transition-colors hover:text-brand-primary"
+              title="Thado Robot Solution"
+            >
+              © 2026 THADOROBOT
+            </a>
+          </div>
         </div>
       </div>
     </div>
   )
 }
-
