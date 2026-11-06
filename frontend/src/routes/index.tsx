@@ -13,6 +13,7 @@ import NotificationPage from "@/pages/NotificationPage";
 import { RoleHomeRedirect } from "@/components/auth/RoleHomeRedirect";
 import ProductionRoutePage from "@/pages/production/ProductionRoutePage";
 import StationSettingPage from "@/pages/production/StationSettingPage";
+import RackManagementPage from "@/pages/production/RackManagementPage";
 
 // PDA 4.2" Caller Pages (Dedicated per Area)
 import RawMaterialPdaPage from "@/pages/pda/RawMaterialPdaPage";
@@ -96,6 +97,8 @@ export default function AppRoutes() {
         <Route path="production/routes" element={<ProductionRoutePage />} />
         <Route path="routes" element={<Navigate to="/production/routes" replace />} />
         <Route path="production/stations" element={<StationSettingPage />} />
+        <Route path="production/racks" element={<RackManagementPage />} />
+        <Route path="racks" element={<Navigate to="/production/racks" replace />} />
         <Route path="machines" element={<Navigate to="/production/stations" replace />} />
         <Route path="zones" element={<Navigate to="/production/stations" replace />} />
         <Route path="report" element={<ReportPage />} />

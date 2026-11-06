@@ -11,6 +11,7 @@ from app.modules.warehouse.item_stock.item_stock_api import router as item_stock
 from app.modules.warehouse.notificcation.notification_api import router as notification_router
 from app.modules.warehouse.dashboard.dashboard_api import router as dashboard_router
 from app.modules.production.route_api import router as production_router
+from app.modules.production.rack_api import rack_router
 from app.core.logger import configure_logging, get_logger
 from app.core.cache import close_redis, get_redis
 from app.socket.ws_manager import ws_manager, ws_router
@@ -80,6 +81,7 @@ app.include_router(item_stock_router, prefix="/api/v1")
 app.include_router(notification_router, prefix="/api/v1")
 app.include_router(dashboard_router, prefix="/api/v1")
 app.include_router(production_router, prefix="/api/v1")
+app.include_router(rack_router, prefix="/api/v1")
 app.include_router(ws_router, prefix="/api/v1")
 app.include_router(client_logs_router, prefix="/api/v1")
 
