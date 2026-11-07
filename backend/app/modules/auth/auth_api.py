@@ -1,7 +1,7 @@
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy.orm import Session, selectinload
+from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.core.dependencies import get_current_user, require_permission
@@ -12,7 +12,6 @@ from app.modules.auth.auth_schema import (
     RefreshTokenRequest,
     RefreshTokenResponse,
     RoleBrief,
-    TokenResponse,
     UserCreate,
     UserSignupResponse,
     UserListResponse,
@@ -75,10 +74,10 @@ def list_staff_usernames(_current_user: CurrentUser, db: DbSession):
 
 
 @router.get("/roles", response_model=list[RoleBrief])
+@router.get("/auth/roles", response_model=list[RoleBrief])
 def list_roles(db: DbSession, _user: CurrentUser):
     """Lấy danh sách các vai trò (roles) trong hệ thống."""
     return db.query(Role).order_by(Role.id.asc()).all()
-
 
 
 @router.get(
