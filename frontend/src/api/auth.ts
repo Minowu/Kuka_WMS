@@ -50,7 +50,7 @@ export const getStaffUsernamesApi = async (): Promise<string[]> => {
 
 /** Lấy danh sách toàn bộ các Role trong hệ thống */
 export const getRolesApi = async (): Promise<RoleBrief[]> => {
-  const response = await axiosInstance.get<RoleBrief[]>('/api/v1/auth/roles');
+  const response = await axiosInstance.get<RoleBrief[]>('/api/v1/roles');
   return response.data;
 };
 
