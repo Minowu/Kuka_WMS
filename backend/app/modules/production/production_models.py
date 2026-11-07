@@ -40,6 +40,7 @@ FLEET_MISSION_STATUS = {
     "DOWN_CONTAINER": "in_progress",  # D2: Still in_progress!
     "COMPLETED": "completed",         # D2: Only completion signal!
     "FAILED": "failed",
+    "CANCELED": "cancelled",
     "CANCELLED": "cancelled",
     "CANCEL": "cancelled",
     "ABORTED": "failed",

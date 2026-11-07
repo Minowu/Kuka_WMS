@@ -314,6 +314,7 @@ class WebhookHandler:
 
         elif mapped_status in ("failed", "cancelled") or raw_status in (
             "FAILED",
+            "CANCELED",
             "CANCELLED",
             "CANCEL",
             "ABORTED",
