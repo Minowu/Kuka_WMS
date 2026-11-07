@@ -10,6 +10,7 @@ from app.modules.production.production_models import (
     ProductionRoute,
     RouteStep,
     RouteStepMachine,
+    TransportRequest,
 )
 from app.modules.production.route_schema import (
     ItemSummary,
@@ -21,8 +22,101 @@ from app.modules.production.route_schema import (
 )
 from app.modules.warehouse.item.item_model import Item
 from app.modules.warehouse.item_stock.item_stock_model import ItemStock
+from app.modules.warehouse.location_map.location_model import Location
 
 log = get_logger("wms.domain.production")
+
+ACTIVE_ROUTE_REQUEST_STATUSES = (
+    "pending",
+    "queued_for_cart",
+    "queued_for_slot",
+    "in_progress",
+)
+
+
+def _find_blocking_cnc_wip_or_request(
+    db: Session,
+    item_id: int,
+) -> tuple[Optional[str], Optional[str], dict]:
+    """
+    Kiểm tra xem sản phẩm `item_id` có đang vướng luồng gia công CNC hay lệnh vận chuyển không:
+    - CHO PHÉP tạo / bật / tắt / sửa / xóa quy trình nếu xe phôi (`ItemStock`) chỉ đang nằm yên
+      (`is_locked=False`) tại Khu Nguyên Liệu (`RAW_MATERIAL`), Khu Tẩy Rửa (`WASHING_SLOT`)
+      hoặc Bãi Xe Trống (`EMPTY_CART_BUFFER`) và không có lệnh vận chuyển nào đang treo.
+    - CHẶN nếu:
+      1. Có xe phôi đang bị khóa di chuyển trên AMR (`is_locked=True` hoặc `location_id=None`).
+      2. Có xe phôi đang nằm tại vị trí Máy CNC (`Location.location_type == 'CNC_SLOT'`).
+      3. Có lệnh gọi hàng / vận chuyển (`TransportRequest`) của sản phẩm này đang ở trạng thái
+         `pending`, `queued_for_cart`, `queued_for_slot`, `in_progress`
+         (ngoại trừ lệnh trả xe rỗng `RETURN_EMPTY_CART`).
+    """
+    active_stocks = (
+        db.query(ItemStock)
+        .options(joinedload(ItemStock.location))
+        .filter(
+            ItemStock.item_id == item_id,
+            ItemStock.is_active.is_(True),
+            ItemStock.status != "empty",
+        )
+        .all()
+    )
+
+    for stock in active_stocks:
+        container = stock.container_code or f"stock #{stock.id}"
+        loc: Optional[Location] = stock.location
+
+        # 1. Xe đang bị khóa bởi nhiệm vụ AMR hoặc đang được nhấc khỏi sàn (location_id is None)
+        if stock.is_locked or loc is None:
+            mission_info = (
+                f" (nhiệm vụ: {stock.locked_by_mission_code})"
+                if stock.locked_by_mission_code
+                else ""
+            )
+            return (
+                "stock_in_transit",
+                f"xe phôi ({container}) đang trong lệnh vận chuyển AMR{mission_info}",
+                {
+                    "container_code": stock.container_code,
+                    "reason": "stock_in_transit",
+                },
+            )
+
+        # 2. Xe đang nằm dở dang tại vị trí Máy CNC (CNC_SLOT)
+        if loc.location_type == "CNC_SLOT":
+            loc_label = loc.location_name or loc.location_code
+            return (
+                "active_stock_at_cnc",
+                f"xe phôi ({container}) đang gia công tại máy CNC '{loc_label}' (Level {stock.current_stage_level or 0})",
+                {
+                    "container_code": stock.container_code,
+                    "station_code": loc.location_code,
+                    "reason": "active_stock_at_cnc",
+                },
+            )
+
+    # 3. Kiểm tra lệnh gọi hàng / hàng đợi vận chuyển đang hoạt động (trừ trả xe rỗng từ khu rửa)
+    active_req = (
+        db.query(TransportRequest)
+        .filter(
+            TransportRequest.item_id == item_id,
+            TransportRequest.status.in_(ACTIVE_ROUTE_REQUEST_STATUSES),
+            TransportRequest.request_type != "RETURN_EMPTY_CART",
+        )
+        .order_by(TransportRequest.id.desc())
+        .first()
+    )
+    if active_req:
+        return (
+            "active_transport_request",
+            f"đang có lệnh gọi/vận chuyển hàng '{active_req.request_code}' (trạng thái: {active_req.status})",
+            {
+                "transport_request_id": active_req.id,
+                "request_code": active_req.request_code,
+                "reason": "active_transport_request",
+            },
+        )
+
+    return None, None, {}
 
 
 def _to_route_response(route: ProductionRoute, include_steps: bool = False):
@@ -200,27 +294,21 @@ def create_route(db: Session, payload: ProductionRouteCreate) -> ProductionRoute
         raise ValueError(f"Không tìm thấy sản phẩm (Item ID={payload.item_id}).")
 
     if payload.is_active:
-        active_stock = (
-            db.query(ItemStock)
-            .filter(ItemStock.item_id == payload.item_id, ItemStock.is_active.is_(True))
-            .first()
-        )
-        if active_stock:
-            container = active_stock.container_code or f"stock #{active_stock.id}"
+        reason_code, detail_msg, extra_info = _find_blocking_cnc_wip_or_request(db, payload.item_id)
+        if reason_code:
             log.warning(
-                "Route create rejected: active stock '%s' on floor for item_id %s",
-                container,
+                "Route create rejected: cannot activate new route '%s' for item_id %s (%s)",
+                payload.route_code.strip(),
                 payload.item_id,
+                detail_msg,
                 extra={
                     "route_code": payload.route_code.strip(),
                     "item_id": payload.item_id,
-                    "container_code": active_stock.container_code,
-                    "reason": "active_stock_in_circulation",
+                    **extra_info,
                 },
             )
             raise ValueError(
-                f"Không thể kích hoạt quy trình mới vì hiện đang có xe phôi ({container}) "
-                f"của sản phẩm này đang lưu thông trên xưởng."
+                f"Không thể kích hoạt quy trình mới vì hiện {detail_msg}."
             )
         db.query(ProductionRoute).filter(
             ProductionRoute.item_id == payload.item_id,
@@ -305,57 +393,45 @@ def update_route(
         route.version = payload.version
 
     if payload.is_active is not None:
-        # Trường hợp 1: Tắt kích hoạt quy trình đang active -> CẤM nếu còn hàng trên xưởng
+        # Trường hợp 1: Tắt kích hoạt quy trình đang active -> CẤM nếu đang có hàng tại CNC hoặc đang vận chuyển
         if payload.is_active is False and route.is_active is True:
-            active_stock = (
-                db.query(ItemStock)
-                .filter(ItemStock.item_id == route.item_id, ItemStock.is_active.is_(True))
-                .first()
-            )
-            if active_stock:
-                container = active_stock.container_code or f"stock #{active_stock.id}"
+            reason_code, detail_msg, extra_info = _find_blocking_cnc_wip_or_request(db, route.item_id)
+            if reason_code:
                 log.warning(
-                    "Route update rejected: cannot deactivate route %s (%s), active stock '%s' on floor",
+                    "Route update rejected: cannot deactivate route %s (%s) (%s)",
                     route.id,
                     route.route_code,
-                    container,
+                    detail_msg,
                     extra={
                         "route_id": route.id,
                         "route_code": route.route_code,
-                        "container_code": active_stock.container_code,
-                        "reason": "active_stock_in_circulation",
+                        **extra_info,
                     },
                 )
                 raise ValueError(
                     f"Không thể tắt kích hoạt quy trình '{route.route_name}' ({route.route_code}) "
-                    f"vì hiện đang có xe phôi ({container}) của sản phẩm này đang lưu thông trên xưởng."
+                    f"vì hiện {detail_msg}."
                 )
             route.is_active = False
 
-        # Trường hợp 2: Bật kích hoạt quy trình khác -> CẤM nếu đang có quy trình khác chạy xe phôi trên xưởng
+        # Trường hợp 2: Bật kích hoạt quy trình khác -> CẤM nếu đang có hàng tại CNC hoặc đang vận chuyển
         elif payload.is_active is True and not route.is_active:
-            active_stock = (
-                db.query(ItemStock)
-                .filter(ItemStock.item_id == route.item_id, ItemStock.is_active.is_(True))
-                .first()
-            )
-            if active_stock:
-                container = active_stock.container_code or f"stock #{active_stock.id}"
+            reason_code, detail_msg, extra_info = _find_blocking_cnc_wip_or_request(db, route.item_id)
+            if reason_code:
                 log.warning(
-                    "Route update rejected: cannot activate route %s (%s), active stock '%s' on floor",
+                    "Route update rejected: cannot activate route %s (%s) (%s)",
                     route.id,
                     route.route_code,
-                    container,
+                    detail_msg,
                     extra={
                         "route_id": route.id,
                         "route_code": route.route_code,
-                        "container_code": active_stock.container_code,
-                        "reason": "active_stock_in_circulation",
+                        **extra_info,
                     },
                 )
                 raise ValueError(
                     f"Không thể kích hoạt quy trình '{route.route_name}' ({route.route_code}) "
-                    f"thay thế quy trình hiện tại vì đang có xe phôi ({container}) của sản phẩm này đang lưu thông trên xưởng."
+                    f"thay thế quy trình hiện tại vì {detail_msg}."
                 )
             db.query(ProductionRoute).filter(
                 ProductionRoute.item_id == route.item_id,
@@ -373,6 +449,26 @@ def update_route(
                 extra={"route_id": route.id, "route_code": route.route_code, "reason": "empty_steps"},
             )
             raise ValueError("Quy trình sản xuất phải có ít nhất 1 bước công đoạn.")
+
+        # Nếu quy trình đang active, chặn sửa bước công đoạn khi đang có xe tại CNC hoặc đang có lệnh vận chuyển
+        if route.is_active:
+            reason_code, detail_msg, extra_info = _find_blocking_cnc_wip_or_request(db, route.item_id)
+            if reason_code:
+                log.warning(
+                    "Route steps update rejected for active route %s (%s) (%s)",
+                    route.id,
+                    route.route_code,
+                    detail_msg,
+                    extra={
+                        "route_id": route.id,
+                        "route_code": route.route_code,
+                        **extra_info,
+                    },
+                )
+                raise ValueError(
+                    f"Không thể thay đổi các bước công đoạn của quy trình '{route.route_name}' ({route.route_code}) "
+                    f"vì hiện {detail_msg}."
+                )
 
         db.query(RouteStep).filter(RouteStep.route_id == route.id).delete(
             synchronize_session="fetch"
@@ -435,28 +531,22 @@ def activate_route(db: Session, route_id: int) -> ProductionRouteDetailResponse:
         raise ValueError(f"Không tìm thấy quy trình sản xuất ID={route_id}")
 
     if not route.is_active:
-        active_stock = (
-            db.query(ItemStock)
-            .filter(ItemStock.item_id == route.item_id, ItemStock.is_active.is_(True))
-            .first()
-        )
-        if active_stock:
-            container = active_stock.container_code or f"stock #{active_stock.id}"
+        reason_code, detail_msg, extra_info = _find_blocking_cnc_wip_or_request(db, route.item_id)
+        if reason_code:
             log.warning(
-                "Route activate rejected: cannot activate route %s (%s), active stock '%s' on floor",
+                "Route activate rejected: cannot activate route %s (%s) (%s)",
                 route.id,
                 route.route_code,
-                container,
+                detail_msg,
                 extra={
                     "route_id": route.id,
                     "route_code": route.route_code,
-                    "container_code": active_stock.container_code,
-                    "reason": "active_stock_in_circulation",
+                    **extra_info,
                 },
             )
             raise ValueError(
                 f"Không thể kích hoạt quy trình '{route.route_name}' ({route.route_code}) "
-                f"vì đang có xe phôi ({container}) của sản phẩm này đang lưu thông trên xưởng theo quy trình hiện tại."
+                f"vì hiện {detail_msg}."
             )
 
         db.query(ProductionRoute).filter(
@@ -492,29 +582,23 @@ def delete_route(db: Session, route_id: int) -> None:
         )
         raise ValueError(f"Không tìm thấy quy trình sản xuất ID={route_id}")
 
-    # Guard: Kiểm tra xem sản phẩm của quy trình này có xe phôi đang lưu thông trên xưởng không
-    active_stock = (
-        db.query(ItemStock)
-        .filter(ItemStock.item_id == route.item_id, ItemStock.is_active.is_(True))
-        .first()
-    )
-    if active_stock:
-        container = active_stock.container_code or f"stock #{active_stock.id}"
+    # Guard: Chỉ chặn xóa nếu sản phẩm đang có xe tại khu CNC hoặc đang có lệnh vận chuyển
+    reason_code, detail_msg, extra_info = _find_blocking_cnc_wip_or_request(db, route.item_id)
+    if reason_code:
         log.warning(
-            "Route delete rejected: cannot delete route %s (%s), active stock '%s' on floor",
+            "Route delete rejected: cannot delete route %s (%s) (%s)",
             route.id,
             route.route_code,
-            container,
+            detail_msg,
             extra={
                 "route_id": route.id,
                 "route_code": route.route_code,
-                "container_code": active_stock.container_code,
-                "reason": "active_stock_in_circulation",
+                **extra_info,
             },
         )
         raise ValueError(
             f"Không thể xóa quy trình '{route.route_name}' ({route.route_code}) "
-            f"vì đang có xe phôi ({container}) của sản phẩm này đang lưu thông trên xưởng."
+            f"vì hiện {detail_msg}."
         )
 
     route_code = route.route_code
