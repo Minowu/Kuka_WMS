@@ -30,6 +30,9 @@ class RackManagementItem(BaseModel):
     active_request_status: Optional[str] = None
     can_modify: bool = True
     block_reason: Optional[str] = None
+    can_relocate: bool = True
+    relocate_block_reason: Optional[str] = None
+    allowed_location_ids: list[int] = Field(default_factory=list)
     fleet_registered: bool = False
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
