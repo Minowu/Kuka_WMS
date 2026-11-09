@@ -21,6 +21,7 @@ logger = get_logger("wms.dispatch")
 
 ACTIVE_TASK_STATUSES = ("created", "pending_submit", "submitting", "sent", "dispatched", "in_progress")
 ACTIVE_REQUEST_STATUSES = ("pending", "queued_for_cart", "queued_for_slot", "in_progress")
+CANCELLABLE_REQUEST_STATUSES = ("pending", "queued_for_cart", "queued_for_slot")
 
 
 def serialize_transport_request(
@@ -37,10 +38,25 @@ def serialize_transport_request(
     src_machine = src.machine.machine_code if (src and getattr(src, "machine", None)) else None
     dst_machine = dst.machine.machine_code if (dst and getattr(dst, "machine", None)) else None
 
-    can_cancel = req.status in ACTIVE_REQUEST_STATUSES
+    can_cancel = req.status in CANCELLABLE_REQUEST_STATUSES
     cancel_block_reason = None
-    if not can_cancel:
+    if req.status == "in_progress":
+        can_cancel = False
+        cancel_block_reason = (
+            "Lệnh đã được giao cho robot AMR thực hiện ('in_progress'), "
+            "không thể hủy ngang từ WMS (chỉ được hủy khi đang ở hàng đợi chờ)."
+        )
+    elif not can_cancel:
         cancel_block_reason = f"Yêu cầu đã kết thúc ở trạng thái '{req.status}', không cần hủy."
+    elif (
+        latest_task
+        and latest_task.status in ("sent", "dispatched", "in_progress")
+    ):
+        can_cancel = False
+        cancel_block_reason = (
+            f"Nhiệm vụ AMR '{latest_task.mission_code}' đã gửi sang KUKA Fleet ('{latest_task.status}'), "
+            f"không thể hủy ngang từ WMS."
+        )
 
     return {
         "id": req.id,
@@ -74,7 +90,7 @@ def serialize_transport_request(
         "robot_id": latest_task.robot_id if latest_task else None,
         "created_by": req.created_by,
         "created_by_username": creator.username if creator else None,
-        "created_by_full_name": creator.full_name if creator else None,
+        "created_by_full_name": (getattr(creator, "full_name", None) or getattr(creator, "email", None)) if creator else None,
         "can_cancel": can_cancel,
         "cancel_block_reason": cancel_block_reason,
         "created_at": req.created_at,
@@ -131,14 +147,14 @@ def list_transport_requests(
     tasks = (
         db.query(FleetTask)
         .options(joinedload(FleetTask.container))
-        .filter(FleetTask.request_id.in_(req_ids))
+        .filter(FleetTask.transport_request_id.in_(req_ids))
         .order_by(FleetTask.id.desc())
         .all()
     )
     task_by_req_id: dict[int, FleetTask] = {}
     for t in tasks:
-        if t.request_id and t.request_id not in task_by_req_id:
-            task_by_req_id[t.request_id] = t
+        if t.transport_request_id and t.transport_request_id not in task_by_req_id:
+            task_by_req_id[t.transport_request_id] = t
 
     items = [
         serialize_transport_request(
@@ -202,15 +218,40 @@ def cancel_transport_request_by_admin(
     if not req:
         raise ValueError(f"Không tìm thấy yêu cầu vận chuyển (ID={request_id}).")
 
-    if req.status not in ACTIVE_REQUEST_STATUSES:
+    if req.status == "in_progress":
         raise ValueError(
-            f"Yêu cầu '{req.request_code}' đã ở trạng thái '{req.status}', không thể hủy."
+            f"Yêu cầu '{req.request_code}' đã được giao cho robot AMR thực hiện ('in_progress'), "
+            f"không thể hủy ngang từ WMS. Chỉ được hủy các lệnh đang chờ ('pending', 'queued_for_cart', 'queued_for_slot')."
+        )
+
+    if req.status not in CANCELLABLE_REQUEST_STATUSES:
+        raise ValueError(
+            f"Yêu cầu '{req.request_code}' đang ở trạng thái '{req.status}', không thể hủy."
         )
 
     bind_context(transport_request_id=req.id)
     now = datetime.now(timezone.utc)
 
-    # 1. Hủy tất cả bản ghi hàng đợi TransportQueue của request này
+    # 1. Kiểm tra nếu đã có FleetTask gửi sang KUKA Fleet thì chặn hủy ngang từ WMS
+    active_tasks = (
+        db.query(FleetTask)
+        .options(joinedload(FleetTask.container))
+        .filter(
+            FleetTask.transport_request_id == req.id,
+            FleetTask.status.in_(ACTIVE_TASK_STATUSES),
+        )
+        .order_by(FleetTask.id.desc())
+        .all()
+    )
+    latest_task = active_tasks[0] if active_tasks else None
+    for task in active_tasks:
+        if task.status in ("sent", "dispatched", "in_progress") or task.picked_up_at is not None:
+            raise ValueError(
+                f"Không thể hủy yêu cầu '{req.request_code}': Nhiệm vụ AMR '{task.mission_code}' "
+                f"đã được gửi sang KUKA Fleet ('{task.status}')."
+            )
+
+    # 2. Hủy tất cả bản ghi hàng đợi TransportQueue của request này
     pending_queues = (
         db.query(TransportQueue)
         .filter(TransportQueue.request_id == req.id)
@@ -219,38 +260,12 @@ def cancel_transport_request_by_admin(
     )
     latest_queue = pending_queues[0] if pending_queues else None
     for q in pending_queues:
-        if q.status == "PENDING":
+        if q.status in ("PENDING", "PROCESSING"):
             q.status = "CANCELLED"
             q.resolved_at = now
 
-    # 2. Kiểm tra và hủy FleetTask đang chạy (nếu có)
-    active_tasks = (
-        db.query(FleetTask)
-        .options(joinedload(FleetTask.container))
-        .filter(
-            FleetTask.request_id == req.id,
-            FleetTask.status.in_(ACTIVE_TASK_STATUSES),
-        )
-        .order_by(FleetTask.id.desc())
-        .all()
-    )
-    latest_task = active_tasks[0] if active_tasks else None
-    fleet_cancel_note = ""
-
+    # 3. Nếu có bản ghi FleetTask mới tạo nháp trong DB (chưa gửi sang KUKA Fleet) thì đánh dấu cancelled
     for task in active_tasks:
-        if task.mission_code and task.status in ("sent", "dispatched", "in_progress"):
-            try:
-                dispatch_service.fleet_client.fleet_cancel_task(task.mission_code)
-                fleet_cancel_note = f" (Đã gửi lệnh hủy missionCancel '{task.mission_code}' sang KUKA Fleet)."
-            except Exception as cancel_err:
-                logger.warning(
-                    "Gửi missionCancel cho '%s' khi Admin hủy request '%s' báo lỗi (vẫn tiếp tục hủy trong WMS): %s",
-                    task.mission_code,
-                    req.request_code,
-                    cancel_err,
-                )
-                fleet_cancel_note = f" (Lưu ý: Lệnh hủy bên KUKA Fleet phản hồi: {cancel_err})."
-
         task.status = "cancelled"
         task.error_message = f"Admin đã hủy yêu cầu '{req.request_code}'"
         task.updated_at = now
@@ -331,6 +346,6 @@ def cancel_transport_request_by_admin(
     )
     return {
         "success": True,
-        "message": f"Đã hủy yêu cầu '{req.request_code}' ({dest_display}) thành công và cập nhật tới màn hình Operator.{fleet_cancel_note}",
+        "message": f"Đã hủy yêu cầu '{req.request_code}' ({dest_display}) thành công và cập nhật tới màn hình Operator.",
         "request": serialize_transport_request(req, latest_queue=latest_queue, latest_task=latest_task),
     }

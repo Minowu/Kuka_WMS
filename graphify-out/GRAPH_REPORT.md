@@ -1,7 +1,7 @@
 # Graph Report - KUKA_WMS  (2026-11-09)
 
 ## Corpus Check
-- 426 files · ~285,801 words
+- 426 files · ~286,001 words
 - Verdict: corpus is large enough that graph structure adds value.
 - Unclassified: 73 file(s) not represented in the graph (top: (none) 52, .csv 3, .css 2)
 
@@ -11,7 +11,7 @@
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `bf843682`
+- Built from commit: `72507a36`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
