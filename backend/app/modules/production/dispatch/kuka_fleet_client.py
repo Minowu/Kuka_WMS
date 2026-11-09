@@ -235,7 +235,7 @@ class KukaFleetClient:
                 db.flush()
             raise IcsError(error_msg, retryable=False)
 
-        timeout_sec = float(getattr(settings, "kuka_http_timeout_seconds", 5.0))
+        timeout_sec = float(getattr(settings, "kuka_http_timeout_seconds", 8.0))
         http_status = None
         headers = {
             "Content-Type": "application/json",
@@ -245,7 +245,7 @@ class KukaFleetClient:
         if token:
             headers["Authorization"] = token
 
-        connect_timeout = min(2.0, timeout_sec)
+        connect_timeout = min(3.0, timeout_sec)
         try:
             with httpx.Client(timeout=httpx.Timeout(timeout_sec, connect=connect_timeout)) as client:
                 response = client.post(url, json=payload, headers=headers)

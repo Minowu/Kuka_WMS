@@ -51,7 +51,7 @@ class Settings(BaseSettings):
     kuka_container_model_code: str = "1001"
     kuka_robot_type: str = "LIFT"
     kuka_mission_type: str = "RACK_MOVE"
-    kuka_http_timeout_seconds: float = 5.0
+    kuka_http_timeout_seconds: float = 8.0
     kuka_submit_max_retries: int = 3
 
     # Warehouses using manual (full-form) print templates — JSON array or comma list, e.g. [2]
