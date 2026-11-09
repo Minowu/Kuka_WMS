@@ -31,8 +31,10 @@ import {
 } from '@/api/requestManagement';
 
 const REQUEST_TYPE_LABELS: Record<string, { label: string; color: string }> = {
+  CALL_CNC: { label: 'Gọi phôi vào máy CNC', color: 'blue' },
   PULL_RAW_MATERIAL: { label: 'Gọi phôi thô vào CNC', color: 'blue' },
   CALL_MATERIAL: { label: 'Gọi phôi vào CNC', color: 'blue' },
+  MOVE_NEXT_STAGE: { label: 'Chuyển sang công đoạn kế', color: 'purple' },
   MOVE_BETWEEN_CNC: { label: 'Chuyển giữa máy CNC', color: 'purple' },
   MOVE_TO_WASH: { label: 'Chuyển sang Tẩy Rửa', color: 'cyan' },
   SEND_TO_WASH: { label: 'Chuyển sang Tẩy Rửa', color: 'cyan' },
@@ -560,8 +562,8 @@ export default function RequestManagementPage() {
             <Alert
               type="warning"
               showIcon
-              message="Đồng bộ tức thì tới màn hình PDA của Operator & KUKA Fleet"
-              description="Khi hủy lệnh này, hệ thống sẽ xóa yêu cầu khỏi hàng đợi tự động, mở khóa xe phôi (nếu có), gửi lệnh dừng nhiệm vụ sang KUKA Fleet (nếu AMR đang chạy) và tự động làm mới màn hình PDA của công nhân tại trạm đó ngay lập tức."
+              message="Đồng bộ tức thì tới màn hình PDA của Operator"
+              description="Khi hủy lệnh đang chờ này, hệ thống sẽ xóa yêu cầu khỏi hàng đợi tự động, mở khóa xe phôi (nếu có) và tự động làm mới màn hình PDA của công nhân tại trạm đó ngay lập tức."
             />
 
             {cancelErrorMsg && (

@@ -39,21 +39,30 @@ class IcsError(Exception):
         self.retryable = retryable
 
 
-def fail_and_release(db: Session, task: FleetTask, reason: str) -> FleetTask:
+def fail_and_release(
+    db: Session,
+    task: FleetTask,
+    reason: str,
+    *,
+    is_cancelled: bool = False,
+) -> FleetTask:
     """
-    Đánh dấu `FleetTask` là `failed` (đảm bảo tính bất biến/idempotent - gọi nhiều lần không lỗi),
+    Đánh dấu `FleetTask` là `failed` hoặc `cancelled` (đảm bảo tính bất biến/idempotent),
     mở khóa xe phôi `ItemStock`, khôi phục an toàn trạng thái nghiệp vụ cho cả 4 luồng sản xuất,
     và xếp hàng phát sự kiện WebSocket `fleet.task_failed` + `floor.changed` ngay sau khi `db.commit()`:
     1. Mở khóa xe `task.container` (`is_locked = False`, xóa `locked_by_mission_code` và `destination_location_id`).
-    2. Nếu `task.request` xuất phát từ Hàng đợi tự động `TransportQueue` (`WAITING_CART` hoặc `WAITING_SLOT`),
-       mở lại bản ghi hàng đợi về trạng thái `PENDING` để yêu cầu không bao giờ bị mất khi Fleet lỗi.
-    3. Nếu `task.request` là `MOVE_TO_WASH` / `SEND_TO_WASH` (từ máy CNC cuối đi Rửa), khôi phục
+    2. Nếu `is_cancelled=True` (nhiệm vụ bị hủy chủ động từ KUKA Fleet hoặc Admin):
+       - Đóng toàn bộ bản ghi `TransportQueue` (`status = 'CANCELLED'`) để Celery không tự điều xe lại.
+       - Đưa `TransportRequest.status = 'cancelled'` để màn hình PDA của Operator về trạng thái sẵn sàng ngay.
+    3. Nếu `is_cancelled=False` (lỗi mạng/lỗi Fleet từ chối) và `task.request` xuất phát từ `TransportQueue`,
+       mở lại bản ghi hàng đợi về trạng thái `PENDING` để yêu cầu không bao giờ bị mất khi Fleet lỗi tạm thời.
+    4. Nếu `task.request` là `MOVE_TO_WASH` / `SEND_TO_WASH` (từ máy CNC cuối đi Rửa), khôi phục
        `cart.current_stage_level` về công đoạn trước đó để nút 'Hoàn thành công đoạn' hiện lại trên PDA.
-    4. Nếu `task.request` là `RETURN_EMPTY_CART` (từ khu Rửa trả xe rỗng), khôi phục
+    5. Nếu `task.request` là `RETURN_EMPTY_CART` (từ khu Rửa trả xe rỗng), khôi phục
        `cart.status = 'available'` để chiếc xe không bị biến mất khỏi màn hình PDA khu Rửa.
     """
     now = datetime.now(timezone.utc)
-    task.status = "failed"
+    task.status = "cancelled" if is_cancelled else "failed"
     task.error_message = reason
     task.updated_at = now
 
@@ -67,14 +76,25 @@ def fail_and_release(db: Session, task: FleetTask, reason: str) -> FleetTask:
     req = task.request
     req_type = req.request_type if req else None
     if req and req.status not in ("completed", "cancelled"):
-        queue_entry = (
+        queue_entries = (
             db.query(TransportQueue)
             .filter(TransportQueue.request_id == req.id)
             .order_by(TransportQueue.id.desc())
-            .first()
+            .all()
         )
-        if queue_entry:
-            # Nếu yêu cầu xuất phát từ Hàng đợi tự động, mở lại PENDING để chu kỳ quét sau thử lại
+        queue_entry = queue_entries[0] if queue_entries else None
+
+        if is_cancelled:
+            # Khi hủy chủ động (CANCELED), đóng toàn bộ hàng đợi để hệ thống không tự gọi lại
+            # và giải phóng màn hình PDA của Operator ngay lập tức!
+            for q in queue_entries:
+                if q.status in ("PENDING", "PROCESSING"):
+                    q.status = "CANCELLED"
+                    q.resolved_at = now
+            req.status = "cancelled"
+            req.completed_at = now
+        elif queue_entry:
+            # Nếu lỗi kỹ thuật (FAILED) và yêu cầu xuất phát từ Hàng đợi tự động, mở lại PENDING để chu kỳ quét sau thử lại
             queue_entry.status = "PENDING"
             queue_entry.resolved_at = None
             if queue_entry.queue_type == "WAITING_CART":
@@ -86,9 +106,10 @@ def fail_and_release(db: Session, task: FleetTask, reason: str) -> FleetTask:
         else:
             req.status = "failed"
 
-            # Bảo vệ Lỗi 2 (Vị trí 2): Máy CNC cuối báo xong đi Rửa nhưng Fleet từ chối
-            # -> Khôi phục current_stage_level về bước trước để nút 'Hoàn thành' trên PDA hiện lại!
-            if req.request_type in ("MOVE_TO_WASH", "SEND_TO_WASH") and cart:
+        # Khi lệnh dừng hẳn (failed hoặc cancelled mà không đẩy lại vào queue),
+        # khôi phục trạng thái nghiệp vụ trên xe phôi để PDA trạm nguồn bấm lại được!
+        if req.status in ("failed", "cancelled") and cart:
+            if req.request_type in ("MOVE_TO_WASH", "SEND_TO_WASH"):
                 req_stage = req.required_stage_level or 0
                 if req_stage > 0 and (cart.current_stage_level or 0) >= req_stage:
                     prev_step = (
@@ -102,10 +123,7 @@ def fail_and_release(db: Session, task: FleetTask, reason: str) -> FleetTask:
                         .first()
                     )
                     cart.current_stage_level = prev_step[0] if prev_step else max(0, req_stage - 1)
-
-            # Bảo vệ Lỗi 3 (Vị trí 2): Khu Rửa bấm trả xe rỗng nhưng Fleet từ chối
-            # -> Đảm bảo status = 'available' để xe không bị biến mất khỏi màn hình PDA khu Rửa!
-            elif req.request_type == "RETURN_EMPTY_CART" and cart:
+            elif req.request_type == "RETURN_EMPTY_CART":
                 if cart.status == "empty":
                     cart.status = "available"
 

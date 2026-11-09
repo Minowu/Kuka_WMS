@@ -344,11 +344,12 @@ class WebhookHandler:
             )
             # Dùng fail_and_release để mở khóa xe, khôi phục nghiệp vụ và tự động xếp hàng phát
             # sự kiện WebSocket `fleet.task_failed` + `floor.changed` ngay sau khi db.commit()!
-            fail_and_release(db, fleet_task, err_msg)
-            if term_status == "cancelled":
-                fleet_task.status = "cancelled"
-                if fleet_task.request and fleet_task.request.status == "failed":
-                    fleet_task.request.status = "cancelled"
+            fail_and_release(
+                db,
+                fleet_task,
+                err_msg,
+                is_cancelled=(term_status == "cancelled"),
+            )
             db.commit()
         else:
             logger.warning(
