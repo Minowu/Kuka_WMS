@@ -444,9 +444,9 @@
     "semantic_hash": ""
   },
   "backend/app/core/config.py": {
-    "mtime": 1793856403.1004138,
-    "seen": 1793945295.2655203,
-    "ast_hash": "5370820bb929cc0d4f4a5dd12fbefc16",
+    "mtime": 1794214467.1109693,
+    "seen": 1794214508.7859466,
+    "ast_hash": "38cd59ee8f36f487f1f32b10e1065efa",
     "semantic_hash": ""
   },
   "backend/app/core/database.py": {
@@ -480,9 +480,9 @@
     "semantic_hash": "1cdcc8cedc587e445c5c838c9398cdfb"
   },
   "backend/app/main.py": {
-    "mtime": 1793887881.4394114,
-    "seen": 1793945295.2655203,
-    "ast_hash": "022f5aef957f99866513b8492778b322",
+    "mtime": 1794197795.252713,
+    "seen": 1794197868.6886468,
+    "ast_hash": "7984a64053ed8d06eb182a3aeb3f3c0f",
     "semantic_hash": ""
   },
   "backend/app/modules/auth/__init.py": {
@@ -546,9 +546,9 @@
     "semantic_hash": ""
   },
   "backend/app/modules/production/dispatch/kuka_fleet_client.py": {
-    "mtime": 1793856403.1049566,
-    "seen": 1793945295.2655203,
-    "ast_hash": "6e5a43a446a6fdee3466e7d35e6f174b",
+    "mtime": 1794214468.3538253,
+    "seen": 1794214508.7859466,
+    "ast_hash": "23d612f68410d773f6aa421150052b40",
     "semantic_hash": ""
   },
   "backend/app/modules/production/dispatch/queue_service.py": {
@@ -558,9 +558,9 @@
     "semantic_hash": ""
   },
   "backend/app/modules/production/dispatch/webhook_handler.py": {
-    "mtime": 1794032587.6519127,
-    "seen": 1794032634.7850788,
-    "ast_hash": "d50f9cbaea6757c5833e98e7ea602f3e",
+    "mtime": 1794213726.753718,
+    "seen": 1794213815.434138,
+    "ast_hash": "ee3eee83833f4d62222cd4cee347175c",
     "semantic_hash": ""
   },
   "backend/app/modules/production/dispatch_service.py": {
@@ -2676,27 +2676,27 @@
     "semantic_hash": ""
   },
   "backend/app/modules/production/rack_api.py": {
-    "mtime": 1794197422.1286442,
-    "seen": 1794197706.4880037,
-    "ast_hash": "d9fd6732501e1b389fcf9bd44b9f2a2e",
+    "mtime": 1794197769.7203307,
+    "seen": 1794197868.6886468,
+    "ast_hash": "4e21d88edabc191239fa4951ce8ddb7c",
     "semantic_hash": ""
   },
   "backend/app/modules/production/rack_schema.py": {
-    "mtime": 1794197233.2596579,
-    "seen": 1794197706.4880037,
-    "ast_hash": "5f4305d56e823f6d65f3d9858e4ffa3e",
+    "mtime": 1794197766.14693,
+    "seen": 1794197868.6886468,
+    "ast_hash": "17350e4f76e44ce4b8c7f094a642cdcf",
     "semantic_hash": ""
   },
   "backend/app/modules/production/rack_service.py": {
-    "mtime": 1794197391.965835,
-    "seen": 1794197706.4880037,
-    "ast_hash": "2c0d10906d8a71c395cfd269bbad2fff",
+    "mtime": 1794197768.414091,
+    "seen": 1794197868.6886468,
+    "ast_hash": "6bfbc438c2bfba6c79fafbea74931112",
     "semantic_hash": ""
   },
   "frontend/src/api/rackManagement.ts": {
-    "mtime": 1794197473.4177794,
-    "seen": 1794197706.4880037,
-    "ast_hash": "5458a8253576f47e51f388ff3ab2edd7",
+    "mtime": 1794197797.151751,
+    "seen": 1794197868.6886468,
+    "ast_hash": "724a482e89cbb0da606b1ad1a99830b7",
     "semantic_hash": ""
   },
   "frontend/src/pages/components/MapNodePickerModal.tsx": {
@@ -2712,9 +2712,33 @@
     "semantic_hash": ""
   },
   "frontend/src/pages/production/RequestManagementPage.tsx": {
-    "mtime": 1794197611.6470141,
-    "seen": 1794197706.4880037,
-    "ast_hash": "13760a6e0aac5016271c4fd652d41430",
+    "mtime": 1794207345.5336156,
+    "seen": 1794207386.8291385,
+    "ast_hash": "65ea80a81610fc7c9da1392afb3bee99",
+    "semantic_hash": ""
+  },
+  "backend/app/modules/production/request_api.py": {
+    "mtime": 1794197717.6769335,
+    "seen": 1794197868.6886468,
+    "ast_hash": "1fd028a2339cfb47261256c4efcbe4f6",
+    "semantic_hash": ""
+  },
+  "backend/app/modules/production/request_schema.py": {
+    "mtime": 1794197714.0492823,
+    "seen": 1794197868.6886468,
+    "ast_hash": "463622daea1f267bb80f1bd7ac635315",
+    "semantic_hash": ""
+  },
+  "backend/app/modules/production/request_service.py": {
+    "mtime": 1794213731.5612018,
+    "seen": 1794213815.434138,
+    "ast_hash": "c7716bb587ab1e2231e06199e525059e",
+    "semantic_hash": ""
+  },
+  "frontend/src/api/requestManagement.ts": {
+    "mtime": 1794197799.131601,
+    "seen": 1794197868.6886468,
+    "ast_hash": "2bb4005a69d264180d824884923e886a",
     "semantic_hash": ""
   },
   "frontend/package-lock.json": {
