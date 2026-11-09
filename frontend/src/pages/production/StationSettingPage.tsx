@@ -27,6 +27,8 @@ import {
   MinusCircleOutlined,
 } from '@ant-design/icons';
 import Hero from '@/components/shared/Hero';
+import MapNodePickerModal from '@/pages/components/MapNodePickerModal';
+
 import {
   useStationCatalog,
   useAvailableNodes,
@@ -100,61 +102,117 @@ export default function StationSettingPage() {
   // 4. Empty Buffer
   const [isEmptyBufferModalOpen, setIsEmptyBufferModalOpen] = useState(false);
   const [editingEmptyBuffer, setEditingEmptyBuffer] = useState<StationCatalogItem | null>(null);
+
+  // Map picker state for visual node selection
+  const [mapPickerConfig, setMapPickerConfig] = useState<{
+    open: boolean;
+    title: string;
+    currentSelectedNodeLabel?: string;
+    currentLocationId?: number | null;
+    selectedInForm?: (string | undefined)[];
+    onSelect: (node: AvailableMapNode) => void;
+  }>({
+    open: false,
+    title: '',
+    onSelect: () => {},
+  });
+
+  const openMapPickerFor = useCallback(
+    (config: {
+      title: string;
+      currentSelectedNodeLabel?: string;
+      currentLocationId?: number | null;
+      selectedInForm?: (string | undefined)[];
+      onSelect: (node: AvailableMapNode) => void;
+    }) => {
+      setMapPickerConfig({
+        open: true,
+        ...config,
+      });
+    },
+    []
+  );
+
+  const closeMapPicker = useCallback(() => {
+    setMapPickerConfig((prev) => ({ ...prev, open: false }));
+  }, []);
+
   const [emptyBufferForm] = Form.useForm();
+
+  // Helper chuẩn hóa node_label từ database (có thể là "20" hoặc "CNC001-CNC001-20") sang AvailableMapNode
+  const matchNodeLabel = useCallback(
+    (val?: string, locCode?: string): string | undefined => {
+      if (!val && !locCode) return undefined;
+      const cleanVal = val ? String(val).toLowerCase() : '';
+      const cleanCode = locCode ? String(locCode).toLowerCase() : '';
+      const found = availableNodes.find((n) => {
+        const nNum = String(n.node_number).toLowerCase();
+        const nLbl = String(n.node_label).toLowerCase();
+        return (
+          nLbl === cleanVal ||
+          nNum === cleanVal ||
+          nLbl === cleanCode ||
+          nNum === cleanCode
+        );
+      });
+      return found ? found.node_label : (val || locCode);
+    },
+    [availableNodes]
+  );
 
   // Realtime in-memory derivation: Quét toàn bộ các vị trí đã gán hiện có trên toàn xưởng từ catalog
   const assignedNodesMap = useMemo(() => {
     const map = new Map<string, { id?: number; name: string; zone: string }>();
 
+    const register = (
+      locCode?: string,
+      locLabel?: string,
+      nodeLabel?: string,
+      info?: { id?: number; name: string; zone: string }
+    ) => {
+      if (!info) return;
+      if (locCode) map.set(String(locCode).toLowerCase(), info);
+      if (locLabel) map.set(String(locLabel).toLowerCase(), info);
+      if (nodeLabel) map.set(String(nodeLabel).toLowerCase(), info);
+    };
+
     // 1. Raw Materials
     catalog?.raw_materials?.forEach((rm) => {
-      const label = rm.node_label || rm.location_label;
-      if (label) {
-        map.set(String(label), {
-          id: rm.id,
-          name: rm.location_name || rm.location_code,
-          zone: 'Khu Cấp Phôi',
-        });
-      }
+      register(rm.location_code, rm.location_label, rm.node_label, {
+        id: rm.id,
+        name: rm.location_name || rm.location_code,
+        zone: 'Khu Cấp Phôi',
+      });
     });
 
     // 2. CNC Machines and Slots
     catalog?.machines?.forEach((m) => {
       m.slots?.forEach((s) => {
-        const label = s.node_label || s.location_label;
-        if (label) {
-          map.set(String(label), {
-            id: s.id,
-            name: `${m.machine_code} (POS${s.position_index})`,
-            zone: 'Khu Máy CNC',
-          });
-        }
+        register(s.location_code, s.location_label, s.node_label, {
+          id: s.id,
+          name: `${m.machine_code} (POS${s.position_index})`,
+          zone: 'Khu Máy CNC',
+        });
       });
     });
 
     // 3. Washing Slots
     catalog?.washing_slots?.forEach((w) => {
-      const label = w.node_label || w.location_label;
-      if (label) {
-        map.set(String(label), {
-          id: w.id,
-          name: w.location_name || w.location_code,
-          zone: 'Khu Tẩy Rửa',
-        });
-      }
+      register(w.location_code, w.location_label, w.node_label, {
+        id: w.id,
+        name: w.location_name || w.location_code,
+        zone: 'Khu Tẩy Rửa',
+      });
     });
 
     // 4. Empty Buffers
     const emptyBuffers = catalog?.empty_buffers || [];
     emptyBuffers.forEach((b) => {
-      const label = b.node_label || b.location_label;
-      if (label) {
-        map.set(String(label), {
-          id: b.id,
-          name: b.location_name || b.location_code,
-          zone: 'Bãi Đệm Xe Rỗng',
-        });
-      }
+      register(b.location_code, b.location_label, b.node_label, {
+        id: b.id,
+        name: b.location_name || b.location_code,
+        zone: 'Bãi Đệm Xe Rỗng',
+      });
     });
 
     return map;
@@ -170,8 +228,9 @@ export default function StationSettingPage() {
       const { currentLocationId, selectedInForm = [], currentSlotNode } = options || {};
 
       return availableNodes.map((n) => {
-        const labelStr = String(n.node_label);
-        const assignedInfo = assignedNodesMap.get(labelStr);
+        const assignedInfo =
+          assignedNodesMap.get(String(n.node_label).toLowerCase()) ||
+          assignedNodesMap.get(String(n.node_number).toLowerCase());
         const isAssignedInDb = n.is_assigned;
 
         // Is it assigned to the current entity being edited?
@@ -179,10 +238,17 @@ export default function StationSettingPage() {
 
         // Is it picked by another slot in the current multi-slot CNC form?
         const isPickedByOtherSlotInForm =
-          selectedInForm.includes(n.node_label) && n.node_label !== currentSlotNode;
+          selectedInForm.some(
+            (sel) =>
+              sel &&
+              (String(sel).toLowerCase() === String(n.node_label).toLowerCase() ||
+                String(sel).toLowerCase() === String(n.node_number).toLowerCase())
+          ) &&
+          String(n.node_label).toLowerCase() !== String(currentSlotNode).toLowerCase() &&
+          String(n.node_number).toLowerCase() !== String(currentSlotNode).toLowerCase();
 
         let isDisabled = false;
-        let badge = '[Chưa gán]';
+        let badge = '[Trống]';
 
         if (isPickedByOtherSlotInForm) {
           isDisabled = true;
@@ -203,7 +269,7 @@ export default function StationSettingPage() {
         return {
           value: n.node_label,
           disabled: isDisabled,
-          label: `${n.node_number} ${badge}`,
+          label: `Node ${n.node_number} ${badge}`,
           node: n,
         };
       });
@@ -230,7 +296,7 @@ export default function StationSettingPage() {
     rawForm.setFieldsValue({
       location_code: item.location_code,
       location_name: item.location_name || '',
-      node_label: item.node_label || undefined,
+      node_label: matchNodeLabel(item.node_label, item.location_code),
     });
     setIsRawModalOpen(true);
   };
@@ -344,13 +410,16 @@ export default function StationSettingPage() {
   };
 
   const handleCreateSlotNodeChange = (slotIndex: number, nodeLabel: string) => {
-    const selectedNode = availableNodes.find((n) => n.node_label === nodeLabel);
+    const selectedNode = availableNodes.find(
+      (n) => n.node_label === nodeLabel || n.node_number === nodeLabel
+    );
+    const resolvedLabel = selectedNode ? selectedNode.node_label : nodeLabel;
     setCreateSlots((prev) =>
       prev.map((s, idx) =>
         idx === slotIndex
           ? {
             ...s,
-            node_label: nodeLabel,
+            node_label: resolvedLabel,
             map_x: selectedNode?.map_x,
             map_y: selectedNode?.map_y,
           }
@@ -401,7 +470,7 @@ export default function StationSettingPage() {
       id: s.id,
       position_index: s.position_index || idx + 1,
       location_code: s.location_code,
-      node_label: s.node_label || undefined,
+      node_label: matchNodeLabel(s.node_label, s.location_code),
       map_x: s.map_x || undefined,
       map_y: s.map_y || undefined,
     }));
@@ -447,13 +516,16 @@ export default function StationSettingPage() {
   };
 
   const handleEditSlotNodeChange = (slotIndex: number, nodeLabel: string) => {
-    const selectedNode = availableNodes.find((n) => n.node_label === nodeLabel);
+    const selectedNode = availableNodes.find(
+      (n) => n.node_label === nodeLabel || n.node_number === nodeLabel
+    );
+    const resolvedLabel = selectedNode ? selectedNode.node_label : nodeLabel;
     setEditSlots((prev) =>
       prev.map((s, idx) =>
         idx === slotIndex
           ? {
             ...s,
-            node_label: nodeLabel,
+            node_label: resolvedLabel,
             map_x: selectedNode?.map_x,
             map_y: selectedNode?.map_y,
           }
@@ -524,7 +596,7 @@ export default function StationSettingPage() {
     washForm.setFieldsValue({
       location_code: item.location_code,
       location_name: item.location_name || '',
-      node_label: item.node_label || undefined,
+      node_label: matchNodeLabel(item.node_label, item.location_code),
     });
     setIsWashModalOpen(true);
   };
@@ -597,7 +669,7 @@ export default function StationSettingPage() {
     emptyBufferForm.setFieldsValue({
       location_code: item.location_code,
       location_name: item.location_name || '',
-      node_label: item.node_label || undefined,
+      node_label: matchNodeLabel(item.node_label, item.location_code),
     });
     setIsEmptyBufferModalOpen(true);
   };
@@ -686,6 +758,22 @@ export default function StationSettingPage() {
       <Hero
         title="Cấu Hình Trạm & Phân Khu Xưởng"
         subtitle="Quản lý các điểm đỗ vật lý gắn với Node Map KUKA: Khu Cấp Phôi, Khu Máy CNC (hỗ trợ 1..3 slots) và Khu Tẩy Rửa / Bãi Đệm"
+        extra={
+          <Button
+            icon={<EnvironmentOutlined />}
+            onClick={() => {
+              openMapPickerFor({
+                title: 'Sơ đồ Bản đồ Xưởng KUKA (Trực quan hóa vị trí & Node)',
+                onSelect: (node) => {
+                  message.info(`Bạn đang chọn Node ${node.node_number} (Tọa độ: ${node.map_x}, ${node.map_y})`);
+                },
+              });
+            }}
+            className="!bg-brand-primary hover:!bg-stripe-primary-deep !border-none !text-white !h-10 !px-4 !rounded-lg font-semibold shadow-sm flex items-center gap-1.5"
+          >
+            🗺️ Mở Bản Đồ Xưởng
+          </Button>
+        }
       />
 
       <Tabs
@@ -1196,15 +1284,36 @@ export default function StationSettingPage() {
             label="Chọn Node Bản Đồ KUKA"
             rules={[{ required: true, message: 'Vui lòng chọn Node Map KUKA!' }]}
           >
-            <Select
-              showSearch
-              placeholder="Chọn điểm đỗ Node trên Map (chưa gán)"
-              options={getNodeOptions({ currentLocationId: editingRaw?.id })}
-              disabled={!!editingRaw}
-              filterOption={(input, option) =>
-                (option?.label as string || '').toLowerCase().includes(input.toLowerCase())
-              }
-            />
+            <Space.Compact style={{ width: '100%' }}>
+              <Select
+                showSearch
+                placeholder="Chọn điểm đỗ Node trên Map (chưa gán)"
+                options={getNodeOptions({ currentLocationId: editingRaw?.id })}
+                disabled={false}
+                filterOption={(input, option) =>
+                  (option?.label as string || '').toLowerCase().includes(input.toLowerCase())
+                }
+                style={{ width: 'calc(100% - 90px)' }}
+              />
+              <Button
+                disabled={false}
+                icon={<EnvironmentOutlined className="text-brand-primary" />}
+                onClick={() => {
+                  const currentVal = rawForm.getFieldValue('node_label');
+                  openMapPickerFor({
+                    title: `Chọn điểm đỗ trên bản đồ cho Ô Cấp Phôi ${rawForm.getFieldValue('location_name') || ''}`,
+                    currentSelectedNodeLabel: currentVal,
+                    currentLocationId: editingRaw?.id,
+                    onSelect: (node) => {
+                      rawForm.setFieldsValue({ node_label: node.node_label });
+                    },
+                  });
+                }}
+                className="!text-xs font-semibold text-brand-primary border-brand-primary/40 hover:!border-brand-primary"
+              >
+                Bản đồ
+              </Button>
+            </Space.Compact>
           </Form.Item>
 
           <Form.Item
@@ -1295,22 +1404,42 @@ export default function StationSettingPage() {
                     </span>
                   </div>
 
-                  <div className="flex-1 max-w-[280px]">
-                    <Select
-                      size="small"
-                      showSearch
-                      placeholder={`Chọn Node Map cho POS${slot.position_index}`}
-                      value={slot.node_label}
-                      onChange={(val) => handleCreateSlotNodeChange(idx, val)}
-                      options={getNodeOptions({
-                        selectedInForm: createSlots.map((s) => s.node_label),
-                        currentSlotNode: slot.node_label,
-                      })}
-                      filterOption={(input, option) =>
-                        (option?.label as string || '').toLowerCase().includes(input.toLowerCase())
-                      }
-                      className="w-full text-xs"
-                    />
+                  <div className="flex-1 max-w-[320px]">
+                    <Space.Compact style={{ width: '100%' }}>
+                      <Select
+                        size="small"
+                        showSearch
+                        placeholder={`Chọn Node cho POS${slot.position_index}`}
+                        value={slot.node_label}
+                        onChange={(val) => handleCreateSlotNodeChange(idx, val)}
+                        options={getNodeOptions({
+                          selectedInForm: createSlots.map((s) => s.node_label),
+                          currentSlotNode: slot.node_label,
+                        })}
+                        filterOption={(input, option) =>
+                          (option?.label as string || '').toLowerCase().includes(input.toLowerCase())
+                        }
+                        className="text-xs"
+                        style={{ width: 'calc(100% - 75px)' }}
+                      />
+                      <Button
+                        size="small"
+                        icon={<EnvironmentOutlined className="text-brand-primary" />}
+                        onClick={() => {
+                          openMapPickerFor({
+                            title: `Chọn Node trên bản đồ cho POS${slot.position_index} (${createMachineForm.getFieldValue('machine_code') || 'Máy CNC'})`,
+                            currentSelectedNodeLabel: slot.node_label,
+                            selectedInForm: createSlots.map((s) => s.node_label),
+                            onSelect: (node) => {
+                              handleCreateSlotNodeChange(idx, node.node_label);
+                            },
+                          });
+                        }}
+                        className="!text-xs font-medium text-brand-primary"
+                      >
+                        Bản đồ
+                      </Button>
+                    </Space.Compact>
                   </div>
 
                   {createSlots.length > 1 && (
@@ -1394,23 +1523,44 @@ export default function StationSettingPage() {
                     </span>
                   </div>
 
-                  <div className="flex-1 max-w-[280px]">
-                    <Select
-                      size="small"
-                      showSearch
-                      placeholder={`Chọn Node Map cho POS${slot.position_index}`}
-                      value={slot.node_label}
-                      onChange={(val) => handleEditSlotNodeChange(idx, val)}
-                      options={getNodeOptions({
-                        currentLocationId: slot.id,
-                        selectedInForm: editSlots.map((s) => s.node_label),
-                        currentSlotNode: slot.node_label,
-                      })}
-                      filterOption={(input, option) =>
-                        (option?.label as string || '').toLowerCase().includes(input.toLowerCase())
-                      }
-                      className="w-full text-xs"
-                    />
+                  <div className="flex-1 max-w-[320px]">
+                    <Space.Compact style={{ width: '100%' }}>
+                      <Select
+                        size="small"
+                        showSearch
+                        placeholder={`Chọn Node cho POS${slot.position_index}`}
+                        value={slot.node_label}
+                        onChange={(val) => handleEditSlotNodeChange(idx, val)}
+                        options={getNodeOptions({
+                          currentLocationId: slot.id,
+                          selectedInForm: editSlots.map((s) => s.node_label),
+                          currentSlotNode: slot.node_label,
+                        })}
+                        filterOption={(input, option) =>
+                          (option?.label as string || '').toLowerCase().includes(input.toLowerCase())
+                        }
+                        className="text-xs"
+                        style={{ width: 'calc(100% - 75px)' }}
+                      />
+                      <Button
+                        size="small"
+                        icon={<EnvironmentOutlined className="text-brand-primary" />}
+                        onClick={() => {
+                          openMapPickerFor({
+                            title: `Chọn Node trên bản đồ cho POS${slot.position_index} (${editingMachine?.machine_code})`,
+                            currentSelectedNodeLabel: slot.node_label,
+                            currentLocationId: slot.id,
+                            selectedInForm: editSlots.map((s) => s.node_label),
+                            onSelect: (node) => {
+                              handleEditSlotNodeChange(idx, node.node_label);
+                            },
+                          });
+                        }}
+                        className="!text-xs font-medium text-brand-primary"
+                      >
+                        Bản đồ
+                      </Button>
+                    </Space.Compact>
                   </div>
 
                   {editSlots.length > 1 && (
@@ -1450,15 +1600,36 @@ export default function StationSettingPage() {
             label="Chọn Node Bản Đồ KUKA"
             rules={[{ required: true, message: 'Vui lòng chọn Node Map KUKA!' }]}
           >
-            <Select
-              showSearch
-              placeholder="Chọn điểm đỗ Node trên Map (chưa gán)"
-              options={getNodeOptions({ currentLocationId: editingWash?.id })}
-              disabled={!!editingWash}
-              filterOption={(input, option) =>
-                (option?.label as string || '').toLowerCase().includes(input.toLowerCase())
-              }
-            />
+            <Space.Compact style={{ width: '100%' }}>
+              <Select
+                showSearch
+                placeholder="Chọn điểm đỗ Node trên Map (chưa gán)"
+                options={getNodeOptions({ currentLocationId: editingWash?.id })}
+                disabled={false}
+                filterOption={(input, option) =>
+                  (option?.label as string || '').toLowerCase().includes(input.toLowerCase())
+                }
+                style={{ width: 'calc(100% - 90px)' }}
+              />
+              <Button
+                disabled={false}
+                icon={<EnvironmentOutlined className="text-brand-primary" />}
+                onClick={() => {
+                  const currentVal = washForm.getFieldValue('node_label');
+                  openMapPickerFor({
+                    title: `Chọn điểm đỗ trên bản đồ cho Slot Tẩy Rửa ${washForm.getFieldValue('location_name') || ''}`,
+                    currentSelectedNodeLabel: currentVal,
+                    currentLocationId: editingWash?.id,
+                    onSelect: (node) => {
+                      washForm.setFieldsValue({ node_label: node.node_label });
+                    },
+                  });
+                }}
+                className="!text-xs font-semibold text-brand-primary border-brand-primary/40 hover:!border-brand-primary"
+              >
+                Bản đồ
+              </Button>
+            </Space.Compact>
           </Form.Item>
 
           <Form.Item
@@ -1493,15 +1664,36 @@ export default function StationSettingPage() {
             label="Chọn Node Bản Đồ KUKA"
             rules={[{ required: true, message: 'Vui lòng chọn Node Map KUKA!' }]}
           >
-            <Select
-              showSearch
-              placeholder="Chọn điểm đỗ Node trên Map (chưa gán)"
-              options={getNodeOptions({ currentLocationId: editingEmptyBuffer?.id })}
-              disabled={!!editingEmptyBuffer}
-              filterOption={(input, option) =>
-                (option?.label as string || '').toLowerCase().includes(input.toLowerCase())
-              }
-            />
+            <Space.Compact style={{ width: '100%' }}>
+              <Select
+                showSearch
+                placeholder="Chọn điểm đỗ Node trên Map (chưa gán)"
+                options={getNodeOptions({ currentLocationId: editingEmptyBuffer?.id })}
+                disabled={false}
+                filterOption={(input, option) =>
+                  (option?.label as string || '').toLowerCase().includes(input.toLowerCase())
+                }
+                style={{ width: 'calc(100% - 90px)' }}
+              />
+              <Button
+                disabled={false}
+                icon={<EnvironmentOutlined className="text-brand-primary" />}
+                onClick={() => {
+                  const currentVal = emptyBufferForm.getFieldValue('node_label');
+                  openMapPickerFor({
+                    title: `Chọn điểm đỗ trên bản đồ cho Bãi Đệm ${emptyBufferForm.getFieldValue('location_name') || ''}`,
+                    currentSelectedNodeLabel: currentVal,
+                    currentLocationId: editingEmptyBuffer?.id,
+                    onSelect: (node) => {
+                      emptyBufferForm.setFieldsValue({ node_label: node.node_label });
+                    },
+                  });
+                }}
+                className="!text-xs font-semibold text-brand-primary border-brand-primary/40 hover:!border-brand-primary"
+              >
+                Bản đồ
+              </Button>
+            </Space.Compact>
           </Form.Item>
 
           <Form.Item
@@ -1513,6 +1705,17 @@ export default function StationSettingPage() {
           </Form.Item>
         </Form>
       </Modal>
+      <MapNodePickerModal
+        open={mapPickerConfig.open}
+        onClose={closeMapPicker}
+        title={mapPickerConfig.title}
+        currentSelectedNodeLabel={mapPickerConfig.currentSelectedNodeLabel}
+        availableNodes={availableNodes}
+        assignedNodesMap={assignedNodesMap}
+        currentLocationId={mapPickerConfig.currentLocationId}
+        selectedInForm={mapPickerConfig.selectedInForm}
+        onSelectNode={mapPickerConfig.onSelect}
+      />
     </div>
   );
 }

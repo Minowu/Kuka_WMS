@@ -21,6 +21,15 @@ DbSession = Annotated[Session, Depends(get_db)]
 CurrentUser = Annotated[User, Depends(get_current_user)]
 
 
+def _ensure_admin(user: User) -> None:
+    is_admin = bool(any(r.name == "admin" for r in (user.roles or [])))
+    if not is_admin:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Chỉ tài khoản Admin mới có quyền thực hiện thao tác quản trị Rack.",
+        )
+
+
 @rack_router.get(
     "/production/racks",
     response_model=list[RackManagementItem],
@@ -56,6 +65,7 @@ def remove_production_rack(
     Xóa / thu hồi Rack khỏi vị trí hiện tại (gửi lệnh POST /amr/containerOut sang KUKA Fleet giống cơ chế xóa ở bãi xe trống).
     Chỉ xóa trong WMS khi KUKA Fleet xác nhận containerOut thành công.
     """
+    _ensure_admin(user)
     try:
         return rack_service.remove_rack_container(
             db=db,
@@ -83,6 +93,7 @@ def update_production_rack_location(
     """
     Cập nhật vị trí mới cho Rack (đồng bộ containerOut vị trí cũ + containerIn vị trí mới trên KUKA Fleet).
     """
+    _ensure_admin(user)
     try:
         return rack_service.update_rack_location(
             db=db,

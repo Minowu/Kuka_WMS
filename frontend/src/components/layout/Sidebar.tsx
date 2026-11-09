@@ -16,6 +16,7 @@ import {
   HomeOutlined,
   BranchesOutlined,
   ContainerOutlined,
+  UnorderedListOutlined,
 } from "@ant-design/icons";
 
 interface SidebarLinkProps {
@@ -257,6 +258,7 @@ export default function Sidebar() {
             },
             { to: "/production/stations", icon: <ClusterOutlined />, label: "Cấu hình Trạm" },
             { to: "/production/racks", icon: <ContainerOutlined />, label: "Quản lý Rack" },
+            { to: "/production/requests", icon: <UnorderedListOutlined />, label: "Lệnh & Hàng đợi" },
           ]}
           collapsed={collapsed}
         />

@@ -1,12 +1,21 @@
-"""Business logic for Admin Container / Rack Management (List, Remove via containerOut, Update Location)."""
+"""Business logic for Admin Container / Rack Management & Transport Request Cancellation."""
 
+from datetime import datetime, timezone
 from typing import Any, Optional
 
 from sqlalchemy.orm import Session, joinedload
 
 from app.core.logger import bind_context, get_logger
+from app.modules.auth.auth_model import User
 from app.modules.production.dispatch_service import dispatch_service
-from app.modules.production.production_models import FleetTask, TransportRequest
+from app.modules.production.production_models import (
+    FleetTask,
+    ProductionRoute,
+    RouteStep,
+    RouteStepMachine,
+    TransportQueue,
+    TransportRequest,
+)
 from app.modules.warehouse.item_stock.item_stock_model import ItemStock
 from app.modules.warehouse.location_map.location_model import Location
 from app.socket.event_bus import publish_event, resolve_location_recipient_user_ids
@@ -21,37 +30,152 @@ def _evaluate_rack_block_reason(
     cart: ItemStock,
     active_task: Optional[FleetTask],
     active_req: Optional[TransportRequest],
-) -> tuple[bool, Optional[str]]:
+) -> tuple[bool, Optional[str], bool, Optional[str]]:
     """
-    Kiểm tra xem Rack có được phép xóa hoặc đổi vị trí hay không.
-    Trả về `(can_modify, block_reason)`.
+    Kiểm tra xem Rack có được phép xóa (`can_modify`) hoặc đổi vị trí (`can_relocate`) hay không.
+    Trả về `(can_modify, block_reason, can_relocate, relocate_block_reason)`.
     """
     if not cart.is_active:
-        return False, "Rack đã được thu hồi / không còn hoạt động trên xưởng."
+        reason = "Rack đã được thu hồi / không còn hoạt động trên xưởng."
+        return False, reason, False, reason
 
     if cart.is_locked:
         m_code = cart.locked_by_mission_code or (active_task.mission_code if active_task else "AMR")
-        return False, f"Rack đang bị khóa bởi nhiệm vụ điều xe AMR ({m_code}). Không thể xóa hoặc đổi vị trí khi xe đang chạy."
+        reason = f"Rack đang bị khóa bởi nhiệm vụ điều xe AMR ({m_code}). Không thể xóa hoặc đổi vị trí khi xe đang chạy."
+        return False, reason, False, reason
 
     if active_task:
-        return (
-            False,
-            f"Rack đang nằm trong nhiệm vụ AMR '{active_task.mission_code}' (trạng thái: {active_task.status}).",
-        )
+        reason = f"Rack đang nằm trong nhiệm vụ AMR '{active_task.mission_code}' (trạng thái: {active_task.status})."
+        return False, reason, False, reason
 
     if active_req:
+        reason = f"Rack đang nằm trong yêu cầu/hàng đợi vận chuyển '{active_req.request_code}' (trạng thái: {active_req.status}). Vui lòng hủy yêu cầu trước."
+        return False, reason, False, reason
+
+    if cart.status in ("empty", "out_failed"):
+        reloc_reason = (
+            "Rack đang ở trạng thái xe rỗng / lỗi xóa trên Fleet (out_failed) — "
+            "chỉ được phép bấm 'Xóa Rack' để thu hồi, không được đổi vị trí."
+        )
+        return True, None, False, reloc_reason
+
+    return True, None, True, None
+
+
+def _build_route_context_by_item(
+    db: Session,
+    item_ids: set[int],
+) -> dict[int, dict[str, Any]]:
+    """
+    Tiền nạp thông tin Quy trình đang active (`ProductionRoute`) cho danh sách `item_ids`:
+    Trả về `{item_id: {"max_stage": int, "machine_stages": {machine_id: set[int]}}}`.
+    """
+    if not item_ids:
+        return {}
+
+    routes = (
+        db.query(ProductionRoute)
+        .options(
+            joinedload(ProductionRoute.steps)
+            .joinedload(RouteStep.allowed_machine_links)
+        )
+        .filter(
+            ProductionRoute.item_id.in_(list(item_ids)),
+            ProductionRoute.is_active.is_(True),
+        )
+        .all()
+    )
+    result: dict[int, dict[str, Any]] = {}
+    for route in routes:
+        steps = route.steps or []
+        max_stage = max((st.stage_level for st in steps), default=0)
+        machine_stages: dict[int, set[int]] = {}
+        for st in steps:
+            for link in st.allowed_machine_links or []:
+                if link.machine_id is not None:
+                    machine_stages.setdefault(link.machine_id, set()).add(st.stage_level)
+        result[route.item_id] = {
+            "route_id": route.id,
+            "max_stage": max_stage,
+            "machine_stages": machine_stages,
+        }
+    return result
+
+
+def _validate_location_for_cart(
+    cart: ItemStock,
+    loc: Location,
+    route_ctx: Optional[dict[str, Any]],
+) -> tuple[bool, Optional[str]]:
+    """
+    Kiểm tra xem một Rack (`cart`) có được phép chuyển tới vị trí `loc` theo đúng logic công đoạn sản xuất không:
+    1. Không bao giờ cho phép chuyển Rack sang `EMPTY_CART_BUFFER` (muốn thu hồi xe rỗng phải dùng Xóa Rack).
+    2. `RAW_MATERIAL`: Chỉ nhận xe phôi thô (`current_stage_level == 0`).
+    3. `CNC_SLOT`: Máy CNC tại vị trí đó phải thuộc Quy trình (`ProductionRoute`) đang active của Model trên xe,
+       và bước công đoạn `S` của máy phải khớp với trạng thái hiện tại của xe (`cart_level in (S - 1, S)`).
+    4. `WASHING_SLOT`: Chỉ nhận xe đã hoàn thành bước CNC cuối cùng (`cart_level >= max_stage` và `max_stage > 0`).
+    """
+    loc_display = loc.location_name or loc.location_code
+    loc_type = loc.location_type
+    cart_level = int(cart.current_stage_level or 0)
+    item_name = cart.item.name if cart.item else f"Model ID={cart.item_id}"
+
+    if loc_type == "EMPTY_CART_BUFFER":
         return (
             False,
-            f"Rack đang nằm trong yêu cầu/hàng đợi vận chuyển '{active_req.request_code}' (trạng thái: {active_req.status}).",
+            f"Không được phép chuyển Rack vào Bãi Xe Trống ('{loc_display}'). Nếu muốn thu hồi xe rỗng, vui lòng dùng chức năng 'Xóa Rack'.",
         )
 
-    return True, None
+    if loc_type == "RAW_MATERIAL":
+        if cart_level != 0:
+            return (
+                False,
+                f"Rack đang ở công đoạn Lv {cart_level} (bán thành phẩm), không thể chuyển ngược về Khu Nguyên Liệu '{loc_display}' (chỉ dành cho phôi thô Lv 0).",
+            )
+        return True, None
+
+    if not cart.item_id or not route_ctx:
+        return (
+            False,
+            f"Model '{item_name}' trên Rack chưa có Quy trình sản xuất (Route) đang kích hoạt, không thể chuyển vào '{loc_display}'.",
+        )
+
+    max_stage = int(route_ctx.get("max_stage") or 0)
+    machine_stages: dict[int, set[int]] = route_ctx.get("machine_stages") or {}
+
+    if loc_type == "CNC_SLOT":
+        if not loc.machine_id or loc.machine_id not in machine_stages:
+            return (
+                False,
+                f"Trạm máy CNC tại '{loc_display}' không nằm trong Quy trình sản xuất của Model '{item_name}'.",
+            )
+        allowed_stages = machine_stages[loc.machine_id]
+        # Máy ở Bước S hợp lệ khi xe đang là đầu vào của Bước S (Lv = S - 1) hoặc vừa xong tại Bước S (Lv = S)
+        valid_for_machine = any(cart_level in (s - 1, s) for s in allowed_stages)
+        if not valid_for_machine:
+            stages_str = ", ".join(f"Bước {s} (nhận phôi Lv {s - 1})" for s in sorted(allowed_stages))
+            return (
+                False,
+                f"Rack đang ở công đoạn Lv {cart_level}, không khớp với công đoạn của máy tại '{loc_display}' ({stages_str}).",
+            )
+        return True, None
+
+    if loc_type == "WASHING_SLOT":
+        if max_stage <= 0 or cart_level < max_stage:
+            return (
+                False,
+                f"Rack mới ở công đoạn Lv {cart_level} (chưa hoàn thành bước CNC cuối Lv {max_stage} của Model '{item_name}'), không thể chuyển thẳng vào Khu Tẩy Rửa '{loc_display}'.",
+            )
+        return True, None
+
+    return False, f"Loại vị trí '{loc_type}' tại '{loc_display}' không hợp lệ để đặt Rack."
 
 
 def serialize_rack(
     cart: ItemStock,
     active_task: Optional[FleetTask] = None,
     active_req: Optional[TransportRequest] = None,
+    allowed_location_ids: Optional[list[int]] = None,
 ) -> dict[str, Any]:
     loc = cart.location
     dest_loc = cart.destination_location
@@ -60,7 +184,9 @@ def serialize_rack(
     if loc and getattr(loc, "machine", None):
         machine_code = loc.machine.machine_code
 
-    can_modify, block_reason = _evaluate_rack_block_reason(cart, active_task, active_req)
+    can_modify, block_reason, can_relocate, relocate_block_reason = _evaluate_rack_block_reason(
+        cart, active_task, active_req
+    )
 
     return {
         "id": cart.id,
@@ -86,6 +212,9 @@ def serialize_rack(
         "active_request_status": active_req.status if active_req else None,
         "can_modify": can_modify,
         "block_reason": block_reason,
+        "can_relocate": can_relocate,
+        "relocate_block_reason": relocate_block_reason,
+        "allowed_location_ids": allowed_location_ids if allowed_location_ids is not None else [],
         "fleet_registered": bool(cart.fleet_registered),
         "created_at": cart.created_at,
         "updated_at": cart.updated_at,
@@ -97,7 +226,7 @@ def list_racks(
     include_inactive: bool = False,
     search: Optional[str] = None,
 ) -> list[dict[str, Any]]:
-    """Lấy danh sách các Container/Rack trên xưởng kèm trạng thái khóa và hàng đợi."""
+    """Lấy danh sách các Container/Rack trên xưởng kèm trạng thái khóa, hàng đợi và danh sách vị trí đích hợp lệ."""
     query = (
         db.query(ItemStock)
         .options(
@@ -122,8 +251,8 @@ def list_racks(
         return []
 
     cart_ids = [c.id for c in carts]
+    item_ids = {c.item_id for c in carts if c.item_id is not None}
 
-    # Tải theo lô các FleetTask và TransportRequest đang hoạt động của các rack này
     active_tasks = (
         db.query(FleetTask)
         .filter(
@@ -152,14 +281,37 @@ def list_racks(
         if r.container_id and r.container_id not in req_by_cart_id:
             req_by_cart_id[r.container_id] = r
 
-    items = [
-        serialize_rack(
-            c,
-            active_task=task_by_cart_id.get(c.id),
-            active_req=req_by_cart_id.get(c.id),
+    # Tiền nạp danh sách vị trí active và quy trình để tính sẵn allowed_location_ids cho từng Rack
+    all_active_locs = (
+        db.query(Location)
+        .filter(
+            Location.is_active.is_(True),
+            Location.location_type.in_(["RAW_MATERIAL", "CNC_SLOT", "WASHING_SLOT"]),
         )
-        for c in carts
-    ]
+        .all()
+    )
+    route_ctx_by_item = _build_route_context_by_item(db, item_ids)
+
+    items = []
+    for c in carts:
+        r_ctx = route_ctx_by_item.get(c.item_id) if c.item_id else None
+        allowed_ids: list[int] = []
+        if c.is_active and c.status not in ("empty", "out_failed"):
+            for loc in all_active_locs:
+                if loc.id == c.location_id:
+                    continue
+                ok, _ = _validate_location_for_cart(c, loc, r_ctx)
+                if ok:
+                    allowed_ids.append(loc.id)
+
+        items.append(
+            serialize_rack(
+                c,
+                active_task=task_by_cart_id.get(c.id),
+                active_req=req_by_cart_id.get(c.id),
+                allowed_location_ids=allowed_ids,
+            )
+        )
 
     if search and search.strip():
         kw = search.strip().lower()
@@ -177,14 +329,13 @@ def list_racks(
     return items
 
 
-def _ensure_rack_modifiable(db: Session, cart: ItemStock, action_label: str) -> None:
-    """
-    Kiểm tra nghiêm ngặt các điều kiện chặn trước khi cho phép xóa hoặc đổi vị trí Rack:
-    1. Rack đã bị thu hồi (`is_active == False`).
-    2. Rack đang bị khóa bởi nhiệm vụ điều xe (`is_locked == True`).
-    3. Rack đang có `FleetTask` đang chạy (`created`, `pending_submit`, `submitting`, `sent`, `in_progress`).
-    4. Rack đang nằm trong `TransportRequest` / Hàng đợi tự động (`pending`, `queued_for_cart`, `queued_for_slot`, `in_progress`).
-    """
+def _ensure_rack_modifiable(
+    db: Session,
+    cart: ItemStock,
+    action_label: str,
+    require_relocatable: bool = False,
+) -> None:
+    """Kiểm tra nghiêm ngặt các điều kiện chặn trước khi cho phép xóa hoặc đổi vị trí Rack."""
     active_task = (
         db.query(FleetTask)
         .filter(
@@ -204,9 +355,13 @@ def _ensure_rack_modifiable(db: Session, cart: ItemStock, action_label: str) -> 
         .first()
     )
 
-    can_modify, block_reason = _evaluate_rack_block_reason(cart, active_task, active_req)
+    can_modify, block_reason, can_relocate, relocate_block_reason = _evaluate_rack_block_reason(
+        cart, active_task, active_req
+    )
     if not can_modify:
         raise ValueError(f"Không thể {action_label} Rack '{cart.container_code}': {block_reason}")
+    if require_relocatable and not can_relocate:
+        raise ValueError(f"Không thể {action_label} Rack '{cart.container_code}': {relocate_block_reason}")
 
 
 def remove_rack_container(
@@ -215,17 +370,17 @@ def remove_rack_container(
     operator_id: Optional[int] = None,
 ) -> dict[str, Any]:
     """
-    Xóa / thu hồi Container (Rack) khỏi vị trí hiện tại — giống hệt cơ chế gọi API `/amr/containerOut`
-    khi xe rỗng về bãi xe trống (`EMPTY_CART_BUFFER`):
+    Xóa / thu hồi Container (Rack) khỏi vị trí hiện tại:
     1. Chặn nếu Rack đang khóa, đang di chuyển trên AMR hoặc đang nằm trong hàng đợi điều phối.
-    2. Gửi lệnh `fleet_container_out` (`POST /amr/containerOut`) sang KUKA Fleet.
-       - Nếu KUKA Fleet báo lỗi hoặc từ chối: Lưu log `FleetApiCall`, giữ nguyên trạng thái Rack trong WMS DB
-         (không xóa trong DB để tránh lệch dữ liệu với Fleet) và trả về thông báo lỗi chi tiết cho người dùng.
-    3. Chỉ khi KUKA Fleet xác nhận thành công (`code=0/200, success=True`), hệ thống mới giải phóng `ItemStock`
-       trong CSDL (`is_active=False`, `location_id=None`, `status='empty'`, `fleet_registered=False`).
+    2. Nếu Rack đang có vị trí (`loc_code`) và đã đăng ký trên Fleet (`fleet_registered=True`),
+       gửi lệnh `fleet_container_out` (`POST /amr/containerOut`) sang KUKA Fleet.
+       - Nếu KUKA Fleet báo lỗi: giữ nguyên trạng thái Rack trong WMS DB và trả về thông báo lỗi chi tiết.
+    3. Nếu Rack đang bị treo không có vị trí (`location_id=None`) hoặc `fleet_registered=False`,
+       cho phép thu hồi trực tiếp trong WMS DB để không bao giờ bị kẹt xe.
     """
     cart = (
         db.query(ItemStock)
+        .options(joinedload(ItemStock.item))
         .filter(ItemStock.id == rack_id)
         .with_for_update(of=ItemStock)
         .first()
@@ -233,41 +388,42 @@ def remove_rack_container(
     if not cart:
         raise ValueError(f"Không tìm thấy Rack (ID={rack_id}).")
 
-    _ensure_rack_modifiable(db, cart, "xóa")
+    _ensure_rack_modifiable(db, cart, "xóa", require_relocatable=False)
 
     old_loc_id = cart.location_id
     loc = db.query(Location).filter(Location.id == old_loc_id).first() if old_loc_id else None
-    loc_code = loc.location_code if loc else ""
-    loc_display = (loc.location_name or loc.location_code) if loc else "Chưa rõ vị trí"
+    loc_code = (loc.location_code or "").strip() if loc else ""
+    loc_display = (loc.location_name or loc.location_code) if loc else "Bãi trống / Chưa rõ vị trí"
     c_code = (cart.container_code or "").strip()
 
     if not c_code:
         raise ValueError("Rack không có mã container_code hợp lệ.")
 
-    bind_context(container_code=c_code, station_code=loc_code)
+    bind_context(container_code=c_code, station_code=loc_code or None)
 
-    # Gửi lệnh containerOut sang KUKA Fleet TRƯỚC KHI thay đổi trạng thái ItemStock trong DB
-    try:
-        dispatch_service.fleet_container_out(
-            location_code=loc_code,
-            container_code=c_code,
-            db=db,
-        )
-    except Exception as e:
-        # Lưu lại bản ghi audit log FleetApiCall vào DB nhưng KHÔNG chạm vào ItemStock
-        db.commit()
-        logger.error(
-            "Xóa Rack '%s' tại '%s' thất bại do KUKA Fleet báo lỗi containerOut: %s",
-            c_code,
-            loc_code,
-            e,
-            exc_info=True,
-        )
-        raise ValueError(
-            f"Không thể xóa Rack '{c_code}' tại vị trí '{loc_display}' vì KUKA Fleet báo lỗi: {e}"
-        ) from e
+    # Chỉ gọi containerOut sang KUKA Fleet khi Rack thực sự có mã vị trí và đã đăng ký trên Fleet
+    called_fleet_out = False
+    if loc_code and cart.fleet_registered:
+        try:
+            dispatch_service.fleet_container_out(
+                location_code=loc_code,
+                container_code=c_code,
+                db=db,
+            )
+            called_fleet_out = True
+        except Exception as e:
+            db.commit()
+            logger.error(
+                "Xóa Rack '%s' tại '%s' thất bại do KUKA Fleet báo lỗi containerOut: %s",
+                c_code,
+                loc_code,
+                e,
+                exc_info=True,
+            )
+            raise ValueError(
+                f"Không thể xóa Rack '{c_code}' tại vị trí '{loc_display}' vì KUKA Fleet báo lỗi: {e}"
+            ) from e
 
-    # KUKA Fleet đã xóa thành công -> Cập nhật giải phóng Rack trong WMS DB
     cart.location_id = None
     cart.destination_location_id = None
     cart.quantity = 0
@@ -288,9 +444,9 @@ def remove_rack_container(
     db.commit()
     db.refresh(cart)
 
-    # Thử giải phóng hàng đợi WAITING_SLOT nếu ô vừa được giải phóng có xe đang chờ vào
     try:
         dispatch_service.try_resolve_waiting_slot_queue(db)
+        dispatch_service.try_resolve_waiting_cart_queue(db)
     except Exception as exc:
         logger.warning("Queue scan after rack removal failed: %s", exc)
 
@@ -305,9 +461,14 @@ def remove_rack_container(
         admins=True,
     )
 
+    msg = (
+        f"Đã xóa Rack '{c_code}' khỏi vị trí '{loc_display}' và đồng bộ containerOut trên KUKA Fleet thành công."
+        if called_fleet_out
+        else f"Đã thu hồi Rack '{c_code}' khỏi WMS thành công."
+    )
     return {
         "success": True,
-        "message": f"Đã xóa Rack '{c_code}' khỏi vị trí '{loc_display}' và đồng bộ containerOut trên KUKA Fleet thành công.",
+        "message": msg,
         "rack": serialize_rack(cart),
     }
 
@@ -319,16 +480,18 @@ def update_rack_location(
     operator_id: Optional[int] = None,
 ) -> dict[str, Any]:
     """
-    Cập nhật vị trí mới cho Container (Rack):
-    1. Kiểm tra điều kiện chặn: Không cho đổi vị trí nếu Rack đang khóa, đang chạy nhiệm vụ AMR hoặc đang trong hàng đợi.
-    2. Kiểm tra vị trí đích hợp lệ, đang hoạt động và chưa có Rack khác đỗ.
-    3. Đồng bộ với KUKA Fleet theo giao thức chuẩn:
-       - Bước 1: Gửi `containerOut` tại vị trí cũ (nếu có). Nếu Fleet báo lỗi -> Dừng ngay và giữ nguyên DB.
-       - Bước 2: Gửi `containerIn` tại vị trí mới. Nếu Fleet từ chối vị trí mới -> Tự động gọi `containerIn` khôi phục lại vị trí cũ trên Fleet, giữ nguyên DB và báo lỗi chi tiết.
-    4. Cập nhật `location_id` của `ItemStock` trong CSDL và phát sự kiện WebSocket `floor.changed`.
+    Cập nhật vị trí mới cho Container (Rack) với đầy đủ chốt chặn nghiệp vụ:
+    1. Chặn nếu Rack đang khóa, đang chạy nhiệm vụ AMR, đang trong hàng đợi, hoặc là xe rỗng/out_failed.
+    2. Kiểm tra vị trí đích:
+       - Đang hoạt động và chưa có Rack khác đỗ.
+       - Không có nhiệm vụ AMR (`FleetTask`) đang chở hàng tới vị trí đích.
+       - Không có yêu cầu gọi phôi (`TransportRequest` trạng thái `queued_for_cart`/`in_progress`) đang chờ tại vị trí đích.
+       - Phù hợp với Quy trình (`ProductionRoute`) và bậc công đoạn (`current_stage_level`) của Model trên Rack.
+    3. Đồng bộ 2 chiều với KUKA Fleet (`containerOut` vị trí cũ -> `containerIn` vị trí mới, tự động rollback nếu lỗi).
     """
     cart = (
         db.query(ItemStock)
+        .options(joinedload(ItemStock.item))
         .filter(ItemStock.id == rack_id)
         .with_for_update(of=ItemStock)
         .first()
@@ -336,13 +499,14 @@ def update_rack_location(
     if not cart:
         raise ValueError(f"Không tìm thấy Rack (ID={rack_id}).")
 
-    _ensure_rack_modifiable(db, cart, "đổi vị trí")
+    _ensure_rack_modifiable(db, cart, "đổi vị trí", require_relocatable=True)
 
     if cart.location_id == new_location_id:
         raise ValueError("Vị trí mới trùng với vị trí hiện tại của Rack.")
 
     new_loc = (
         db.query(Location)
+        .options(joinedload(Location.machine))
         .filter(Location.id == new_location_id, Location.is_active.is_(True))
         .first()
     )
@@ -350,6 +514,13 @@ def update_rack_location(
         raise ValueError(f"Vị trí đích (ID={new_location_id}) không tồn tại hoặc đã bị khóa.")
 
     new_loc_display = new_loc.location_name or new_loc.location_code
+
+    # Kiểm tra quy tắc công đoạn & quy trình đối với vị trí đích
+    route_ctx_map = _build_route_context_by_item(db, {cart.item_id} if cart.item_id else set())
+    route_ctx = route_ctx_map.get(cart.item_id) if cart.item_id else None
+    is_valid_dest, dest_err = _validate_location_for_cart(cart, new_loc, route_ctx)
+    if not is_valid_dest:
+        raise ValueError(dest_err)
 
     occupying_cart = (
         db.query(ItemStock)
@@ -365,7 +536,6 @@ def update_rack_location(
             f"Vị trí '{new_loc_display}' đang có Rack '{occupying_cart.container_code}' đỗ. Vui lòng chọn vị trí trống."
         )
 
-    # Kiểm tra xem vị trí đích có đang được AMR khác nhắm tới làm điểm hạ hàng không
     incoming_task = (
         db.query(FleetTask)
         .filter(
@@ -377,6 +547,21 @@ def update_rack_location(
     if incoming_task:
         raise ValueError(
             f"Vị trí '{new_loc_display}' đang có AMR thực hiện nhiệm vụ '{incoming_task.mission_code}' chở hàng tới. Vui lòng chọn vị trí khác."
+        )
+
+    waiting_dest_req = (
+        db.query(TransportRequest)
+        .filter(
+            TransportRequest.destination_location_id == new_loc.id,
+            TransportRequest.status.in_(ACTIVE_REQUEST_STATUSES),
+        )
+        .order_by(TransportRequest.id.desc())
+        .first()
+    )
+    if waiting_dest_req:
+        raise ValueError(
+            f"Vị trí '{new_loc_display}' đang có yêu cầu gọi phôi '{waiting_dest_req.request_code}' ({waiting_dest_req.status}). "
+            f"Vui lòng hủy yêu cầu gọi phôi tại vị trí này trước khi đặt Rack thủ công."
         )
 
     old_loc_id = cart.location_id
@@ -396,7 +581,7 @@ def update_rack_location(
             )
             removed_from_old_on_fleet = True
         except Exception as out_err:
-            db.commit()  # Lưu log FleetApiCall nhưng giữ nguyên ItemStock
+            db.commit()
             logger.error(
                 "Đổi vị trí Rack '%s' thất bại ở bước gỡ khỏi vị trí cũ '%s' (containerOut): %s",
                 c_code,
@@ -416,7 +601,6 @@ def update_rack_location(
             db=db,
         )
     except Exception as in_err:
-        # Nếu đã gỡ khỏi vị trí cũ trên Fleet nhưng thêm vào vị trí mới bị Fleet từ chối -> Khôi phục lại vị trí cũ trên Fleet!
         rollback_note = ""
         if removed_from_old_on_fleet and old_loc and old_loc.location_code:
             try:
@@ -436,12 +620,11 @@ def update_rack_location(
                 )
                 rollback_note = f" (Cảnh báo: Không thể khôi phục tự động về vị trí cũ '{old_loc_display}' trên Fleet: {restore_err})."
 
-        db.commit()  # Lưu log FleetApiCall nhưng giữ nguyên ItemStock tại vị trí cũ
+        db.commit()
         raise ValueError(
             f"KUKA Fleet từ chối đặt Rack '{c_code}' vào vị trí mới '{new_loc_display}' (containerIn): {in_err}{rollback_note}"
         ) from in_err
 
-    # Chỉ cập nhật vị trí (location_id); giữ nguyên 100% current_stage_level, item_id, quantity của Rack
     cart.location_id = new_loc.id
     cart.destination_location_id = None
     cart.fleet_registered = True
@@ -455,6 +638,12 @@ def update_rack_location(
 
     db.commit()
     db.refresh(cart)
+
+    try:
+        dispatch_service.try_resolve_waiting_slot_queue(db)
+        dispatch_service.try_resolve_waiting_cart_queue(db)
+    except Exception as exc:
+        logger.warning("Queue scan after rack relocation failed: %s", exc)
 
     publish_event(
         "floor.changed",

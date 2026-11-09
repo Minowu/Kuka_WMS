@@ -24,6 +24,9 @@ export interface RackManagementItem {
   active_request_status: string | null;
   can_modify: boolean;
   block_reason: string | null;
+  can_relocate?: boolean;
+  relocate_block_reason?: string | null;
+  allowed_location_ids?: number[];
   fleet_registered: boolean;
   created_at: string | null;
   updated_at: string | null;

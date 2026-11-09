@@ -72,13 +72,13 @@ export default function RackManagementPage() {
 
   const { data: stationCatalog } = useStationCatalog();
 
-  // Gom toàn bộ các vị trí trạm đã cấu hình trên xưởng để chọn khi cập nhật vị trí Rack
+  // Gom các vị trí trạm sản xuất (Nguyên liệu, Máy CNC, Tẩy rửa — không cho phép chuyển vào Bãi xe trống)
   const allStationLocations = useMemo(() => {
     if (!stationCatalog) return [];
     const list: Array<StationCatalogItem & { groupLabel: string }> = [];
 
     for (const raw of stationCatalog.raw_materials || []) {
-      list.push({ ...raw, groupLabel: '1. Khu Nguyên Liệu (RAW_MATERIAL)' });
+      list.push({ ...raw, groupLabel: '1. Khu Nguyên Liệu (RAW_MATERIAL - Phôi thô Lv 0)' });
     }
     for (const machine of stationCatalog.machines || []) {
       for (const slot of machine.slots || []) {
@@ -90,10 +90,7 @@ export default function RackManagementPage() {
       }
     }
     for (const wash of stationCatalog.washing_slots || []) {
-      list.push({ ...wash, groupLabel: '3. Khu Tẩy Rửa (WASHING_SLOT)' });
-    }
-    for (const buf of stationCatalog.empty_buffers || []) {
-      list.push({ ...buf, groupLabel: '4. Bãi Xe Trống (EMPTY_CART_BUFFER)' });
+      list.push({ ...wash, groupLabel: '3. Khu Tẩy Rửa (WASHING_SLOT - Đã xong CNC cuối)' });
     }
     return list;
   }, [stationCatalog]);
@@ -115,24 +112,33 @@ export default function RackManagementPage() {
       Array<{ value: number; label: string; disabled?: boolean }>
     >();
 
+    const allowedSet = new Set<number>(editingRack?.allowed_location_ids || []);
+    const hasAllowedList = Array.isArray(editingRack?.allowed_location_ids);
+
     for (const loc of allStationLocations) {
       const occupant = occupiedByLocationId.get(loc.id);
       const isOccupiedByOther =
         Boolean(occupant) && occupant !== editingRack?.container_code;
       const isSameCurrentLoc = occupant === editingRack?.container_code;
+      const isAllowedByRouteAndStage = !hasAllowedList || allowedSet.has(loc.id);
+
       const displayLabel = loc.location_name || loc.location_code;
       const nodeHint = loc.location_label || loc.node_label || loc.location_code;
-      const statusText = isOccupiedByOther
-        ? ` [Đang có rack: ${occupant}]`
-        : isSameCurrentLoc
-          ? ' [Vị trí hiện tại]'
-          : ' [Trống]';
+
+      let statusText = ' [Trống - Hợp lệ]';
+      if (isSameCurrentLoc) {
+        statusText = ' [Vị trí hiện tại]';
+      } else if (isOccupiedByOther) {
+        statusText = ` [Đang có rack: ${occupant}]`;
+      } else if (!isAllowedByRouteAndStage) {
+        statusText = ` [Không khớp Quy trình / Công đoạn Lv ${editingRack?.current_stage_level ?? 0}]`;
+      }
 
       const arr = groups.get(loc.groupLabel) || [];
       arr.push({
         value: loc.id,
         label: `${displayLabel} (${nodeHint})${statusText}`,
-        disabled: isOccupiedByOther || isSameCurrentLoc,
+        disabled: isOccupiedByOther || isSameCurrentLoc || !isAllowedByRouteAndStage,
       });
       groups.set(loc.groupLabel, arr);
     }
@@ -454,30 +460,33 @@ export default function RackManagementPage() {
       width: 220,
       fixed: 'right' as const,
       render: (_: unknown, record: RackManagementItem) => {
-        const disabled = !record.can_modify;
-        const tooltipText = record.block_reason || undefined;
+        const deleteDisabled = !record.can_modify;
+        const deleteTooltip = record.block_reason || undefined;
+        const relocateDisabled = !(record.can_relocate ?? record.can_modify);
+        const relocateTooltip =
+          record.relocate_block_reason || record.block_reason || undefined;
 
         return (
           <Space size="small">
-            <Tooltip title={tooltipText}>
+            <Tooltip title={relocateTooltip}>
               <span>
                 <Button
                   size="small"
                   icon={<EnvironmentOutlined />}
-                  disabled={disabled}
+                  disabled={relocateDisabled}
                   onClick={() => openEditLocationModal(record)}
                 >
                   Đổi vị trí
                 </Button>
               </span>
             </Tooltip>
-            <Tooltip title={tooltipText}>
+            <Tooltip title={deleteTooltip}>
               <span>
                 <Button
                   size="small"
                   danger
                   icon={<DeleteOutlined />}
-                  disabled={disabled}
+                  disabled={deleteDisabled}
                   onClick={() => openDeleteModal(record)}
                 >
                   Xóa Rack

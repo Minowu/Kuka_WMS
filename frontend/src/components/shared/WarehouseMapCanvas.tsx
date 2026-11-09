@@ -71,6 +71,8 @@ interface WarehouseMapCanvasProps {
   hideDrawer?: boolean;
   /** Mã location đang được chọn — highlight màu xanh trên map */
   selectedLocationCodes?: string[];
+  /** Danh sách các mã node/location CÓ THỂ CHỌN (Picker mode) — highlight viền/màu nổi bật */
+  selectableLocationCodes?: string[];
   /** Ghi đè warehouse đang chọn trên header (vd. map kiểm kê theo phiếu). */
   warehouseId?: number;
   /** Dữ liệu vị trí/tồn tùy chỉnh — dùng cho map kiểm kê thay API full-locations. */
@@ -93,6 +95,7 @@ const WarehouseMapCanvas: React.FC<WarehouseMapCanvasProps> = ({
   hideToolbar = false,
   hideDrawer = false,
   selectedLocationCodes = [],
+  selectableLocationCodes = [],
   warehouseId: warehouseIdProp,
   locationOverrides,
   skipFullLocationsFetch = false,
@@ -146,19 +149,33 @@ const WarehouseMapCanvas: React.FC<WarehouseMapCanvasProps> = ({
   const fullCodesRef = useRef<Set<string>>(new Set());
   const fullLocationsMapRef = useRef<Map<string, FullLocationDetail>>(new Map());
   const selectedCodesRef = useRef<Set<string>>(new Set());
+  const selectableCodesRef = useRef<Set<string>>(new Set());
 
   const selectedCodesKey = useMemo(
     () => selectedLocationCodes.join('\u0000'),
     [selectedLocationCodes],
   );
 
+  const selectableCodesKey = useMemo(
+    () => selectableLocationCodes.join('\u0000'),
+    [selectableLocationCodes],
+  );
+
   useEffect(() => {
     selectedCodesRef.current = new Set(
-      selectedLocationCodes.map((code) => String(code)),
+      selectedLocationCodes.map((code) => String(code).toLowerCase()),
     );
     draw();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedCodesKey]);
+
+  useEffect(() => {
+    selectableCodesRef.current = new Set(
+      selectableLocationCodes.map((code) => String(code).toLowerCase()),
+    );
+    draw();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectableCodesKey]);
 
   // Keep fullCodesRef in sync
   useEffect(() => {
@@ -291,6 +308,8 @@ const WarehouseMapCanvas: React.FC<WarehouseMapCanvasProps> = ({
     // ── Draw Nodes ────────────────────────────────────────────────────────────
     const baseSize = BASE_NODE_SIZE;
 
+    const isPickerMode = selectableCodesRef.current.size > 0;
+
     for (const node of nodesRef.current) {
       const { x, y, type } = node;
       const locDetail =
@@ -303,16 +322,27 @@ const WarehouseMapCanvas: React.FC<WarehouseMapCanvasProps> = ({
       );
 
       if (!isStation) {
-        // Normal waypoint: small grey circle
+        // Normal waypoint: small grey circle (faint in picker mode)
         ctx.beginPath();
         ctx.arc(x, y, baseSize * 0.3, 0, Math.PI * 2);
-        ctx.fillStyle = NODE_NORMAL_COLOR;
+        ctx.fillStyle = isPickerMode ? 'rgba(156, 163, 175, 0.25)' : NODE_NORMAL_COLOR;
         ctx.fill();
       } else {
         const half = baseSize * 0.7;
+        const nodeKey = String(node.content).toLowerCase();
+        const locCode = locDetail ? String(locDetail.location_code).toLowerCase() : '';
+        const locLabel = locDetail?.location_label ? String(locDetail.location_label).toLowerCase() : '';
+
         const isSelected =
-          selectedCodesRef.current.has(String(node.content)) ||
-          (locDetail && selectedCodesRef.current.has(String(locDetail.location_code)));
+          selectedCodesRef.current.has(nodeKey) ||
+          (locCode && selectedCodesRef.current.has(locCode)) ||
+          (locLabel && selectedCodesRef.current.has(locLabel));
+
+        const isSelectable =
+          isPickerMode &&
+          (selectableCodesRef.current.has(nodeKey) ||
+            (locCode && selectableCodesRef.current.has(locCode)) ||
+            (locLabel && selectableCodesRef.current.has(locLabel)));
 
         const hasActiveStock = Boolean(
           (locDetail?.item_stock && locDetail.item_stock.length > 0) ||
@@ -332,6 +362,12 @@ const WarehouseMapCanvas: React.FC<WarehouseMapCanvasProps> = ({
 
         if (isSelected) {
           ctx.fillStyle = SHELF_SELECTED_COLOR;
+        } else if (isSelectable) {
+          // Highlight điểm có thể chọn: nền xanh ngọc dịu
+          ctx.fillStyle = 'rgba(16, 185, 129, 0.22)';
+        } else if (isPickerMode) {
+          // Điểm đã gán trạm khác (không khả dụng trong modal này)
+          ctx.fillStyle = 'rgba(241, 245, 249, 0.85)';
         } else if (isReserved) {
           ctx.fillStyle = 'rgba(245, 158, 11, 0.25)';
         } else if (isInTransit) {
@@ -343,7 +379,28 @@ const WarehouseMapCanvas: React.FC<WarehouseMapCanvasProps> = ({
         }
         ctx.fillRect(x - half * 1.5, y - half, half * 3, half * 2);
 
-        if (isReserved) {
+        if (isSelected) {
+          ctx.save();
+          ctx.shadowColor = '#22c55e';
+          ctx.shadowBlur = half * 0.4;
+          ctx.strokeStyle = SHELF_SELECTED_STROKE_COLOR;
+          ctx.lineWidth = invScale * 2.5;
+          ctx.strokeRect(x - half * 1.5, y - half, half * 3, half * 2);
+          ctx.restore();
+        } else if (isSelectable) {
+          // Viền xanh lá nổi bật kèm đổ bóng phát sáng cho điểm có thể chọn
+          ctx.save();
+          ctx.shadowColor = '#10b981';
+          ctx.shadowBlur = half * 0.3;
+          ctx.strokeStyle = '#10b981';
+          ctx.lineWidth = invScale * 2.2;
+          ctx.strokeRect(x - half * 1.5, y - half, half * 3, half * 2);
+          ctx.restore();
+        } else if (isPickerMode) {
+          ctx.strokeStyle = '#cbd5e1';
+          ctx.lineWidth = invScale * 1.0;
+          ctx.strokeRect(x - half * 1.5, y - half, half * 3, half * 2);
+        } else if (isReserved) {
           ctx.save();
           ctx.setLineDash([invScale * 6, invScale * 3]);
           ctx.strokeStyle = '#d97706';
@@ -358,15 +415,52 @@ const WarehouseMapCanvas: React.FC<WarehouseMapCanvasProps> = ({
           ctx.strokeRect(x - half * 1.5, y - half, half * 3, half * 2);
           ctx.restore();
         } else {
-          ctx.strokeStyle = isSelected ? SHELF_SELECTED_STROKE_COLOR : (isFull ? '#059669' : SHELF_STROKE_COLOR);
-          ctx.lineWidth = invScale * (isSelected ? 1.4 : 1.0);
+          ctx.strokeStyle = isFull ? '#059669' : SHELF_STROKE_COLOR;
+          ctx.lineWidth = invScale * 1.0;
           ctx.strokeRect(x - half * 1.5, y - half, half * 3, half * 2);
         }
 
         const maxTextWidth = half * 2.8;
         const stationTitle = locDetail?.location_name || node.name || node.content;
 
-        if (isReserved && !isSelected) {
+        if (isSelected) {
+          ctx.save();
+          ctx.fillStyle = '#ffffff';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.shadowColor = 'rgba(0, 0, 0, 0.5)';
+          ctx.shadowBlur = half * 0.15;
+          const fontSize = half * 0.30;
+          ctx.font = '700 ' + fontSize + 'px sans-serif';
+          ctx.fillText(`★ ĐANG CHỌN`, x, y - fontSize * 0.55, maxTextWidth);
+          ctx.font = '600 ' + (fontSize * 0.85) + 'px sans-serif';
+          ctx.fillText(`Node ${node.content}`, x, y + fontSize * 0.65, maxTextWidth);
+          ctx.restore();
+        } else if (isSelectable) {
+          ctx.save();
+          ctx.fillStyle = '#047857';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          const fontSize = half * 0.30;
+          ctx.font = '700 ' + fontSize + 'px sans-serif';
+          ctx.fillText(`✓ CÓ THỂ CHỌN`, x, y - fontSize * 0.55, maxTextWidth);
+          ctx.font = '600 ' + (fontSize * 0.85) + 'px sans-serif';
+          ctx.fillStyle = '#059669';
+          ctx.fillText(`Node ${node.content}`, x, y + fontSize * 0.65, maxTextWidth);
+          ctx.restore();
+        } else if (isPickerMode) {
+          ctx.save();
+          ctx.fillStyle = '#64748b';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          const fontSize = half * 0.28;
+          ctx.font = '600 ' + fontSize + 'px sans-serif';
+          ctx.fillText(`Node ${node.content}`, x, y - fontSize * 0.55, maxTextWidth);
+          ctx.font = '400 ' + (fontSize * 0.8) + 'px sans-serif';
+          ctx.fillStyle = '#94a3b8';
+          ctx.fillText(stationTitle, x, y + fontSize * 0.65, maxTextWidth);
+          ctx.restore();
+        } else if (isReserved) {
           ctx.save();
           ctx.fillStyle = '#b45309';
           ctx.textAlign = 'center';
@@ -379,7 +473,7 @@ const WarehouseMapCanvas: React.FC<WarehouseMapCanvasProps> = ({
           const reservedLabel = locDetail?.transit_target_name || stationTitle;
           ctx.fillText(reservedLabel, x, y + fontSize * 0.7, maxTextWidth);
           ctx.restore();
-        } else if (isInTransit && !isSelected) {
+        } else if (isInTransit) {
           ctx.save();
           ctx.fillStyle = '#1d4ed8';
           ctx.textAlign = 'center';
@@ -392,7 +486,7 @@ const WarehouseMapCanvas: React.FC<WarehouseMapCanvasProps> = ({
           const transitLabel = locDetail?.transit_target_name || (locDetail?.container_code ? 'CONT: ' + locDetail.container_code : stationTitle);
           ctx.fillText(transitLabel, x, y + fontSize * 0.7, maxTextWidth);
           ctx.restore();
-        } else if (isFull && !isSelected) {
+        } else if (isFull) {
           ctx.save();
           ctx.fillStyle = '#ffffff';
           ctx.textAlign = 'center';
@@ -412,7 +506,7 @@ const WarehouseMapCanvas: React.FC<WarehouseMapCanvasProps> = ({
           ctx.font = '400 ' + (fontSize * 0.85) + 'px sans-serif';
           ctx.fillText(qtyText, x, y + fontSize * 0.8, maxTextWidth);
           ctx.restore();
-        } else if (!isSelected) {
+        } else {
           ctx.save();
           ctx.fillStyle = '#64748b';
           ctx.textAlign = 'center';
@@ -422,7 +516,6 @@ const WarehouseMapCanvas: React.FC<WarehouseMapCanvasProps> = ({
           ctx.fillText(stationTitle, x, y, maxTextWidth);
           ctx.restore();
         }
-
       }
     }
 
@@ -818,9 +911,11 @@ const WarehouseMapCanvas: React.FC<WarehouseMapCanvasProps> = ({
           isAdmin={isAdmin}
         />
 
-        {hasData && !isLoading && !isError && <WarehouseMapLegend />}
+        {hasData && !isLoading && !isError && (
+          <WarehouseMapLegend isPickerMode={selectableCodesRef.current.size > 0} />
+        )}
 
-        {!hideToolbar && hasData && !isLoading && !isError && (
+        {hasData && !isLoading && !isError && (
           <WarehouseMapZoomControls
             onZoomIn={handleZoomIn}
             onZoomOut={handleZoomOut}
