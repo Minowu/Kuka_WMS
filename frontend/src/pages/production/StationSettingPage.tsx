@@ -107,6 +107,7 @@ export default function StationSettingPage() {
   const [mapPickerConfig, setMapPickerConfig] = useState<{
     open: boolean;
     title: string;
+    isOverview?: boolean;
     currentSelectedNodeLabel?: string;
     currentLocationId?: number | null;
     selectedInForm?: (string | undefined)[];
@@ -120,6 +121,7 @@ export default function StationSettingPage() {
   const openMapPickerFor = useCallback(
     (config: {
       title: string;
+      isOverview?: boolean;
       currentSelectedNodeLabel?: string;
       currentLocationId?: number | null;
       selectedInForm?: (string | undefined)[];
@@ -764,6 +766,7 @@ export default function StationSettingPage() {
             onClick={() => {
               openMapPickerFor({
                 title: 'Sơ đồ Bản đồ Xưởng KUKA (Trực quan hóa vị trí & Node)',
+                isOverview: true,
                 onSelect: (node) => {
                   message.info(`Bạn đang chọn Node ${node.node_number} (Tọa độ: ${node.map_x}, ${node.map_y})`);
                 },
@@ -1280,21 +1283,26 @@ export default function StationSettingPage() {
       >
         <Form form={rawForm} layout="vertical" className="mt-4">
           <Form.Item
-            name="node_label"
             label="Chọn Node Bản Đồ KUKA"
-            rules={[{ required: true, message: 'Vui lòng chọn Node Map KUKA!' }]}
+            required
           >
             <Space.Compact style={{ width: '100%' }}>
-              <Select
-                showSearch
-                placeholder="Chọn điểm đỗ Node trên Map (chưa gán)"
-                options={getNodeOptions({ currentLocationId: editingRaw?.id })}
-                disabled={false}
-                filterOption={(input, option) =>
-                  (option?.label as string || '').toLowerCase().includes(input.toLowerCase())
-                }
-                style={{ width: 'calc(100% - 90px)' }}
-              />
+              <Form.Item
+                name="node_label"
+                noStyle
+                rules={[{ required: true, message: 'Vui lòng chọn Node Map KUKA!' }]}
+              >
+                <Select
+                  showSearch
+                  placeholder="Chọn điểm đỗ Node trên Map (chưa gán)"
+                  options={getNodeOptions({ currentLocationId: editingRaw?.id })}
+                  disabled={false}
+                  filterOption={(input, option) =>
+                    (option?.label as string || '').toLowerCase().includes(input.toLowerCase())
+                  }
+                  style={{ width: 'calc(100% - 90px)' }}
+                />
+              </Form.Item>
               <Button
                 disabled={false}
                 icon={<EnvironmentOutlined className="text-brand-primary" />}
@@ -1427,7 +1435,7 @@ export default function StationSettingPage() {
                         icon={<EnvironmentOutlined className="text-brand-primary" />}
                         onClick={() => {
                           openMapPickerFor({
-                            title: `Chọn Node trên bản đồ cho POS${slot.position_index} (${createMachineForm.getFieldValue('machine_code') || 'Máy CNC'})`,
+                            title: `Chọn Node trên bản đồ cho POS${slot.position_index} (${cncForm.getFieldValue('machine_code') || 'Máy CNC'})`,
                             currentSelectedNodeLabel: slot.node_label,
                             selectedInForm: createSlots.map((s) => s.node_label),
                             onSelect: (node) => {
@@ -1547,7 +1555,7 @@ export default function StationSettingPage() {
                         icon={<EnvironmentOutlined className="text-brand-primary" />}
                         onClick={() => {
                           openMapPickerFor({
-                            title: `Chọn Node trên bản đồ cho POS${slot.position_index} (${editingMachine?.machine_code})`,
+                            title: `Chọn Node trên bản đồ cho POS${slot.position_index} (${editingCnc?.machine_code || 'Máy CNC'})`,
                             currentSelectedNodeLabel: slot.node_label,
                             currentLocationId: slot.id,
                             selectedInForm: editSlots.map((s) => s.node_label),
@@ -1596,21 +1604,26 @@ export default function StationSettingPage() {
       >
         <Form form={washForm} layout="vertical" className="mt-4">
           <Form.Item
-            name="node_label"
             label="Chọn Node Bản Đồ KUKA"
-            rules={[{ required: true, message: 'Vui lòng chọn Node Map KUKA!' }]}
+            required
           >
             <Space.Compact style={{ width: '100%' }}>
-              <Select
-                showSearch
-                placeholder="Chọn điểm đỗ Node trên Map (chưa gán)"
-                options={getNodeOptions({ currentLocationId: editingWash?.id })}
-                disabled={false}
-                filterOption={(input, option) =>
-                  (option?.label as string || '').toLowerCase().includes(input.toLowerCase())
-                }
-                style={{ width: 'calc(100% - 90px)' }}
-              />
+              <Form.Item
+                name="node_label"
+                noStyle
+                rules={[{ required: true, message: 'Vui lòng chọn Node Map KUKA!' }]}
+              >
+                <Select
+                  showSearch
+                  placeholder="Chọn điểm đỗ Node trên Map (chưa gán)"
+                  options={getNodeOptions({ currentLocationId: editingWash?.id })}
+                  disabled={false}
+                  filterOption={(input, option) =>
+                    (option?.label as string || '').toLowerCase().includes(input.toLowerCase())
+                  }
+                  style={{ width: 'calc(100% - 90px)' }}
+                />
+              </Form.Item>
               <Button
                 disabled={false}
                 icon={<EnvironmentOutlined className="text-brand-primary" />}
@@ -1660,21 +1673,26 @@ export default function StationSettingPage() {
       >
         <Form form={emptyBufferForm} layout="vertical" className="mt-4">
           <Form.Item
-            name="node_label"
             label="Chọn Node Bản Đồ KUKA"
-            rules={[{ required: true, message: 'Vui lòng chọn Node Map KUKA!' }]}
+            required
           >
             <Space.Compact style={{ width: '100%' }}>
-              <Select
-                showSearch
-                placeholder="Chọn điểm đỗ Node trên Map (chưa gán)"
-                options={getNodeOptions({ currentLocationId: editingEmptyBuffer?.id })}
-                disabled={false}
-                filterOption={(input, option) =>
-                  (option?.label as string || '').toLowerCase().includes(input.toLowerCase())
-                }
-                style={{ width: 'calc(100% - 90px)' }}
-              />
+              <Form.Item
+                name="node_label"
+                noStyle
+                rules={[{ required: true, message: 'Vui lòng chọn Node Map KUKA!' }]}
+              >
+                <Select
+                  showSearch
+                  placeholder="Chọn điểm đỗ Node trên Map (chưa gán)"
+                  options={getNodeOptions({ currentLocationId: editingEmptyBuffer?.id })}
+                  disabled={false}
+                  filterOption={(input, option) =>
+                    (option?.label as string || '').toLowerCase().includes(input.toLowerCase())
+                  }
+                  style={{ width: 'calc(100% - 90px)' }}
+                />
+              </Form.Item>
               <Button
                 disabled={false}
                 icon={<EnvironmentOutlined className="text-brand-primary" />}
@@ -1709,6 +1727,7 @@ export default function StationSettingPage() {
         open={mapPickerConfig.open}
         onClose={closeMapPicker}
         title={mapPickerConfig.title}
+        isOverview={mapPickerConfig.isOverview}
         currentSelectedNodeLabel={mapPickerConfig.currentSelectedNodeLabel}
         availableNodes={availableNodes}
         assignedNodesMap={assignedNodesMap}

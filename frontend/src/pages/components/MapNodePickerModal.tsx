@@ -1,11 +1,10 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { Modal, Button, Tag, Space, Alert, Typography, Select, Tooltip } from 'antd';
 import {
   EnvironmentOutlined,
   CheckCircleOutlined,
   AimOutlined,
   StopOutlined,
-  SearchOutlined,
 } from '@ant-design/icons';
 import WarehouseMapCanvas from '@/components/shared/WarehouseMapCanvas';
 import type { NodeInfo } from '@/types/warehouseMap';
@@ -18,6 +17,7 @@ export interface MapNodePickerModalProps {
   onClose: () => void;
   onSelectNode: (node: AvailableMapNode) => void;
   title?: string;
+  isOverview?: boolean;
   currentSelectedNodeLabel?: string;
   availableNodes: AvailableMapNode[];
   assignedNodesMap: Map<string, { id?: number; name: string; zone: string }>;
@@ -30,6 +30,7 @@ export const MapNodePickerModal: React.FC<MapNodePickerModalProps> = ({
   onClose,
   onSelectNode,
   title = 'Chọn điểm đỗ (Node Map) trên sơ đồ xưởng',
+  isOverview = false,
   currentSelectedNodeLabel,
   availableNodes,
   assignedNodesMap,
@@ -80,6 +81,8 @@ export const MapNodePickerModal: React.FC<MapNodePickerModalProps> = ({
             ? 'Đang gán cho trạm hiện tại'
             : assignedInfo
             ? `Đã gán cho ${assignedInfo.name} (${assignedInfo.zone})`
+            : found.is_assigned
+            ? `Đã gán (${found.assigned_to || 'Khu khác'})`
             : 'Điểm trống chưa gán';
 
           setValidationMessage({
@@ -97,51 +100,63 @@ export const MapNodePickerModal: React.FC<MapNodePickerModalProps> = ({
   }, [open, currentSelectedNodeLabel, findAvailableNode, assignedNodesMap, currentLocationId]);
 
   // Kiểm tra tính hợp lệ của một Node
-  const checkEligibility = (node: AvailableMapNode) => {
-    const assignedInfo =
-      assignedNodesMap.get(String(node.node_label).toLowerCase()) ||
-      assignedNodesMap.get(String(node.node_number).toLowerCase());
+  const checkEligibility = useCallback(
+    (node: AvailableMapNode) => {
+      const assignedInfo =
+        assignedNodesMap.get(String(node.node_label).toLowerCase()) ||
+        assignedNodesMap.get(String(node.node_number).toLowerCase());
 
-    const isAssignedToSelf = currentLocationId && assignedInfo?.id === currentLocationId;
+      const isAssignedToSelf = currentLocationId && assignedInfo?.id === currentLocationId;
 
-    // Đang được chọn ở slot khác trong cùng form máy CNC đa slot
-    const isPickedInOtherSlot =
-      selectedInForm.some(
-        (sel) =>
-          sel &&
-          (String(sel).toLowerCase() === String(node.node_label).toLowerCase() ||
-            String(sel).toLowerCase() === String(node.node_number).toLowerCase())
-      ) &&
-      String(node.node_label).toLowerCase() !== String(currentSelectedNodeLabel).toLowerCase() &&
-      String(node.node_number).toLowerCase() !== String(currentSelectedNodeLabel).toLowerCase();
+      // Đang được chọn ở slot khác trong cùng form máy CNC đa slot
+      const isPickedInOtherSlot =
+        selectedInForm.some(
+          (sel) =>
+            sel &&
+            (String(sel).toLowerCase() === String(node.node_label).toLowerCase() ||
+              String(sel).toLowerCase() === String(node.node_number).toLowerCase())
+        ) &&
+        String(node.node_label).toLowerCase() !== String(currentSelectedNodeLabel || '').toLowerCase() &&
+        String(node.node_number).toLowerCase() !== String(currentSelectedNodeLabel || '').toLowerCase();
 
-    if (isPickedInOtherSlot) {
+      if (isPickedInOtherSlot) {
+        return {
+          eligible: false,
+          reason: `Node ${node.node_number} đang được chọn ở một vị trí khác trong form này.`,
+          assignedInfo,
+          isAssignedToSelf: false,
+        };
+      }
+
+      if (assignedInfo && !isAssignedToSelf) {
+        return {
+          eligible: false,
+          reason: `Node ${node.node_number} đã được gán cho '${assignedInfo.name}' (${assignedInfo.zone}). Không thể gán trùng cho 2 trạm.`,
+          assignedInfo,
+          isAssignedToSelf: false,
+        };
+      }
+
+      if (node.is_assigned && !isAssignedToSelf) {
+        return {
+          eligible: false,
+          reason: `Node ${node.node_number} đã được gán (${node.assigned_to || 'Khu vực khác'}). Không thể gán trùng.`,
+          assignedInfo,
+          isAssignedToSelf: false,
+        };
+      }
+
       return {
-        eligible: false,
-        reason: `Node ${node.node_number} đang được chọn ở một vị trí khác trong form này.`,
+        eligible: true,
+        reason: isAssignedToSelf
+          ? `Node ${node.node_number} đang gán cho trạm hiện tại (Hợp lệ).`
+          : `Node ${node.node_number} là điểm đỗ trống chưa gán (Hợp lệ).`,
         assignedInfo,
-        isAssignedToSelf: false,
+        isAssignedToSelf: !!isAssignedToSelf,
       };
-    }
-
-    if (assignedInfo && !isAssignedToSelf) {
-      return {
-        eligible: false,
-        reason: `Node ${node.node_number} đã được gán cho '${assignedInfo.name}' (${assignedInfo.zone}). Không thể gán trùng cho 2 trạm.`,
-        assignedInfo,
-        isAssignedToSelf: false,
-      };
-    }
-
-    return {
-      eligible: true,
-      reason: isAssignedToSelf
-        ? `Node ${node.node_number} đang gán cho trạm hiện tại (Hợp lệ).`
-        : `Node ${node.node_number} là điểm đỗ trống chưa gán (Hợp lệ).`,
-      assignedInfo,
-      isAssignedToSelf: !!isAssignedToSelf,
-    };
-  };
+    },
+    [assignedNodesMap, currentLocationId, selectedInForm, currentSelectedNodeLabel]
+  );
 
   // Xử lý khi user click vào một node trên Canvas
   const handleNodeClick = (clickedNode: NodeInfo | null) => {
@@ -213,29 +228,31 @@ export const MapNodePickerModal: React.FC<MapNodePickerModalProps> = ({
   // Tạo danh sách options cho ô tìm kiếm nhanh trên header
   const quickSelectOptions = useMemo(() => {
     return availableNodes.map((n) => {
-      const assigned =
-        assignedNodesMap.get(String(n.node_label).toLowerCase()) ||
-        assignedNodesMap.get(String(n.node_number).toLowerCase());
-      const isSelf = currentLocationId && assigned?.id === currentLocationId;
+      const check = checkEligibility(n);
+      const assigned = check.assignedInfo;
+      const isSelf = check.isAssignedToSelf;
       let badge = '[Trống]';
       if (isSelf) {
         badge = `[Hiện tại: ${assigned?.name}]`;
       } else if (assigned) {
         badge = `[${assigned.name} - ${assigned.zone}]`;
+      } else if (n.is_assigned) {
+        badge = `[${n.assigned_to || 'Đã gán'}]`;
       }
 
       return {
         value: n.node_label,
+        disabled: !isOverview && !check.eligible,
         label: `Node ${n.node_number} ${badge}`,
         node: n,
       };
     });
-  }, [availableNodes, assignedNodesMap, currentLocationId]);
+  }, [availableNodes, checkEligibility, isOverview]);
 
   // Danh sách tất cả các điểm CÓ THỂ CHỌN (Khả dụng) trên bản đồ để highlight
   const selectableLocationCodes = useMemo(() => {
     const list: string[] = [];
-    const isOverviewMode = !currentLocationId && (!selectedInForm || selectedInForm.length === 0);
+    const isOverviewMode = !!isOverview;
 
     availableNodes.forEach((node) => {
       if (isOverviewMode) {
@@ -251,8 +268,9 @@ export const MapNodePickerModal: React.FC<MapNodePickerModalProps> = ({
         }
       }
     });
+
     return list;
-  }, [availableNodes, currentLocationId, selectedInForm, checkEligibility]);
+  }, [availableNodes, isOverview, checkEligibility]);
 
   const currentSelectionEligibility = useMemo(() => {
     if (!tempSelectedNode) return null;
