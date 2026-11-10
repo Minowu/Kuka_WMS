@@ -1,17 +1,15 @@
 /**
  * OperatorMapCanvas — Bản đồ kho vận hành theo 1 hoặc nhiều zone.
  *
- * Nhiều zone: gọi layout/status của các zone song song, gộp node theo location_code
- * rồi vẽ chung (các zone cùng hệ toạ độ map_x/map_y của warehouse).
- *
- * Thay đổi so với phiên bản cũ (theo quyết định đã chốt):
- * - Kích thước ô cố định: `baseNodeSize * shelfSizeFactor` (không còn computeMinShelfSpacing).
- * - Màu sắc theo chuẩn WarehouseMapCanvas (import từ warehouseMapUtils).
- * - Bỏ khái niệm bufferCodes làm mờ kệ — tất cả node trong zone đều có status.
- * - Không có pan, zoom, virtual grid hay responsive zoom.
- * - Chỉ cho click / double-click vào ô kệ.
+ * Tính năng:
+ * - Hiển thị ảnh nền mặt sàn (Floor Plan) chuẩn tỉ lệ vật lý 1:1 (1 px = 50 mm = 0.05m AMR Grid).
+ * - Tọa độ ô kệ khớp chính xác với bản vẽ (x = map_x * 0.02, y = bgHeight - map_y * 0.02).
+ * - Hỗ trợ Zoom mượt mà bằng con lăn chuột (Wheel) tập trung tại vị trí trỏ chuột.
+ * - Hỗ trợ Pan mượt mà bằng kéo rê chuột trái (Left Drag), có chống kích hoạt nhầm click khi đang kéo.
+ * - Nút chọn / đổi ảnh nền trực tiếp ở góc trên bên phải (Client-only qua ObjectURL).
+ * - Click / double-click chọn ô kệ với hệ tọa độ nghịch đảo chính xác.
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useZonesMapLayout, useZonesMapStatus } from "@/hooks/useWarehouseMap";
 import type { LocationStockLabel } from "@/types/warehouseLocation";
 import { type MapContentBounds } from "@/utils/warehouseMapRender";
@@ -29,8 +27,14 @@ import {
   SHELF_RESERVED_COLOR,
   SHELF_IN_TRANSIT_COLOR,
 } from "@/utils/warehouseMapUtils";
+import type { ZoneMapLayoutNode } from "@/types/warehouseMap";
 
+const DEFAULT_BG_URL = "/maps/ALK_CNC_floor_1_08_11.png";
+const SCALE_MM_TO_PX = 0.02; // 1 px = 50 mm (0.05m)
 const LABEL_MIN_SCREEN_PX = 16;
+const ZOOM_MIN = 0.05;
+const ZOOM_MAX = 5.0;
+const ZOOM_FACTOR = 1.15;
 
 // ─── Drawing helpers ──────────────────────────────────────────────────────────
 /**
@@ -59,12 +63,12 @@ function drawShelfByStatus(
     ctx.fillStyle = SHELF_EMPTY_COLOR;
   }
   const size = half * 2;
-  const radius = Math.max(4, half * 0.15);
+  const radius = Math.max(2, half * 0.15);
   ctx.beginPath();
   ctx.roundRect(x - half, y - half, size, size, radius);
   ctx.fill();
   ctx.strokeStyle = SHELF_STROKE_COLOR;
-  ctx.lineWidth = invScale * 0.8;
+  ctx.lineWidth = Math.max(0.6, invScale * 0.8);
   ctx.stroke();
 }
 
@@ -79,31 +83,30 @@ function drawSelectedHighlight(
   invScale: number,
 ) {
   const size = half * 2;
-  const radius = Math.max(4, half * 0.15);
+  const radius = Math.max(2, half * 0.15);
   ctx.save();
   ctx.beginPath();
   ctx.roundRect(x - half, y - half, size, size, radius);
   ctx.fillStyle = `${SHELF_SELECTED_COLOR}55`; // 33% opacity overlay
   ctx.fill();
   ctx.shadowColor = SHELF_SELECTED_COLOR;
-  ctx.shadowBlur = 12 * invScale;
+  ctx.shadowBlur = Math.max(2, 12 * invScale);
   ctx.strokeStyle = SHELF_SELECTED_COLOR;
-  ctx.lineWidth = 2.5 * invScale;
+  ctx.lineWidth = Math.max(1.2, 2.5 * invScale);
   ctx.stroke();
   ctx.restore();
 }
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 export type BufferMapCanvasTuning = {
-  /** Hệ số zoom sau khi fit (mặc định 0.75). */
+  /** Hệ số zoom sau khi fit (mặc định 0.95). */
   fitScaleFactor?: number;
-  /** Padding khi fit, tính theo tỉ lệ cạnh ngắn nhất (mặc định 0.08 = 8%). */
+  /** Padding khi fit, tính theo tỉ lệ cạnh ngắn nhất (mặc định 0.04 = 4%). */
   fitPaddingRatio?: number;
-  /** Kích thước world-space cơ sở của ô (mặc định 800). */
+  /** Kích thước world-space cơ sở của ô (mặc định 800 mm). */
   baseNodeSize?: number;
   /**
    * Hệ số kích thước ô: half = baseNodeSize * shelfSizeFactor (mặc định 0.7).
-   * Tăng lên để ô to hơn, giảm xuống nếu các kệ quá gần nhau.
    */
   shelfSizeFactor?: number;
   /** Hệ số phóng chữ label trong ô. */
@@ -142,53 +145,18 @@ type Props = {
    * Nếu không truyền → tất cả ô đều có thể click.
    */
   interactiveCodes?: string[] | Set<string>;
+  /** Đường dẫn ảnh nền bản đồ (mặc định /maps/ALK_CNC_floor_1_08_11.png) */
+  backgroundImageUrl?: string;
+  /** Cho phép ẩn nút chọn ảnh nền nếu không cần */
+  showBackgroundPicker?: boolean;
 };
-
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-/**
- * Tính vùng bao (bounding box) bao quanh toàn bộ nodes.
- * Chiến lược: min/max của map_x, map_y + padding tỉ lệ để tạo khoảng trống xung quanh.
- * Kết quả dùng để tính toán scale và offset trong fitToCanvas().
- */
-function computeMapSizeFromNodes(
-  nodes: Array<{ x: number; y: number }>,
-  baseNodeSize: number,
-): MapContentBounds {
-  let minX = Number.POSITIVE_INFINITY;
-  let minY = Number.POSITIVE_INFINITY;
-  let maxX = Number.NEGATIVE_INFINITY;
-  let maxY = Number.NEGATIVE_INFINITY;
-  for (const node of nodes) {
-    minX = Math.min(minX, node.x);
-    minY = Math.min(minY, node.y);
-    maxX = Math.max(maxX, node.x);
-    maxY = Math.max(maxY, node.y);
-  }
-
-  // Margin cố định = 2 lần kích thước 1 ô kệ 
-  const margin = baseNodeSize * 1.1;
-
-  minX -= margin;
-  minY -= margin;
-  maxX += margin;
-  maxY += margin;
-
-  return {
-    minX,
-    minY,
-    maxX,
-    maxY,
-    width: Math.max(maxX - minX, 1),
-    height: Math.max(maxY - minY, 1),
-  };
-}
 
 function drawInboundSeparator(
   ctx: CanvasRenderingContext2D,
   nodes: MapNode[],
   labelByCode: Map<string, LocationStockLabel>,
   shelfHalf: number,
-  invScale: number
+  invScale: number,
 ) {
   const sortedNodes = [...nodes].sort((a, b) => a.x - b.x);
   const columns: { x: number; isBP: boolean; isCN: boolean }[] = [];
@@ -237,7 +205,25 @@ export default function OperatorMapCanvas({
   tuning,
   overlayLabelByCode,
   interactiveCodes,
+  backgroundImageUrl,
+  showBackgroundPicker = true,
 }: Props) {
+  // ── Background Image State ──────────────────────────────────────────────────
+  const [bgSrc, setBgSrc] = useState<string>(backgroundImageUrl || DEFAULT_BG_URL);
+  const bgImageRef = useRef<HTMLImageElement | null>(null);
+  const bgDimensionsRef = useRef<{ width: number; height: number }>({
+    width: 3990,
+    height: 1914,
+  });
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Sync backgroundImageUrl prop if changed externally
+  useEffect(() => {
+    if (backgroundImageUrl) {
+      setBgSrc(backgroundImageUrl);
+    }
+  }, [backgroundImageUrl]);
+
   // ── API data ────────────────────────────────────────────────────────────────
   const zoneIdsKey = (Array.isArray(zoneId) ? zoneId : [zoneId]).join(",");
   const zoneIds = useMemo(
@@ -264,7 +250,7 @@ export default function OperatorMapCanvas({
     }
   }, [failedZoneIds]);
 
-  // ── Derived data (useMemo — tránh tính lại khi status chưa đổi) ────────────
+  // ── Derived data ────────────────────────────────────────────────────────────
   const labelByCode = useMemo(() => {
     const map = new Map<string, LocationStockLabel>();
     for (const cell of statusQuery.items) {
@@ -288,6 +274,7 @@ export default function OperatorMapCanvas({
     }
     return map;
   }, [statusQuery.items]);
+
   const interactiveCodeSet = useMemo(() => {
     if (interactiveCodes == null) return null;
     if (interactiveCodes instanceof Set) return interactiveCodes;
@@ -298,6 +285,7 @@ export default function OperatorMapCanvas({
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const nodesRef = useRef<MapNode[]>([]);
+  const layoutNodesRef = useRef<ZoneMapLayoutNode[]>([]);
   const contentBoundsRef = useRef<MapContentBounds | null>(null);
 
   const labelByCodeRef = useRef<Map<string, LocationStockLabel>>(new Map());
@@ -312,12 +300,21 @@ export default function OperatorMapCanvas({
   const offsetXRef = useRef(0);
   const offsetYRef = useRef(0);
 
-  const tuningRef = useRef<Required<BufferMapCanvasTuning>>({ ...OPERATOR_MAP_CANVAS_DEFAULTS });
+  // Pan interaction refs
+  const isPanningRef = useRef(false);
+  const hasDraggedRef = useRef(false);
+  const panStartRef = useRef({ x: 0, y: 0 });
+  const lastMouseRef = useRef({ x: 0, y: 0 });
 
-  // Sync tuningRef với prop tuning mỗi render (không cần useEffect)
+  const tuningRef = useRef<Required<BufferMapCanvasTuning>>({
+    ...OPERATOR_MAP_CANVAS_DEFAULTS,
+    fitPaddingRatio: 0.04,
+    fitScaleFactor: 0.96,
+  });
+
   tuningRef.current = {
-    fitScaleFactor: tuning?.fitScaleFactor ?? OPERATOR_MAP_CANVAS_DEFAULTS.fitScaleFactor,
-    fitPaddingRatio: tuning?.fitPaddingRatio ?? OPERATOR_MAP_CANVAS_DEFAULTS.fitPaddingRatio,
+    fitScaleFactor: tuning?.fitScaleFactor ?? 0.96,
+    fitPaddingRatio: tuning?.fitPaddingRatio ?? 0.04,
     baseNodeSize: tuning?.baseNodeSize ?? OPERATOR_MAP_CANVAS_DEFAULTS.baseNodeSize,
     shelfSizeFactor: tuning?.shelfSizeFactor ?? OPERATOR_MAP_CANVAS_DEFAULTS.shelfSizeFactor,
     labelTextScale: tuning?.labelTextScale ?? OPERATOR_MAP_CANVAS_DEFAULTS.labelTextScale,
@@ -353,18 +350,32 @@ export default function OperatorMapCanvas({
       offsetXRef.current, offsetYRef.current,
     );
 
-    // Kích thước ô kệ = baseNodeSize * shelfSizeFactor (cố định, tunable)
-    const shelfHalf = opts.baseNodeSize * opts.shelfSizeFactor;
+    // 1. Vẽ Background Image nếu đã tải
+    if (bgImageRef.current && bgImageRef.current.complete && bgImageRef.current.naturalWidth > 0) {
+      ctx.drawImage(
+        bgImageRef.current,
+        0,
+        0,
+        bgDimensionsRef.current.width,
+        bgDimensionsRef.current.height,
+      );
+    }
+
+    // 2. Kích thước ô kệ trong world space (pixel)
+    const baseNodePx =
+      opts.baseNodeSize > 100
+        ? opts.baseNodeSize * SCALE_MM_TO_PX
+        : opts.baseNodeSize;
+    const shelfHalf = baseNodePx * opts.shelfSizeFactor;
     const showLabels = shelfHalf * 2 * scaleRef.current >= LABEL_MIN_SCREEN_PX;
 
-    // Vẽ đường phân cách BP / CN nếu showInboundSeparator
+    // Vẽ đường phân cách BP / CN nếu bật
     if (showInboundSeparator && nodesRef.current.length > 0) {
       drawInboundSeparator(ctx, nodesRef.current, labels, shelfHalf, invScale);
     }
 
-    // Vẽ từng node
+    // 3. Vẽ từng node ô kệ / station
     for (const node of nodesRef.current) {
-
       const interactive = isInteractiveCode(node.content);
       const isSelected = interactive && selectedCodes.has(node.content);
       const label = labels.get(node.content);
@@ -395,7 +406,7 @@ export default function OperatorMapCanvas({
             label,
             opts.labelTextScale,
             isSelected,
-            false
+            false,
           );
         }
       }
@@ -405,45 +416,118 @@ export default function OperatorMapCanvas({
   }, [showInboundSeparator, isInteractiveCode]);
 
   // ── Fit ─────────────────────────────────────────────────────────────────────
-  /**
-   * Tính scale và offset để fit toàn bộ bản đồ vào canvas, căn giữa.
-   *
-   * Scale: tỉ lệ nhỏ nhất giữa (rộng màn hình / rộng kho) và (cao màn hình / cao kho)
-   *        → đảm bảo kho không bị tràn theo chiều nào.
-   *
-   * Offset: dịch chuyển bản đồ vào trung tâm màn hình
-   *         = pad + (khoảng thừa / 2) - minX * scale
-   *         (phải trừ minX vì toạ độ backend không bắt đầu từ 0)
-   */
   const fitToCanvas = useCallback(() => {
     const canvas = canvasRef.current;
     const bounds = contentBoundsRef.current;
     if (!canvas || !bounds) return;
     const opts = tuningRef.current;
 
-    const pad = Math.min(canvas.width, canvas.height) * opts.fitPaddingRatio;
-    const availW = canvas.width - pad * 2;
-    const availH = canvas.height - pad * 2;
-    const scale = Math.min(availW / bounds.width, availH / bounds.height);
-    const lockedScale = scale * opts.fitScaleFactor;
+    const cW = Math.max(canvas.width, 300);
+    const cH = Math.max(canvas.height, 150);
+    const pad = Math.min(cW, cH) * opts.fitPaddingRatio;
+    const availW = Math.max(cW - pad * 2, 20);
+    const availH = Math.max(cH - pad * 2, 20);
+    const bW = Math.max(bounds.width, 1);
+    const bH = Math.max(bounds.height, 1);
+
+    const scale = Math.min(availW / bW, availH / bH);
+    const lockedScale = Math.max(scale * opts.fitScaleFactor, 0.001);
     scaleRef.current = lockedScale;
-    offsetXRef.current = pad + (availW - bounds.width * lockedScale) / 2 - bounds.minX * lockedScale;
-    offsetYRef.current = pad + (availH - bounds.height * lockedScale) / 2 - bounds.minY * lockedScale;
+    offsetXRef.current = pad + (availW - bW * lockedScale) / 2 - bounds.minX * lockedScale;
+    offsetYRef.current = pad + (availH - bH * lockedScale) / 2 - bounds.minY * lockedScale;
   }, []);
 
   const resizeCanvas = useCallback(() => {
     const canvas = canvasRef.current;
     const container = containerRef.current;
     if (!canvas || !container) return;
-    canvas.width = Math.max(container.clientWidth, 1);
-    canvas.height = Math.max(container.clientHeight, 1);
+    const rect = container.getBoundingClientRect();
+    const w = Math.round(rect.width) || container.clientWidth || 800;
+    const h = Math.round(rect.height) || container.clientHeight || 600;
+    canvas.width = Math.max(w, 1);
+    canvas.height = Math.max(h, 1);
     fitToCanvas();
     draw();
   }, [draw, fitToCanvas]);
 
-  // ── Effects ─────────────────────────────────────────────────────────────────
+  // ── Node Alignment ──────────────────────────────────────────────────────────
+  const refreshNodes = useCallback(() => {
+    const raw = layoutNodesRef.current;
+    const bgH = bgDimensionsRef.current.height;
 
-  // Sync callback refs (không cần trigger redraw)
+    if (raw.length === 0) {
+      nodesRef.current = [];
+      if (bgDimensionsRef.current.width > 0 && bgH > 0) {
+        contentBoundsRef.current = {
+          minX: 0,
+          minY: 0,
+          maxX: bgDimensionsRef.current.width,
+          maxY: bgH,
+          width: bgDimensionsRef.current.width,
+          height: bgH,
+        };
+        setHasData(true);
+      } else {
+        contentBoundsRef.current = null;
+        setHasData(false);
+      }
+      fitToCanvas();
+      draw();
+      return;
+    }
+
+    // Tọa độ thực tế 1:1 theo hệ quy chiếu KUKA AMR:
+    // x = map_x * 0.02 (1 px = 50 mm)
+    // y = bgHeight - (map_y * 0.02)
+    const nodes: MapNode[] = raw.map((n) => ({
+      x: n.map_x * SCALE_MM_TO_PX,
+      y: bgH - n.map_y * SCALE_MM_TO_PX,
+      content: n.location_code,
+    }));
+
+    nodesRef.current = nodes;
+    contentBoundsRef.current = {
+      minX: 0,
+      minY: 0,
+      maxX: bgDimensionsRef.current.width,
+      maxY: bgH,
+      width: bgDimensionsRef.current.width,
+      height: bgH,
+    };
+
+    setHasData(true);
+    fitToCanvas();
+    draw();
+  }, [draw, fitToCanvas]);
+
+  // Load Background Image
+  useEffect(() => {
+    if (!bgSrc) return;
+    const img = new Image();
+    img.src = bgSrc;
+    img.onload = () => {
+      bgImageRef.current = img;
+      bgDimensionsRef.current = {
+        width: img.naturalWidth || 3990,
+        height: img.naturalHeight || 1914,
+      };
+      refreshNodes();
+    };
+    img.onerror = (err) => {
+      console.warn(`[OperatorMapCanvas] Không tải được ảnh nền từ ${bgSrc}`, err);
+    };
+  }, [bgSrc, refreshNodes]);
+
+  // Handle local background image upload
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      const objectUrl = URL.createObjectURL(file);
+      setBgSrc(objectUrl);
+    }
+  };
+
+  // ── Effects ─────────────────────────────────────────────────────────────────
   useEffect(() => { onClickRef.current = onBufferCellClick; }, [onBufferCellClick]);
   useEffect(() => { onDoubleClickRef.current = onBufferCellDoubleClick; }, [onBufferCellDoubleClick]);
 
@@ -471,59 +555,11 @@ export default function OperatorMapCanvas({
     draw();
   }, [selectedCodes, draw]);
 
-  // Build nodes từ layout đã gộp + tính bounds (chờ mọi zone tải xong để không vẽ nửa chừng)
   useEffect(() => {
     if (layoutQuery.isLoading) return;
-    if (layoutNodes.length === 0) {
-      nodesRef.current = [];
-      contentBoundsRef.current = null;
-      setHasData(false);
-      draw();
-      return;
-    }
-
-    const nodes: MapNode[] = layoutNodes.map((n) => ({
-      x: n.map_x,
-      y: -(n.map_y) * 1.2, // Lật ngược trục Y (Flip Y)
-      content: n.location_code,
-    }));
-
-    // Thu hẹp khoảng trống khổng lồ (gap) giữa các cụm node (ví dụ kho 12 và 13 bị cách nhau bởi kho 10)
-    const GAP_THRESHOLD = tuningRef.current.baseNodeSize * 9;
-    const COLLAPSED_GAP = tuningRef.current.baseNodeSize * 2.4;
-
-    const collapseAxis = (axis: "x" | "y") => {
-      const uniqueVals = Array.from(new Set(nodes.map((n) => n[axis]))).sort((a, b) => a - b);
-      if (uniqueVals.length === 0) return;
-
-      const mapping = new Map<number, number>();
-      let currentVal = uniqueVals[0];
-      mapping.set(uniqueVals[0], currentVal);
-
-      for (let i = 1; i < uniqueVals.length; i++) {
-        const diff = uniqueVals[i] - uniqueVals[i - 1];
-        // Nếu khoảng cách giữa 2 node lớn hơn ngưỡng cho phép -> Kéo chúng lại gần nhau
-        if (diff > GAP_THRESHOLD) {
-          currentVal += COLLAPSED_GAP;
-        } else {
-          currentVal += diff;
-        }
-        mapping.set(uniqueVals[i], currentVal);
-      }
-      for (const node of nodes) {
-        node[axis] = mapping.get(node[axis])!;
-      }
-    };
-
-    collapseAxis("x");
-    collapseAxis("y");
-
-    nodesRef.current = nodes;
-    contentBoundsRef.current = computeMapSizeFromNodes(nodes, tuningRef.current.baseNodeSize);
-
-    setHasData(true);
-    resizeCanvas();
-  }, [layoutQuery.isLoading, layoutNodes, resizeCanvas, draw]);
+    layoutNodesRef.current = layoutNodes;
+    refreshNodes();
+  }, [layoutQuery.isLoading, layoutNodes, refreshNodes]);
 
   // ResizeObserver
   useEffect(() => {
@@ -535,10 +571,72 @@ export default function OperatorMapCanvas({
     return () => observer.disconnect();
   }, [resizeCanvas]);
 
-  // Click / Double-click
+  // ── Zoom (Wheel) ────────────────────────────────────────────────────────────
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
+
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      const rect = canvas.getBoundingClientRect();
+      const cx = e.clientX - rect.left;
+      const cy = e.clientY - rect.top;
+
+      const factor = e.deltaY < 0 ? ZOOM_FACTOR : 1 / ZOOM_FACTOR;
+      const newScale = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, scaleRef.current * factor));
+
+      const wx = (cx - offsetXRef.current) / scaleRef.current;
+      const wy = (cy - offsetYRef.current) / scaleRef.current;
+
+      scaleRef.current = newScale;
+      offsetXRef.current = cx - wx * newScale;
+      offsetYRef.current = cy - wy * newScale;
+
+      draw();
+    };
+
+    canvas.addEventListener("wheel", onWheel, { passive: false });
+    return () => canvas.removeEventListener("wheel", onWheel);
+  }, [draw]);
+
+  // ── Pan & Click Handling ────────────────────────────────────────────────────
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    const onMouseDown = (e: MouseEvent) => {
+      if (e.button !== 0) return;
+      isPanningRef.current = true;
+      hasDraggedRef.current = false;
+      panStartRef.current = { x: e.clientX, y: e.clientY };
+      lastMouseRef.current = { x: e.clientX, y: e.clientY };
+    };
+
+    const onMouseMove = (e: MouseEvent) => {
+      if (!isPanningRef.current) return;
+      const dx = e.clientX - lastMouseRef.current.x;
+      const dy = e.clientY - lastMouseRef.current.y;
+
+      const dist = Math.hypot(
+        e.clientX - panStartRef.current.x,
+        e.clientY - panStartRef.current.y,
+      );
+      if (dist > 4) {
+        hasDraggedRef.current = true;
+        canvas.style.cursor = "grabbing";
+      }
+
+      offsetXRef.current += dx;
+      offsetYRef.current += dy;
+      lastMouseRef.current = { x: e.clientX, y: e.clientY };
+      draw();
+    };
+
+    const onMouseUp = () => {
+      isPanningRef.current = false;
+      canvas.style.cursor =
+        onClickRef.current || onDoubleClickRef.current ? "pointer" : "default";
+    };
 
     const resolveClickPayload = (e: MouseEvent): BufferCellClickPayload | null => {
       const rect = canvas.getBoundingClientRect();
@@ -548,8 +646,12 @@ export default function OperatorMapCanvas({
       const wy = (sy - offsetYRef.current) / scaleRef.current;
 
       const opts = tuningRef.current;
-      const shelfHalf = opts.baseNodeSize * opts.shelfSizeFactor;
-      const hitRadius = shelfHalf * 0.55;
+      const baseNodePx =
+        opts.baseNodeSize > 100
+          ? opts.baseNodeSize * SCALE_MM_TO_PX
+          : opts.baseNodeSize;
+      const shelfHalf = baseNodePx * opts.shelfSizeFactor;
+      const hitRadius = Math.max(shelfHalf * 0.9, 12 / scaleRef.current);
       let closest: MapNode | null = null;
       let closestDist = Infinity;
 
@@ -564,66 +666,111 @@ export default function OperatorMapCanvas({
       if (!closest) return null;
 
       const columnLocationCodes = nodesRef.current
-        .filter((n) => Math.abs(n.x - closest!.x) < shelfHalf * 0.5)
+        .filter((n) => Math.abs(n.x - closest!.x) < shelfHalf * 0.8)
         .map((n) => n.content);
 
       return {
         locationCode: closest.content,
         x: closest.x,
         y: closest.y,
-        columnLocationCodes
+        columnLocationCodes,
       };
     };
 
     const onClick = (e: MouseEvent) => {
+      if (hasDraggedRef.current) return;
       const payload = resolveClickPayload(e);
       if (payload) onClickRef.current?.(payload);
     };
 
     const onDoubleClick = (e: MouseEvent) => {
+      if (hasDraggedRef.current) return;
       if (!onDoubleClickRef.current) return;
       const payload = resolveClickPayload(e);
       if (payload) onDoubleClickRef.current(payload);
     };
 
+    canvas.addEventListener("mousedown", onMouseDown);
+    window.addEventListener("mousemove", onMouseMove);
+    window.addEventListener("mouseup", onMouseUp);
     canvas.addEventListener("click", onClick);
     canvas.addEventListener("dblclick", onDoubleClick);
+
     canvas.style.cursor =
       onClickRef.current || onDoubleClickRef.current ? "pointer" : "default";
+
     return () => {
+      canvas.removeEventListener("mousedown", onMouseDown);
+      window.removeEventListener("mousemove", onMouseMove);
+      window.removeEventListener("mouseup", onMouseUp);
       canvas.removeEventListener("click", onClick);
       canvas.removeEventListener("dblclick", onDoubleClick);
     };
-  }, [onBufferCellClick, onBufferCellDoubleClick, isInteractiveCode]);
+  }, [draw, isInteractiveCode]);
 
   // ── Render ───────────────────────────────────────────────────────────────────
   return (
     <div
       ref={containerRef}
-      className={`relative min-h-0 w-full bg-canvas ${className ?? ""}`}
+      className={`relative min-h-0 w-full overflow-hidden bg-canvas ${className ?? ""}`}
     >
       <canvas ref={canvasRef} className="absolute inset-0 h-full w-full" />
 
+      {/* Nút đổi ảnh nền gọn gàng ở góc trên bên phải */}
+      {showBackgroundPicker && (
+        <div className="absolute top-3 right-3 z-10">
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/*"
+            className="hidden"
+            onChange={handleFileChange}
+          />
+          <button
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            className="flex items-center gap-1.5 rounded-lg border border-slate-200/80 bg-white/90 px-2.5 py-1.5 text-xs font-medium text-slate-700 shadow-sm backdrop-blur-sm transition-colors hover:bg-white hover:text-slate-900"
+            title="Đổi ảnh nền bản đồ (PNG, JPG)"
+          >
+            <svg
+              className="h-3.5 w-3.5 text-slate-500"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"
+              />
+            </svg>
+            <span>Đổi ảnh nền</span>
+          </button>
+        </div>
+      )}
+
       {isLoading && (
-        <div className="absolute inset-0 flex items-center justify-center bg-white/70 text-sm text-slate-500">
-          Đang tải bản đồ...
+        <div className="pointer-events-none absolute left-3 bottom-3 flex items-center gap-2 rounded-lg bg-white/90 px-3 py-1.5 text-xs text-slate-500 shadow-sm border border-slate-200">
+          <div className="h-3 w-3 animate-spin rounded-full border-2 border-slate-400 border-t-transparent" />
+          <span>Đang tải dữ liệu node...</span>
         </div>
       )}
 
       {!isLoading && !hasData && failedZoneIds.length > 0 && (
-        <div className="absolute inset-0 flex items-center justify-center bg-white/70 px-4 text-center text-sm text-slate-500">
-          Không tải được bản đồ
+        <div className="pointer-events-none absolute left-3 bottom-3 rounded-lg bg-amber-50/95 px-3 py-1.5 text-xs text-amber-700 shadow-sm border border-amber-200">
+          Chưa kết nối dữ liệu zone {failedZoneIds.join(", ")}
         </div>
       )}
 
       {!isLoading && hasData && failedZoneIds.length > 0 && (
-        <div className="pointer-events-none absolute right-3 top-3 rounded-lg bg-amber-50/95 px-3 py-1.5 text-xs text-amber-700 shadow-sm">
+        <div className="pointer-events-none absolute left-3 top-3 rounded-lg bg-amber-50/95 px-3 py-1.5 text-xs text-amber-700 shadow-sm border border-amber-200">
           Không tải được zone {failedZoneIds.join(", ")}
         </div>
       )}
 
       {!isLoading && failedZoneIds.length === 0 && hasData && labelByCode.size === 0 && (
-        <div className="pointer-events-none absolute bottom-3 left-3 rounded-lg bg-white/90 px-3 py-1.5 text-xs text-slate-500 shadow-sm">
+        <div className="pointer-events-none absolute bottom-3 left-3 rounded-lg bg-white/90 px-3 py-1.5 text-xs text-slate-500 shadow-sm border border-slate-200">
           Chưa có điểm nào trên bản đồ
         </div>
       )}
