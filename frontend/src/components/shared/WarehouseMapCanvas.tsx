@@ -85,6 +85,10 @@ interface WarehouseMapCanvasProps {
   boxSelectActive?: boolean;
   /** Callback khi hoàn tất kéo vùng — trả về các shelf node trong vùng. */
   onBoxSelect?: (nodes: NodeInfo[]) => void;
+  /** Đường dẫn ảnh nền bản đồ (mặc định /maps/ALK_CNC_floor_1_08_11.png) */
+  backgroundImageUrl?: string;
+  /** Ẩn nút chọn ảnh nền */
+  hideBackgroundPicker?: boolean;
 }
 
 
@@ -102,9 +106,24 @@ const WarehouseMapCanvas: React.FC<WarehouseMapCanvasProps> = ({
   enableBoxSelect = false,
   boxSelectActive = false,
   onBoxSelect,
+  backgroundImageUrl,
+  hideBackgroundPicker = false,
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+
+  // ─── Background Image State ────────────────────────────────────────────────
+  const [bgSrc, setBgSrc] = useState<string>(
+    backgroundImageUrl || '/maps/ALK_CNC_floor_1_08_11.png',
+  );
+  const bgImageRef = useRef<HTMLImageElement | null>(null);
+  const bgFileInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (backgroundImageUrl) {
+      setBgSrc(backgroundImageUrl);
+    }
+  }, [backgroundImageUrl]);
 
   // ─── Zustand stores ────────────────────────────────────────────────────────
   const selectedWarehouseId = useAppStore((s) => s.selectedWarehouseId);
@@ -249,7 +268,8 @@ const WarehouseMapCanvas: React.FC<WarehouseMapCanvasProps> = ({
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
     const mapData = mapDataRef.current;
-    if (!mapData) return;
+    const mapW = mapData?.width || 199500;
+    const mapH = mapData?.height || 95700;
 
     const { width: W, height: H } = canvas;
     ctx.clearRect(0, 0, W, H);
@@ -259,6 +279,16 @@ const WarehouseMapCanvas: React.FC<WarehouseMapCanvasProps> = ({
     ctx.setTransform(scaleRef.current, 0, 0, scaleRef.current, offsetXRef.current, offsetYRef.current);
 
     const invScale = 1 / scaleRef.current;
+
+    // ── Draw Background Image (Floor Plan 1:1) ────────────────────────────────
+    if (bgImageRef.current && bgImageRef.current.complete && bgImageRef.current.naturalWidth > 0) {
+      ctx.drawImage(bgImageRef.current, 0, 0, mapW, mapH);
+    }
+
+    if (!mapData) {
+      ctx.restore();
+      return;
+    }
 
     // ── Draw Lines ────────────────────────────────────────────────────────────
     ctx.beginPath();
@@ -544,10 +574,11 @@ const WarehouseMapCanvas: React.FC<WarehouseMapCanvasProps> = ({
 
   const fitToCanvas = useCallback(() => {
     const canvas = canvasRef.current;
-    const mapData = mapDataRef.current;
-    if (!canvas || !mapData) return;
+    if (!canvas) return;
 
-    const { width: mapW, height: mapH } = mapData;
+    const mapData = mapDataRef.current;
+    const mapW = mapData?.width || 199500;
+    const mapH = mapData?.height || 95700;
     const cW = canvas.width;
     const cH = canvas.height;
 
@@ -567,6 +598,21 @@ const WarehouseMapCanvas: React.FC<WarehouseMapCanvasProps> = ({
     zoomMinRef.current = scale * 0.8;
   }, []);
 
+  // ─── Load Background Image ──────────────────────────────────────────────────
+  useEffect(() => {
+    if (!bgSrc) return;
+    const img = new Image();
+    img.src = bgSrc;
+    img.onload = () => {
+      bgImageRef.current = img;
+      fitToCanvas();
+      draw();
+    };
+    img.onerror = (e) => {
+      console.warn('[WarehouseMapCanvas] Không tải được ảnh nền:', bgSrc, e);
+    };
+  }, [bgSrc, fitToCanvas, draw]);
+
   // ─── Resize Observer ────────────────────────────────────────────────────────
 
   useEffect(() => {
@@ -579,10 +625,8 @@ const WarehouseMapCanvas: React.FC<WarehouseMapCanvasProps> = ({
       canvas.width = rect.width;
       canvas.height = rect.height;
 
-      if (mapDataRef.current) {
-        fitToCanvas();
-        draw();
-      }
+      fitToCanvas();
+      draw();
     });
 
     ro.observe(container);
@@ -920,6 +964,36 @@ const WarehouseMapCanvas: React.FC<WarehouseMapCanvasProps> = ({
             onZoomIn={handleZoomIn}
             onZoomOut={handleZoomOut}
           />
+        )}
+
+        {/* Nút Đổi ảnh nền */}
+        {!hideBackgroundPicker && (
+          <div className="absolute top-3 right-3 z-10">
+            <input
+              ref={bgFileInputRef}
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file) {
+                  const url = URL.createObjectURL(file);
+                  setBgSrc(url);
+                }
+              }}
+            />
+            <button
+              type="button"
+              onClick={() => bgFileInputRef.current?.click()}
+              className="flex items-center gap-1.5 rounded-lg border border-slate-200/80 bg-white/90 px-2.5 py-1.5 text-xs font-medium text-slate-700 shadow-sm backdrop-blur-sm transition-colors hover:bg-white hover:text-slate-900 cursor-pointer"
+              title="Đổi ảnh nền bản đồ (PNG, JPG)"
+            >
+              <svg className="h-3.5 w-3.5 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+              </svg>
+              <span>Đổi ảnh nền</span>
+            </button>
+          </div>
         )}
 
         {/* Drawer Component */}
