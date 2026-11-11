@@ -53,6 +53,7 @@ services:
       - ./backend/scripts:/app/scripts
       - ./backend/uploads:/app/uploads
       - ./backend/app/static/file_import_item:/app/app/static/file_import_item
+      - ./backend/alembic:/app/alembic
     depends_on:
       db:
         condition: service_healthy
