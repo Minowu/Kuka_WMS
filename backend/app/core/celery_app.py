@@ -25,6 +25,7 @@ celery_app = Celery(
     backend=settings.celery_broker_result_url,
     include=[
         "app.modules.production.production_celery_task",
+        "app.modules.audit.audit_celery_task",
     ],
 )
 
@@ -68,6 +69,10 @@ celery_app.conf.update(
         "sweep-fleet-tasks": {
             "task": "production.sweep_fleet_tasks",
             "schedule": 15.0,
+        },
+        "cleanup-expired-audit-logs": {
+            "task": "audit.cleanup_expired_logs",
+            "schedule": crontab(hour=2, minute=0),
         },
     },
 )

@@ -18,6 +18,7 @@ from app.core.cache import close_redis, get_redis
 from app.socket.ws_manager import ws_manager, ws_router
 from app.core.observability import RequestLoggingMiddleware, install_exception_handlers
 from app.modules.client_logs.client_logs_api import router as client_logs_router
+from app.modules.audit.audit_api import router as audit_router
 import redis
 from prometheus_fastapi_instrumentator import Instrumentator
 
@@ -86,6 +87,7 @@ app.include_router(rack_router, prefix="/api/v1")
 app.include_router(request_router, prefix="/api/v1")
 app.include_router(ws_router, prefix="/api/v1")
 app.include_router(client_logs_router, prefix="/api/v1")
+app.include_router(audit_router, prefix="/api/v1")
 
 @app.get("/")
 async def root():

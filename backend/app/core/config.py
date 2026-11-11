@@ -66,6 +66,12 @@ class Settings(BaseSettings):
     celery_broker_url: str = "redis://localhost:6379/1"
     celery_broker_result_url: str = "redis://localhost:6379/2"
 
+    # Audit / Action log
+    # Reverse proxies (nginx container) allowed to set X-Real-IP / X-Forwarded-For — comma list of CIDR
+    trusted_proxy_cidrs: str = "127.0.0.1/32,172.16.0.0/12"
+    audit_log_retention_days: int = 180
+    action_log_retention_days: int = 90
+
     @field_validator("manual_warehouse_ids", mode="before")
     @classmethod
     def parse_manual_warehouse_ids(cls, value: object) -> list[int]:

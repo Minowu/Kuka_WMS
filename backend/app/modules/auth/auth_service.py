@@ -15,6 +15,13 @@ from app.core.security import (
     get_password_hash,
     verify_password,
 )
+from app.modules.audit.audit_service import (
+    EVENT_LOGIN,
+    EVENT_LOGOUT,
+    RESULT_FAILED,
+    RESULT_SUCCESS,
+    record_audit,
+)
 from app.modules.auth.auth_access import build_user_access_summary, user_to_response
 from app.modules.auth.auth_model import User, Role, Permission, UserRole, UserWarehouse
 from app.modules.auth.auth_schema import (
@@ -201,11 +208,13 @@ def _apply_access_on_update(db: Session, user: User, body: UserUpdate) -> None:
 
 
 def login(db: Session, body: LoginRequest) -> LoginResponse:
-    user = authenticate_user(db, body.username, body.password)
+    user, failure_reason = _check_credentials(db, body.username, body.password)
     if not user:
         logger.warning("Login failed for username '%s'", body.username, extra={"username": body.username})
+        record_audit(EVENT_LOGIN, RESULT_FAILED, username=body.username, failure_reason=failure_reason)
         raise ValueError("Invalid username or password")
     logger.info("Login successful for username '%s' (user_id=%s)", user.username, user.id, extra={"username": user.username, "user_id": user.id})
+    record_audit(EVENT_LOGIN, RESULT_SUCCESS, username=user.username, user_id=user.id)
     return LoginResponse(
         user=user_to_response(db, user),
         tokens=TokenResponse(
@@ -214,6 +223,12 @@ def login(db: Session, body: LoginRequest) -> LoginResponse:
             token_type="bearer",
         ),
     )
+
+
+def logout(user: User) -> None:
+    """JWT is stateless: logout only records the event, the token stays valid until it expires."""
+    logger.info("Logout for username '%s' (user_id=%s)", user.username, user.id, extra={"username": user.username, "user_id": user.id})
+    record_audit(EVENT_LOGOUT, RESULT_SUCCESS, username=user.username, user_id=user.id)
 
 
 def sign_up(db: Session, user_in: UserCreate) -> UserSignupResponse:
@@ -305,14 +320,20 @@ def refresh_access_token(db: Session, refresh_token: str) -> Optional[str]:
     )
 
 
-def authenticate_user(db: Session, username: str, password: str) -> Optional[User]:
+def _check_credentials(db: Session, username: str, password: str) -> tuple[Optional[User], Optional[str]]:
+    """Return ``(user, None)`` or ``(None, reason)``. Reason is for audit only, never sent to client."""
     user = _user_query(db).filter(User.username == username).first()
     if not user:
         logger.warning("Authentication failed: user '%s' not found", username, extra={"username": username})
-        return None
+        return None, "USER_NOT_FOUND"
     if not verify_password(password, user.hashed_password):
         logger.warning("Authentication failed: invalid password for user '%s'", username, extra={"username": username})
-        return None
+        return None, "WRONG_PASSWORD"
+    return user, None
+
+
+def authenticate_user(db: Session, username: str, password: str) -> Optional[User]:
+    user, _reason = _check_credentials(db, username, password)
     return user
 
 

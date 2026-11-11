@@ -1,7 +1,7 @@
 import { type UserAccessSummary, type User } from '@/types/auth';
 import { useAuthStore } from '@/store/useAuthStore';
 
-const AUTH_API_PATHS = ['/api/v1/auth/login', '/api/v1/auth/refresh', '/api/v1/auth/signup'];
+const AUTH_API_PATHS = ['/api/v1/auth/login', '/api/v1/auth/refresh', '/api/v1/auth/logout'];
 
 export function isAuthApiUrl(url?: string): boolean {
   if (!url) return false;

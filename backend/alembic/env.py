@@ -37,6 +37,7 @@ from app.modules.production.production_models import (  # noqa: F401
     TransportRequest,
     UserLocation,
 )
+from app.modules.audit.audit_model import ActionLog, AuditLog, Device  # noqa: F401
 
 target_metadata = Base.metadata
 

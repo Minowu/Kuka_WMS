@@ -8,6 +8,7 @@ import {
   isRefreshApiUrl,
 } from '@/utils/authSession';
 import { generateUuid } from '@/utils/randomId';
+import { getClientType } from '@/utils/clientType';
 import { logger } from '@/logger';
 
 interface CustomAxiosRequestConfig extends InternalAxiosRequestConfig {
@@ -59,6 +60,7 @@ axiosInstance.interceptors.request.use(
     const requestId = existingRequestId || generateUuid();
     if (customConfig.headers) {
       customConfig.headers['X-Request-ID'] = requestId;
+      customConfig.headers['X-Client-Type'] = getClientType();
     }
     customConfig._requestStartTime = performance.now();
     customConfig._requestId = requestId;

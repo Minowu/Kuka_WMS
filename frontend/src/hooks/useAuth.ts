@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import {
   loginApi,
+  logoutApi,
   getUsersApi,
   deleteUserApi,
   createUserApi,
@@ -46,6 +47,10 @@ export const useLogout = () => {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   return () => {
+    const accessToken = useAuthStore.getState().access_token;
+    if (accessToken) {
+      logoutApi(accessToken).catch(() => undefined);
+    }
     clearAuth();
     queryClient.clear();
     queryClient.removeQueries({ queryKey: ['warehouse'] });

@@ -5,13 +5,35 @@ from __future__ import annotations
 import json
 import time
 import uuid
-from typing import Any
+from typing import Any, Optional
+from urllib.parse import parse_qsl
+
+from starlette.concurrency import run_in_threadpool
 
 from app.core.logger import bind_context, get_context, get_logger, request_scope
+from app.core.request_meta import (
+    build_request_meta,
+    mask_payload,
+    reset_request_meta,
+    set_request_meta,
+    truncate_payload,
+)
 
 http_log = get_logger("wms.http")
 db_log = get_logger("wms.db")
 SLOW_QUERY_MS = 200
+
+ACTION_LOG_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
+# Covered elsewhere: auth -> audit_logs, client logs -> noise, fleet webhook -> task_status
+ACTION_LOG_EXCLUDED_PATHS = {
+    "/api/v1/auth/login",
+    "/api/v1/auth/refresh",
+    "/api/v1/auth/logout",
+    "/api/v1/logs/client",
+    "/api/v1/production/fleet/receive-status",
+}
+# FastAPI HTTPBearer returns 403 with this detail when the Authorization header is missing
+MISSING_TOKEN_DETAIL = "Not authenticated"
 
 
 # --------------------------------------------------------------------------- HTTP
@@ -26,6 +48,71 @@ def _decode(body: bytes) -> Any:
         return json.loads(text)
     except ValueError:
         return text
+
+
+def _request_payload(body: bytes, content_type: str) -> Any:
+    if content_type.startswith("multipart/"):
+        return {"_multipart": True, "size_bytes": len(body)}
+    return mask_payload(_decode(body))
+
+
+def _error_message(resp_body: Any) -> Optional[str]:
+    if resp_body is None:
+        return None
+    detail = resp_body.get("detail", resp_body) if isinstance(resp_body, dict) else resp_body
+    return str(detail)[:1000]
+
+
+def _resource_from_route(route_template: str, path_params: dict[str, Any]) -> tuple[Optional[str], Optional[str]]:
+    """``/api/v1/users/{user_id}`` -> ("users", "12"); no param -> (first segment, None)."""
+    segments = [s for s in route_template.split("/") if s and s not in ("api", "v1")]
+    for i, seg in enumerate(segments):
+        if seg.startswith("{"):
+            param = seg.strip("{}").split(":")[0]
+            resource_type = segments[i - 1][:50] if i > 0 else None
+            return resource_type, str(path_params.get(param))[:50]
+    return (segments[0][:50] if segments else None), None
+
+
+def _should_record_action(method: str, path: str, user_id: Any) -> bool:
+    return method in ACTION_LOG_METHODS and user_id is not None and path not in ACTION_LOG_EXCLUDED_PATHS
+
+
+def _build_action_entry(
+    scope, meta: dict[str, Any], rscope: dict[str, Any], code: int, dur: float, req_payload: Any, resp_body: Any
+) -> dict[str, Any]:
+    route = scope.get("route")
+    route_template = getattr(route, "path", None)
+    resource_type, resource_id = _resource_from_route(route_template or "", scope.get("path_params") or {})
+    query = scope.get("query_string", b"").decode("latin-1")
+    return {
+        "user_id": rscope.get("user_id"),
+        "username": rscope.get("user"),
+        "action": getattr(route, "name", None),
+        "method": meta["method"],
+        "route_template": route_template,
+        "path": meta["path"][:255],
+        "resource_type": resource_type,
+        "resource_id": resource_id,
+        "status_code": code,
+        "result": "SUCCESS" if code < 400 else "FAILED",
+        "error_message": _error_message(resp_body) if code >= 400 else None,
+        "payload": truncate_payload(req_payload),
+        "query_params": mask_payload(dict(parse_qsl(query))) or None,
+        "duration_ms": int(dur),
+        "ip": meta["ip"],
+        "client_type": meta["client_type"],
+        "request_id": meta["request_id"],
+    }
+
+
+async def _record_action_safely(entry_factory) -> None:
+    from app.modules.audit.audit_service import record_action
+
+    try:
+        await run_in_threadpool(record_action, entry_factory())
+    except Exception:
+        http_log.warning("Action log skipped: failed to build entry", exc_info=True)
 
 
 class RequestLoggingMiddleware:
@@ -67,28 +154,46 @@ class RequestLoggingMiddleware:
                 resp_chunks.append(msg.get("body", b""))
             await send(msg)
 
+        meta = build_request_meta(scope, headers, rid)
+        meta_token = set_request_meta(meta)
         with request_scope(correlation_id=rid) as rscope:
             try:
                 await self.app(scope, recv, snd)
             finally:
-                dur = round((time.perf_counter() - start) * 1000, 2)
-                code = status["code"]
-                level = 40 if code >= 500 else 30 if code >= 400 else 20
-                http_log.log(
-                    level,
-                    "%s %s -> %s (%.1f ms)", scope.get("method"), path, code, dur,
-                    extra={
-                        "method": scope.get("method"),
-                        "path": path,
-                        "query": scope.get("query_string", b"").decode("latin-1"),
-                        "req_body": _decode(b"".join(chunks)),
-                        "resp_body": _decode(b"".join(resp_chunks)) if resp_chunks else None,
-                        "status": code,
-                        "duration_ms": dur,
-                        "client": (scope.get("client") or [None])[0],
-                        "user": rscope.get("user"),
-                    },
-                )
+                try:
+                    dur = round((time.perf_counter() - start) * 1000, 2)
+                    code = status["code"]
+                    level = 40 if code >= 500 else 30 if code >= 400 else 20
+                    req_payload = _request_payload(b"".join(chunks), headers.get("content-type", ""))
+                    resp_body = _decode(b"".join(resp_chunks)) if resp_chunks else None
+                    http_log.log(
+                        level,
+                        "%s %s -> %s (%.1f ms)", scope.get("method"), path, code, dur,
+                        extra={
+                            "method": scope.get("method"),
+                            "path": path,
+                            "query": scope.get("query_string", b"").decode("latin-1"),
+                            "req_body": req_payload,
+                            "resp_body": resp_body,
+                            "status": code,
+                            "duration_ms": dur,
+                            "client": meta["ip"],
+                            "user": rscope.get("user"),
+                        },
+                    )
+                    if _should_record_action(meta["method"], path, rscope.get("user_id")):
+                        await _record_action_safely(
+                            lambda: _build_action_entry(scope, meta, rscope, code, dur, req_payload, resp_body)
+                        )
+                finally:
+                    reset_request_meta(meta_token)
+
+
+async def _record_permission_denied(detail: Any) -> None:
+    from app.modules.audit.audit_service import EVENT_PERMISSION_DENIED, RESULT_FAILED, record_audit
+
+    reason = "INACTIVE_USER" if detail == "Inactive user" else "INSUFFICIENT_PERMISSION"
+    await run_in_threadpool(record_audit, EVENT_PERMISSION_DENIED, RESULT_FAILED, failure_reason=reason)
 
 
 def install_exception_handlers(app) -> None:
@@ -109,6 +214,8 @@ def install_exception_handlers(app) -> None:
             exc_info=exc,
             extra={"status": exc.status_code},
         )
+        if exc.status_code == 403 and exc.detail != MISSING_TOKEN_DETAIL:
+            await _record_permission_denied(exc.detail)
         return await http_exception_handler(request, exc)
 
     async def _value_err(request: Request, exc: ValueError):

@@ -21,9 +21,7 @@ from app.modules.auth.auth_schema import (
 )
 from app.modules.auth import auth_service
 from app.modules.auth.auth_access import user_to_response
-from app.core.logger import get_logger
 
-logger = get_logger(name="main")
 router = APIRouter(tags=["Auth"])
 
 DbSession = Annotated[Session, Depends(get_db)]
@@ -36,10 +34,15 @@ def _user_to_response(user: User, db: Session) -> UserResponse:
 @router.post("/auth/login", response_model=LoginResponse)
 def login(body: LoginRequest, db: DbSession):
     try:
-        logger.info(f"Successfully logged in user {body.username}")
         return auth_service.login(db, body)
     except ValueError as e:
         raise HTTPException(status_code=401, detail=str(e))
+
+
+@router.post("/auth/logout", status_code=status.HTTP_204_NO_CONTENT)
+def logout(current_user: CurrentUser):
+    auth_service.logout(current_user)
+    return None
 
 @router.post("/auth/refresh", response_model=RefreshTokenResponse)
 def refresh_token(body: RefreshTokenRequest, db: DbSession):
@@ -52,6 +55,7 @@ def refresh_token(body: RefreshTokenRequest, db: DbSession):
     "/auth/signup",
     response_model=UserSignupResponse,
     status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(require_permission("user:create"))],
 )
 def signup(body: UserCreate, db: DbSession):
     try:

@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 
 from app.core.dependencies import get_current_user
 from app.core.logger import get_logger
+from app.core.request_meta import mask_payload
 from app.modules.auth.auth_model import User
 
 router = APIRouter(tags=["Logs"])
@@ -38,6 +39,6 @@ def ingest_client_logs(
         frontend_log.log(
             _LEVELS.get(e.level.lower(), logging.INFO),
             e.msg,
-            extra={"client_ts": e.ts, "client_context": e.context, "user": user.username},
+            extra={"client_ts": e.ts, "client_context": mask_payload(e.context), "user": user.username},
         )
     return {"accepted": len(batch.entries)}

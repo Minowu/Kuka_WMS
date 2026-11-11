@@ -27,6 +27,13 @@ export const loginApi = async (data: LoginRequest): Promise<LoginResponse> => {
 
 export { refreshAccessTokenApi as refreshApi } from './authRefresh';
 
+/** Records the logout audit event. Token is passed explicitly because the store is cleared right after. */
+export const logoutApi = async (accessToken: string): Promise<void> => {
+  await axiosInstance.post('/api/v1/auth/logout', null, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+};
+
 export const getUsersApi = async (params?: {
   page?: number;
   page_size?: number;

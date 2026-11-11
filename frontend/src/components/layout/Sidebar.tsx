@@ -17,6 +17,7 @@ import {
   BranchesOutlined,
   ContainerOutlined,
   UnorderedListOutlined,
+  FileSearchOutlined,
 } from "@ant-design/icons";
 
 interface SidebarLinkProps {
@@ -278,6 +279,7 @@ export default function Sidebar() {
               label: "Tài khoản & Trạm",
             },
             { to: "/setting/warehouse", icon: <HomeOutlined />, label: "Phân xưởng" },
+            { to: "/setting/audit-logs", icon: <FileSearchOutlined />, label: "Nhật ký hệ thống" },
           ]}
           collapsed={collapsed}
         />

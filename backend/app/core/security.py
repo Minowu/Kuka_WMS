@@ -36,9 +36,13 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -
     return encoded_jwt
 
 
-def decode_access_token(token: str) -> Optional[dict]:
+TOKEN_EXPIRED = "EXPIRED"
+
+
+def decode_access_token_with_reason(token: str) -> tuple[Optional[dict], Optional[str]]:
+    """Return ``(payload, None)`` or ``(None, reason)``; reason feeds the TOKEN_INVALID audit."""
     if not token or not isinstance(token, str):
-        return None
+        return None, "MALFORMED"
     clean = token.strip()
     if clean.lower().startswith("bearer "):
         clean = clean[7:].strip()
@@ -46,17 +50,22 @@ def decode_access_token(token: str) -> Optional[dict]:
         payload = jwt.decode(clean, settings.secret_key, algorithms=[settings.algorithm])
         if payload.get("type") != "access":
             logger.warning("Access token rejected: incorrect token type '%s' (expected 'access')", payload.get("type"))
-            return None
-        return payload
+            return None, "WRONG_TOKEN_TYPE"
+        return payload, None
     except ExpiredSignatureError as e:
         logger.debug("Access token decode failed: token expired (%s)", e)
-        return None
+        return None, TOKEN_EXPIRED
     except JWTClaimsError as e:
         logger.warning("Access token decode failed: invalid claims (%s)", e)
-        return None
+        return None, "INVALID_CLAIMS"
     except JWTError as e:
         logger.warning("Access token decode failed: invalid signature or malformed token (%s)", e)
-        return None
+        return None, "INVALID_SIGNATURE"
+
+
+def decode_access_token(token: str) -> Optional[dict]:
+    payload, _reason = decode_access_token_with_reason(token)
+    return payload
 
 
 def create_refresh_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:

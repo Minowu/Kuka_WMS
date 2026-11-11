@@ -15,6 +15,7 @@ import ProductionRoutePage from "@/pages/production/ProductionRoutePage";
 import StationSettingPage from "@/pages/production/StationSettingPage";
 import RackManagementPage from "@/pages/production/RackManagementPage";
 import RequestManagementPage from "@/pages/production/RequestManagementPage";
+import AuditLogPage from "@/pages/AuditLogPage";
 
 // PDA 4.2" Caller Pages (Dedicated per Area)
 import RawMaterialPdaPage from "@/pages/pda/RawMaterialPdaPage";
@@ -109,6 +110,7 @@ export default function AppRoutes() {
         <Route path="setting" element={<Navigate to="/setting/users" replace />} />
         <Route path="setting/users" element={<UserSettingPage />} />
         <Route path="setting/warehouse" element={<WarehouseSettingPage />} />
+        <Route path="setting/audit-logs" element={<AuditLogPage />} />
         <Route path="setting/zones" element={<Navigate to="/production/stations" replace />} />
       </Route>
     </Routes>
