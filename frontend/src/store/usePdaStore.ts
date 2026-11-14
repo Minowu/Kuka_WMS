@@ -69,7 +69,7 @@ export const usePdaStore = create<PdaState>((set, get) => ({
         models,
         positions: sortByName(rawMaterials),
         cncStations,
-        washingSlots,
+        washingSlots: sortByName(washingSlots),
         loading: false,
         initialized: true,
       });
