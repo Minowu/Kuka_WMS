@@ -48,6 +48,8 @@ import type {
 } from '@/types/station';
 import type { SlotConfigInput } from '@/types/machine';
 
+const MAX_CNC_SLOTS = 4;
+
 interface SlotFormItem {
   id?: number;
   position_index: number;
@@ -353,7 +355,7 @@ export default function StationSettingPage() {
   };
 
   // =========================================================================
-  // HANDLERS: TAB 2 - KHU MÁY CNC (Hỗ trợ linh hoạt 1..3 Slots)
+  // HANDLERS: TAB 2 - KHU MÁY CNC (Hỗ trợ linh hoạt 1..4 Slots)
   // =========================================================================
   const handleOpenCreateCnc = () => {
     cncForm.resetFields();
@@ -381,8 +383,8 @@ export default function StationSettingPage() {
   };
 
   const handleAddCreateSlot = () => {
-    if (createSlots.length >= 3) {
-      message.warning('Mỗi máy CNC hỗ trợ tối đa 3 vị trí đỗ vật lý (POS1, POS2, POS3)!');
+    if (createSlots.length >= MAX_CNC_SLOTS) {
+      message.warning(`Mỗi máy CNC hỗ trợ tối đa ${MAX_CNC_SLOTS} vị trí đỗ vật lý (POS1..POS${MAX_CNC_SLOTS})!`);
       return;
     }
     const nextIdx = createSlots.length + 1;
@@ -487,8 +489,8 @@ export default function StationSettingPage() {
   };
 
   const handleAddEditSlot = () => {
-    if (editSlots.length >= 3) {
-      message.warning('Mỗi máy CNC hỗ trợ tối đa 3 vị trí đỗ (POS1, POS2, POS3)!');
+    if (editSlots.length >= MAX_CNC_SLOTS) {
+      message.warning(`Mỗi máy CNC hỗ trợ tối đa ${MAX_CNC_SLOTS} vị trí đỗ (POS1..POS${MAX_CNC_SLOTS})!`);
       return;
     }
     if (!editingCnc) return;
@@ -725,7 +727,7 @@ export default function StationSettingPage() {
     }
   };
 
-  // Helper badge for positions P1, P2, P3
+  // Helper badge for positions P1, P2, P3, P4
   const renderPosBadge = (posIndex: number | null) => {
     if (posIndex === 1) {
       return (
@@ -748,6 +750,13 @@ export default function StationSettingPage() {
         </span>
       );
     }
+    if (posIndex === 4) {
+      return (
+        <span className="font-mono text-xs font-bold px-2 py-0.5 rounded bg-emerald-100 text-emerald-700 border border-emerald-200">
+          P4
+        </span>
+      );
+    }
     return (
       <span className="font-mono text-xs font-bold px-2 py-0.5 rounded bg-slate-100 text-slate-600 border border-slate-200">
         P{posIndex || '?'}
@@ -759,7 +768,7 @@ export default function StationSettingPage() {
     <div className="space-y-6">
       <Hero
         title="Cấu Hình Trạm & Phân Khu Xưởng"
-        subtitle="Quản lý các điểm đỗ vật lý gắn với Node Map KUKA: Khu Cấp Phôi, Khu Máy CNC (hỗ trợ 1..3 slots) và Khu Tẩy Rửa / Bãi Đệm"
+        subtitle="Quản lý các điểm đỗ vật lý gắn với Node Map KUKA: Khu Cấp Phôi, Khu Máy CNC (hỗ trợ 1..4 slots) và Khu Tẩy Rửa / Bãi Đệm"
         extra={
           <Button
             icon={<EnvironmentOutlined />}
@@ -919,7 +928,7 @@ export default function StationSettingPage() {
                   <div className="flex items-center gap-3">
                     <InfoCircleOutlined className="text-blue-600 text-xl shrink-0" />
                     <div className="text-xs text-blue-900 leading-relaxed">
-                      <span className="font-bold">Mô hình CNC linh hoạt 1..3 Slots:</span> Mỗi máy CNC có thể cấu hình linh hoạt từ 1 đến 3 vị trí đỗ vật lý (<span className="font-semibold text-blue-700">POS1, POS2, POS3</span>), gắn tương ứng với Node Map KUKA. Công đoạn gia công không gắn cứng vào máy mà được quản lý linh hoạt trong trang <span className="font-semibold underline">Quy trình (Route)</span>.
+                      <span className="font-bold">Mô hình CNC linh hoạt 1..4 Slots:</span> Mỗi máy CNC có thể cấu hình linh hoạt từ 1 đến 4 vị trí đỗ vật lý (<span className="font-semibold text-blue-700">POS1, POS2, POS3, POS4</span>), gắn tương ứng với Node Map KUKA. Công đoạn gia công không gắn cứng vào máy mà được quản lý linh hoạt trong trang <span className="font-semibold underline">Quy trình (Route)</span>.
                     </div>
                   </div>
                   <Button
@@ -983,7 +992,7 @@ export default function StationSettingPage() {
                           </Space>
                         </div>
 
-                        {/* Physical Slots (1..3 Slots) */}
+                        {/* Physical Slots (1..4 Slots) */}
                         <div>
                           <div className="flex items-center justify-between text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">
                             <span>Vị trí đỗ vật lý ({slots.length} Slots)</span>
@@ -998,7 +1007,9 @@ export default function StationSettingPage() {
                                   ? 'border-blue-200 bg-blue-50/30'
                                   : pos === 2
                                     ? 'border-purple-200 bg-purple-50/30'
-                                    : 'border-amber-200 bg-amber-50/30';
+                                    : pos === 3
+                                      ? 'border-amber-200 bg-amber-50/30'
+                                      : 'border-emerald-200 bg-emerald-50/30';
 
                               return (
                                 <div key={slot.id || sIdx} className={`border rounded-lg p-2.5 ${bgClass}`}>
@@ -1337,7 +1348,7 @@ export default function StationSettingPage() {
       </Modal>
 
       {/* ========================================================================= */}
-      {/* MODAL 2: THÊM MÁY CNC (Hỗ trợ cấu hình 1..3 Slots) */}
+      {/* MODAL 2: THÊM MÁY CNC (Hỗ trợ cấu hình 1..4 Slots) */}
       {/* ========================================================================= */}
       <Modal
         title="Thêm Máy CNC Mới & Cấu hình Vị trí Đỗ"
@@ -1379,14 +1390,14 @@ export default function StationSettingPage() {
             <div className="flex items-center justify-between">
               <div>
                 <span className="text-xs font-bold text-slate-800 uppercase tracking-wide">
-                  Cấu hình Vị trí Đỗ (1 đến 3 Slots)
+                  Cấu hình Vị trí Đỗ (1 đến 4 Slots)
                 </span>
                 <p className="text-[11px] text-slate-500 m-0">
                   Mỗi vị trí gắn với một Node Map KUKA để AMR điều phối phôi vào/ra
                 </p>
               </div>
 
-              {createSlots.length < 3 && (
+              {createSlots.length < 4 && (
                 <Button
                   size="sm"
                   variant="outline"
@@ -1394,7 +1405,7 @@ export default function StationSettingPage() {
                   onClick={handleAddCreateSlot}
                   className="!h-7 !text-xs !rounded-lg text-brand-primary border-brand-primary/40 hover:!bg-brand-primary/10"
                 >
-                  + Thêm vị trí đỗ
+                  Thêm vị trí đỗ
                 </Button>
               )}
             </div>
@@ -1468,7 +1479,7 @@ export default function StationSettingPage() {
       </Modal>
 
       {/* ========================================================================= */}
-      {/* MODAL 2B: SỬA MÁY CNC (Hỗ trợ cấu hình 1..3 Slots) */}
+      {/* MODAL 2B: SỬA MÁY CNC (Hỗ trợ cấu hình 1..4 Slots) */}
       {/* ========================================================================= */}
       <Modal
         title={`Chỉnh sửa cấu hình ${editingCnc?.machine_code || ''}`}
@@ -1498,14 +1509,14 @@ export default function StationSettingPage() {
             <div className="flex items-center justify-between">
               <div>
                 <span className="text-xs font-bold text-slate-800 uppercase tracking-wide">
-                  Cấu hình Vị trí Đỗ (1 đến 3 Slots)
+                  Cấu hình Vị trí Đỗ (1 đến 4 Slots)
                 </span>
                 <p className="text-[11px] text-slate-500 m-0">
                   Cập nhật Node Map hoặc mở rộng vị trí đỗ cho máy
                 </p>
               </div>
 
-              {editSlots.length < 3 && (
+              {editSlots.length < 4 && (
                 <Button
                   size="sm"
                   variant="outline"
@@ -1513,7 +1524,7 @@ export default function StationSettingPage() {
                   onClick={handleAddEditSlot}
                   className="!h-7 !text-xs !rounded-lg text-brand-primary border-brand-primary/40 hover:!bg-brand-primary/10"
                 >
-                  + Thêm vị trí đỗ
+                  Thêm vị trí đỗ
                 </Button>
               )}
             </div>
