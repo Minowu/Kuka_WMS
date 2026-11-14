@@ -1,6 +1,8 @@
 from typing import Optional
 from pydantic import BaseModel, ConfigDict, Field
 
+MAX_MACHINE_SLOTS = 4
+
 
 class MachineSlotInfo(BaseModel):
     id: int
@@ -18,7 +20,7 @@ class MachineSlotInfo(BaseModel):
 
 class MachineSlotCreate(BaseModel):
     id: Optional[int] = None
-    position_index: int = Field(..., ge=1, le=3, description="Vị trí đỗ: 1 (POS1), 2 (POS2), 3 (POS3)")
+    position_index: int = Field(..., ge=1, le=MAX_MACHINE_SLOTS, description="Vị trí đỗ: 1 (POS1) .. 4 (POS4)")
     location_code: Optional[str] = None
     location_name: Optional[str] = None
     node_label: Optional[str] = Field(None, description="Nhãn node trên bản đồ KUKA (VD: '216')")
@@ -43,10 +45,10 @@ class MachineCreateRequest(BaseModel):
     machine_code: str = Field(..., min_length=1, max_length=50, description="Mã máy CNC (VD: CNC-05)")
     machine_name: Optional[str] = Field(None, max_length=100, description="Tên hiển thị máy (VD: Máy Phay CNC 05)")
     warehouse_id: Optional[int] = None
-    slots: Optional[list[MachineSlotCreate]] = Field(None, description="Danh sách 1..3 slot đỗ phôi (POS1, POS2, POS3)")
+    slots: Optional[list[MachineSlotCreate]] = Field(None, description="Danh sách 1..4 slot đỗ phôi (POS1..POS4)")
 
 
 class MachineUpdateRequest(BaseModel):
     machine_name: Optional[str] = Field(None, max_length=100)
     is_active: Optional[bool] = None
-    slots: Optional[list[MachineSlotCreate]] = Field(None, description="Cấu hình danh sách 1..3 slot đỗ phôi (POS1, POS2, POS3)")
+    slots: Optional[list[MachineSlotCreate]] = Field(None, description="Cấu hình danh sách 1..4 slot đỗ phôi (POS1..POS4)")

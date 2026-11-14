@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 from app.core.logger import get_logger
 from app.modules.production.production_models import Machine, RouteStepMachine
 from app.modules.production.machine_schema import (
+    MAX_MACHINE_SLOTS,
     AvailableMachineResponse,
     MachineCreateRequest,
     MachineUpdateRequest,
@@ -126,7 +127,7 @@ def create_machine(db: Session, payload: MachineCreateRequest) -> AvailableMachi
     db.add(m)
     db.flush()
 
-    # Hỗ trợ máy CNC linh hoạt từ 1 đến 3 vị trí đỗ (POS1, POS2, POS3)
+    # Hỗ trợ máy CNC linh hoạt từ 1 đến 4 vị trí đỗ (POS1..POS4)
     slot_defs = payload.slots
     if not slot_defs:
         slot_defs = [
@@ -136,14 +137,15 @@ def create_machine(db: Session, payload: MachineCreateRequest) -> AvailableMachi
 
     for s_def in slot_defs:
         pos = s_def.position_index
-        if pos < 1 or pos > 3:
+        if pos < 1 or pos > MAX_MACHINE_SLOTS:
             log.warning(
-                "Machine create rejected: position_index %s out of range [1, 3] for machine '%s'",
+                "Machine create rejected: position_index %s out of range [1, %s] for machine '%s'",
                 pos,
+                MAX_MACHINE_SLOTS,
                 code,
                 extra={"machine_code": code, "position_index": pos, "reason": "invalid_position_index"},
             )
-            raise ValueError(f"Vị trí đỗ position_index phải từ 1 đến 3 (nhận được: {pos})")
+            raise ValueError(f"Vị trí đỗ position_index phải từ 1 đến {MAX_MACHINE_SLOTS} (nhận được: {pos})")
         node_lbl = (s_def.node_label or "").strip()
         loc_name = s_def.location_name or f"{m.machine_name} - Vị trí {pos}"
         
@@ -259,14 +261,14 @@ def update_machine(db: Session, machine_id: int, payload: MachineUpdateRequest) 
         used_target_ids: set[int] = set()
 
         for pos, s_def in positions_requested.items():
-            if pos < 1 or pos > 3:
+            if pos < 1 or pos > MAX_MACHINE_SLOTS:
                 log.warning(
                     "Machine update rejected: invalid position_index %s for machine %s",
                     pos,
                     m.machine_code,
                     extra={"machine_code": m.machine_code, "position_index": pos, "reason": "invalid_position_index"},
                 )
-                raise ValueError(f"Vị trí đỗ position_index phải từ 1 đến 3 (nhận được: {pos})")
+                raise ValueError(f"Vị trí đỗ position_index phải từ 1 đến {MAX_MACHINE_SLOTS} (nhận được: {pos})")
             node_lbl = (s_def.node_label or "").strip()
             loc_name = s_def.location_name or f"{m.machine_name} - Vị trí {pos}"
 
