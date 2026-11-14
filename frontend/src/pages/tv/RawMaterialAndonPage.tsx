@@ -322,10 +322,10 @@ export default function RawMaterialAndonPage() {
                     : 'border-slate-700 bg-slate-950/70 hover:border-slate-600'
                 }`}
               >
-                {/* Header: Location Code */}
+                {/* Header: Location Name */}
                 <div className="flex items-center justify-between border-b border-slate-800/80 pb-1.5 mb-2">
                   <span className="font-mono text-xl font-extrabold text-white tracking-wider">
-                    {slot.locationCode}
+                    {slot.name}
                   </span>
                   {isEmpty ? (
                     <span className="px-2 py-0.5 rounded text-xs font-bold bg-emerald-900/60 border border-emerald-500/40 text-emerald-300">
@@ -365,9 +365,9 @@ export default function RawMaterialAndonPage() {
                   )}
                 </div>
 
-                {/* Footer slot index indicator */}
-                <div className="text-[10px] text-slate-500 font-mono text-right mt-1 pt-1 border-t border-slate-800/60">
-                  {slot.name}
+                {/* Footer: KUKA node code */}
+                <div className="text-[10px] text-slate-500 font-mono text-right mt-1 pt-1 border-t border-slate-800/60 truncate">
+                  {slot.locationCode}
                 </div>
               </div>
             );

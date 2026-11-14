@@ -27,6 +27,10 @@ export function toDisplayInteger(value: unknown): string {
   return String(Math.trunc(num));
 }
 
+export function padTwoDigits(value: number): string {
+  return String(value).padStart(2, "0");
+}
+
 export function toInteger(value: unknown, fallback = 0): number {
   const num = Number(value);
   if (!Number.isFinite(num)) return fallback;
