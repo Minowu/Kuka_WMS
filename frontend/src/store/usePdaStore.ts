@@ -16,6 +16,7 @@ import {
   completeMachiningStageApi,
   returnEmptyCartFromWashingApi,
 } from '@/api/pda';
+import { sortByName } from '@/utils/sortByName';
 interface PdaState {
   positions: RawMaterialPosition[];
   models: PartModel[];
@@ -66,7 +67,7 @@ export const usePdaStore = create<PdaState>((set, get) => ({
 
       set({
         models,
-        positions: rawMaterials,
+        positions: sortByName(rawMaterials),
         cncStations,
         washingSlots,
         loading: false,

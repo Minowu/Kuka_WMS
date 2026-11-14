@@ -2,6 +2,7 @@ import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { getRawMaterialAndonQueueApi } from '@/api/andon';
 import type { AndonRawMaterialDemand, AndonRawSlotStatus } from '@/types/andon';
 import { useAuthStore } from '@/store/useAuthStore';
+import { sortByName } from '@/utils/sortByName';
 import {
   FullscreenOutlined,
   FullscreenExitOutlined,
@@ -39,7 +40,7 @@ export default function RawMaterialAndonPage() {
     try {
       const res = await getRawMaterialAndonQueueApi();
       setDemands(res.demands || []);
-      setRawSlots(res.rawSlots || []);
+      setRawSlots(sortByName(res.rawSlots || []));
     } catch (err) {
       console.error('[Andon] Failed to fetch raw material queue:', err);
     } finally {
