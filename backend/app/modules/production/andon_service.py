@@ -1,6 +1,9 @@
 """Service layer for Production Andon TV displays."""
 
+from datetime import timezone
 from typing import Optional
+from zoneinfo import ZoneInfo
+
 from sqlalchemy.orm import Session, joinedload
 
 from app.core.logger import get_logger
@@ -15,6 +18,7 @@ from app.modules.warehouse.item_stock.item_stock_model import ItemStock
 from app.modules.warehouse.location_map.location_model import Location
 
 logger = get_logger("production.andon")
+VN_TZ = ZoneInfo("Asia/Ho_Chi_Minh")
 
 
 def get_raw_material_andon_queue(
@@ -57,8 +61,13 @@ def get_raw_material_andon_queue(
         machine_code = machine.machine_code if machine else (dest_loc.location_code or f"LOC-{dest_loc.id}")
         machine_name = machine.machine_name if machine else (dest_loc.location_name or machine_code)
 
-        # Mốc thời gian bấm tĩnh theo giờ HH:MM:SS
-        called_time_str = req.created_at.strftime("%H:%M:%S") if req.created_at else ""
+        # Mốc thời gian bấm tĩnh theo giờ Việt Nam (GMT+7) HH:MM:SS
+        called_time_str = ""
+        if req.created_at:
+            called_at = req.created_at
+            if called_at.tzinfo is None:
+                called_at = called_at.replace(tzinfo=timezone.utc)
+            called_time_str = called_at.astimezone(VN_TZ).strftime("%H:%M:%S")
 
         demands.append(
             AndonRawMaterialDemand(
