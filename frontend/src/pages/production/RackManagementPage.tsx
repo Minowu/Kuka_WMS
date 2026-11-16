@@ -503,7 +503,7 @@ export default function RackManagementPage() {
     <div className="space-y-6 p-4 md:p-6">
       <Hero
         title="Quản lý Container / Rack"
-        subtitle="Kiểm soát danh sách xe phôi (Rack), cập nhật vị trí thực tế và gửi lệnh xóa/thu hồi Rack (containerOut) đồng bộ trực tiếp với KUKA Fleet."
+        subtitle="Kiểm soát danh sách xe phôi (Rack), cập nhật vị trí thực tế và thu hồi Rack (containerQuery → containerOut) đồng bộ với KUKA Fleet."
       />
 
       {/* Thống kê nhanh */}
@@ -714,18 +714,21 @@ export default function RackManagementPage() {
             <Alert
               type="warning"
               showIcon
-              message="Gửi lệnh xóa containerOut sang KUKA Fleet (giống bãi xe trống)"
+              message="Đồng bộ xóa với KUKA Fleet (containerQuery → containerOut)"
               description={
                 <span>
-                  Thao tác này sẽ gọi API{' '}
-                  <code className="font-mono font-semibold">/amr/containerOut</code> tới
-                  KUKA Fleet Manager để xóa sự hiện diện của Rack tại vị trí{' '}
+                  Hệ thống sẽ truy vấn{' '}
+                  <code className="font-mono font-semibold">/amr/containerQuery</code> theo mã
+                  Rack. Nếu Fleet không còn container → thu hồi ngay trên WMS. Nếu còn và không
+                  đang được AMR mang → gọi{' '}
+                  <code className="font-mono font-semibold">/amr/containerOut</code> rồi mới giải
+                  phóng vị trí{' '}
                   <strong>
                     {deletingRack.location_name ||
                       deletingRack.location_code ||
                       'hiện tại'}
                   </strong>
-                  . Chỉ khi KUKA Fleet phản hồi xóa thành công, WMS mới giải phóng vị trí trong CSDL.
+                  . Query/Out lỗi hoặc xe đang trên AMR → WMS giữ nguyên.
                 </span>
               }
             />
