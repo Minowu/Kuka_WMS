@@ -62,8 +62,11 @@ def remove_production_rack(
     user: CurrentUser,
 ):
     """
-    Xóa / thu hồi Rack khỏi vị trí hiện tại (gửi lệnh POST /amr/containerOut sang KUKA Fleet giống cơ chế xóa ở bãi xe trống).
-    Chỉ xóa trong WMS khi KUKA Fleet xác nhận containerOut thành công.
+    Xóa / thu hồi Rack (Admin):
+    1) POST /amr/containerQuery theo containerCode.
+    2) Không có trên Fleet → thu hồi WMS.
+    3) Có trên Fleet và không isCarry → POST /amr/containerOut rồi thu hồi WMS.
+    Query/Out lỗi hoặc isCarry=1 → giữ nguyên WMS.
     """
     _ensure_admin(user)
     try:

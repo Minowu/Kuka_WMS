@@ -472,6 +472,45 @@ class KukaFleetClient:
         """Alias for fleet_container_in."""
         return self.fleet_container_in(location_code, container_code, db=db)
 
+    def fleet_container_query(
+        self,
+        container_code: str = "",
+        node_code: str = "",
+        area_code: str = "",
+        empty_full_status: int = 2,
+        container_model_code: Optional[str] = None,
+        db: Optional[Session] = None,
+    ) -> dict[str, Any]:
+        """
+        [FLEET API - POST /amr/containerQuery]
+        Tra cứu container đang có trên bản đồ Fleet theo `containerCode` (và các filter tùy chọn).
+        """
+        model_code = (
+            container_model_code
+            or getattr(settings, "kuka_container_model_code", None)
+            or "CNC_TROLLEY_001"
+        )
+        payload = {
+            "nodeCode": node_code or "",
+            "containerModelCode": model_code,
+            "containerCode": container_code or "",
+            "areaCode": area_code or "",
+            "emptyFullStatus": empty_full_status,
+        }
+        logger.info(
+            "Fleet containerQuery: container=%s model=%s emptyFullStatus=%s",
+            container_code,
+            model_code,
+            empty_full_status,
+        )
+        return self._post_kuka(
+            "/amr/containerQuery",
+            payload,
+            api_name="containerQuery",
+            container_code=container_code or None,
+            db=db,
+        )
+
     def fleet_container_out(
         self,
         location_code: str = "",

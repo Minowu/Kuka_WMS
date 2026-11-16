@@ -364,19 +364,36 @@ def _ensure_rack_modifiable(
         raise ValueError(f"Không thể {action_label} Rack '{cart.container_code}': {relocate_block_reason}")
 
 
+def _fleet_query_hits_for_container(query_resp: dict[str, Any], container_code: str) -> list[dict[str, Any]]:
+    """Lọc các bản ghi Fleet `containerQuery` khớp đúng `containerCode` (không phụ thuộc nodeCode)."""
+    raw = query_resp.get("data") if isinstance(query_resp, dict) else None
+    if not isinstance(raw, list):
+        return []
+    target = (container_code or "").strip()
+    hits: list[dict[str, Any]] = []
+    for row in raw:
+        if not isinstance(row, dict):
+            continue
+        code = str(row.get("containerCode") or row.get("container_code") or "").strip()
+        if code == target:
+            hits.append(row)
+    return hits
+
+
 def remove_rack_container(
     db: Session,
     rack_id: int,
     operator_id: Optional[int] = None,
 ) -> dict[str, Any]:
     """
-    Xóa / thu hồi Container (Rack) khỏi vị trí hiện tại:
-    1. Chặn nếu Rack đang khóa, đang di chuyển trên AMR hoặc đang nằm trong hàng đợi điều phối.
-    2. Nếu Rack đang có vị trí (`loc_code`) và đã đăng ký trên Fleet (`fleet_registered=True`),
-       gửi lệnh `fleet_container_out` (`POST /amr/containerOut`) sang KUKA Fleet.
-       - Nếu KUKA Fleet báo lỗi: giữ nguyên trạng thái Rack trong WMS DB và trả về thông báo lỗi chi tiết.
-    3. Nếu Rack đang bị treo không có vị trí (`location_id=None`) hoặc `fleet_registered=False`,
-       cho phép thu hồi trực tiếp trong WMS DB để không bao giờ bị kẹt xe.
+    Xóa / thu hồi Container (Rack) — phạm vi A (Admin xóa tay trên Rack Management):
+    1. Chặn nếu Rack đang khóa / có FleetTask / TransportRequest active.
+    2. Luôn `POST /amr/containerQuery` theo `containerCode` (không phụ thuộc `fleet_registered`).
+       - Query lỗi / timeout: giữ nguyên WMS.
+       - `data` rỗng: coi như không còn trên Fleet → thu hồi WMS.
+       - Có bản ghi và `isCarry=1`: chặn xóa.
+       - Có bản ghi và không đang mang: `containerOut` rồi mới thu hồi WMS.
+       - `containerOut` lỗi thật: giữ nguyên WMS.
     """
     cart = (
         db.query(ItemStock)
@@ -401,12 +418,54 @@ def remove_rack_container(
 
     bind_context(container_code=c_code, station_code=loc_code or None)
 
-    # Chỉ gọi containerOut sang KUKA Fleet khi Rack thực sự có mã vị trí và đã đăng ký trên Fleet
     called_fleet_out = False
-    if loc_code and cart.fleet_registered:
+    skipped_fleet_absent = False
+
+    try:
+        query_resp = dispatch_service.fleet_container_query(
+            container_code=c_code,
+            empty_full_status=2,
+            db=db,
+        )
+    except Exception as e:
+        db.commit()
+        logger.error(
+            "Xóa Rack '%s' thất bại do KUKA Fleet lỗi/timeout containerQuery: %s",
+            c_code,
+            e,
+            exc_info=True,
+        )
+        raise ValueError(
+            f"Không thể xóa Rack '{c_code}' vì không truy vấn được trạng thái trên KUKA Fleet "
+            f"(containerQuery lỗi/timeout). WMS giữ nguyên. Chi tiết: {e}"
+        ) from e
+
+    hits = _fleet_query_hits_for_container(query_resp, c_code)
+    if not hits:
+        skipped_fleet_absent = True
+        logger.info(
+            "Xóa Rack '%s': containerQuery trả về rỗng — bỏ qua containerOut, thu hồi trên WMS.",
+            c_code,
+        )
+    else:
+        carrying = [
+            h for h in hits
+            if str(h.get("isCarry", h.get("is_carry", "0"))).strip() in ("1", "true", "True")
+        ]
+        if carrying:
+            raise ValueError(
+                f"Không thể xóa Rack '{c_code}': KUKA Fleet báo container đang được AMR mang "
+                f"(isCarry=1). Hãy đợi nhiệm vụ kết thúc rồi thử lại."
+            )
+
+        # position chỉ để gửi Out; sự tồn tại đã xác định bằng containerCode
+        out_position = loc_code
+        if not out_position:
+            out_position = str(hits[0].get("nodeCode") or hits[0].get("node_code") or "").strip()
+
         try:
             dispatch_service.fleet_container_out(
-                location_code=loc_code,
+                location_code=out_position,
                 container_code=c_code,
                 db=db,
             )
@@ -414,14 +473,14 @@ def remove_rack_container(
         except Exception as e:
             db.commit()
             logger.error(
-                "Xóa Rack '%s' tại '%s' thất bại do KUKA Fleet báo lỗi containerOut: %s",
+                "Xóa Rack '%s' thất bại do KUKA Fleet báo lỗi containerOut: %s",
                 c_code,
-                loc_code,
                 e,
                 exc_info=True,
             )
             raise ValueError(
-                f"Không thể xóa Rack '{c_code}' tại vị trí '{loc_display}' vì KUKA Fleet báo lỗi: {e}"
+                f"Không thể xóa Rack '{c_code}' tại vị trí '{loc_display}' vì KUKA Fleet báo lỗi "
+                f"containerOut: {e}"
             ) from e
 
     cart.location_id = None
@@ -461,11 +520,19 @@ def remove_rack_container(
         admins=True,
     )
 
-    msg = (
-        f"Đã xóa Rack '{c_code}' khỏi vị trí '{loc_display}' và đồng bộ containerOut trên KUKA Fleet thành công."
-        if called_fleet_out
-        else f"Đã thu hồi Rack '{c_code}' khỏi WMS thành công."
-    )
+    if called_fleet_out:
+        msg = (
+            f"Đã xóa Rack '{c_code}' khỏi vị trí '{loc_display}' và đồng bộ containerOut "
+            f"trên KUKA Fleet thành công."
+        )
+    elif skipped_fleet_absent:
+        msg = (
+            f"Đã thu hồi Rack '{c_code}' khỏi WMS thành công "
+            f"(containerQuery không thấy container trên KUKA Fleet)."
+        )
+    else:
+        msg = f"Đã thu hồi Rack '{c_code}' khỏi WMS thành công."
+
     return {
         "success": True,
         "message": msg,

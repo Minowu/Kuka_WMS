@@ -42,6 +42,9 @@ class DispatchService:
     def fleet_insert_rack(self, *args, **kwargs):
         return self.fleet_client.fleet_insert_rack(*args, **kwargs)
 
+    def fleet_container_query(self, *args, **kwargs):
+        return self.fleet_client.fleet_container_query(*args, **kwargs)
+
     def fleet_container_out(self, *args, **kwargs):
         return self.fleet_client.fleet_container_out(*args, **kwargs)
 
