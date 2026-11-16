@@ -418,9 +418,26 @@ def remove_rack_container(
 
     bind_context(container_code=c_code, station_code=loc_code or None)
 
+    logger.info(
+        "[remove_rack] step=1_start rack_id=%s container=%s loc=%s loc_code=%s "
+        "fleet_registered=%s status=%s is_active=%s operator_id=%s",
+        rack_id,
+        c_code,
+        loc_display,
+        loc_code or None,
+        bool(cart.fleet_registered),
+        cart.status,
+        bool(cart.is_active),
+        operator_id,
+    )
+
     called_fleet_out = False
     skipped_fleet_absent = False
 
+    logger.info(
+        "[remove_rack] step=2_containerQuery_request container=%s emptyFullStatus=2",
+        c_code,
+    )
     try:
         query_resp = dispatch_service.fleet_container_query(
             container_code=c_code,
@@ -430,7 +447,7 @@ def remove_rack_container(
     except Exception as e:
         db.commit()
         logger.error(
-            "Xóa Rack '%s' thất bại do KUKA Fleet lỗi/timeout containerQuery: %s",
+            "[remove_rack] step=2_containerQuery_FAIL container=%s error=%s — giữ nguyên WMS",
             c_code,
             e,
             exc_info=True,
@@ -440,11 +457,39 @@ def remove_rack_container(
             f"(containerQuery lỗi/timeout). WMS giữ nguyên. Chi tiết: {e}"
         ) from e
 
+    raw_data = query_resp.get("data") if isinstance(query_resp, dict) else None
+    raw_count = len(raw_data) if isinstance(raw_data, list) else None
+    logger.info(
+        "[remove_rack] step=2_containerQuery_OK container=%s fleet_success=%s fleet_code=%s "
+        "raw_data_count=%s",
+        c_code,
+        query_resp.get("success") if isinstance(query_resp, dict) else None,
+        query_resp.get("code") if isinstance(query_resp, dict) else None,
+        raw_count,
+    )
+
     hits = _fleet_query_hits_for_container(query_resp, c_code)
+    logger.info(
+        "[remove_rack] step=3_match_hits container=%s matched_count=%s hits=%s",
+        c_code,
+        len(hits),
+        [
+            {
+                "containerCode": h.get("containerCode") or h.get("container_code"),
+                "nodeCode": h.get("nodeCode") or h.get("node_code"),
+                "isCarry": h.get("isCarry", h.get("is_carry")),
+                "inMapStatus": h.get("inMapStatus", h.get("in_map_status")),
+                "emptyFullStatus": h.get("emptyFullStatus", h.get("empty_full_status")),
+            }
+            for h in hits
+        ],
+    )
+
     if not hits:
         skipped_fleet_absent = True
         logger.info(
-            "Xóa Rack '%s': containerQuery trả về rỗng — bỏ qua containerOut, thu hồi trên WMS.",
+            "[remove_rack] step=4_decision SKIP_containerOut reason=query_empty "
+            "container=%s → sẽ thu hồi WMS",
             c_code,
         )
     else:
@@ -453,6 +498,12 @@ def remove_rack_container(
             if str(h.get("isCarry", h.get("is_carry", "0"))).strip() in ("1", "true", "True")
         ]
         if carrying:
+            logger.warning(
+                "[remove_rack] step=4_decision BLOCK reason=isCarry=1 container=%s carrying=%s "
+                "— giữ nguyên WMS",
+                c_code,
+                carrying,
+            )
             raise ValueError(
                 f"Không thể xóa Rack '{c_code}': KUKA Fleet báo container đang được AMR mang "
                 f"(isCarry=1). Hãy đợi nhiệm vụ kết thúc rồi thử lại."
@@ -463,6 +514,13 @@ def remove_rack_container(
         if not out_position:
             out_position = str(hits[0].get("nodeCode") or hits[0].get("node_code") or "").strip()
 
+        logger.info(
+            "[remove_rack] step=4_decision CALL_containerOut container=%s position=%s "
+            "(wms_loc_code=%s)",
+            c_code,
+            out_position or None,
+            loc_code or None,
+        )
         try:
             dispatch_service.fleet_container_out(
                 location_code=out_position,
@@ -470,11 +528,18 @@ def remove_rack_container(
                 db=db,
             )
             called_fleet_out = True
+            logger.info(
+                "[remove_rack] step=5_containerOut_OK container=%s position=%s",
+                c_code,
+                out_position or None,
+            )
         except Exception as e:
             db.commit()
             logger.error(
-                "Xóa Rack '%s' thất bại do KUKA Fleet báo lỗi containerOut: %s",
+                "[remove_rack] step=5_containerOut_FAIL container=%s position=%s error=%s "
+                "— giữ nguyên WMS",
                 c_code,
+                out_position or None,
                 e,
                 exc_info=True,
             )
@@ -482,6 +547,14 @@ def remove_rack_container(
                 f"Không thể xóa Rack '{c_code}' tại vị trí '{loc_display}' vì KUKA Fleet báo lỗi "
                 f"containerOut: {e}"
             ) from e
+
+    logger.info(
+        "[remove_rack] step=6_wms_deactivate_begin container=%s called_fleet_out=%s "
+        "skipped_fleet_absent=%s",
+        c_code,
+        called_fleet_out,
+        skipped_fleet_absent,
+    )
 
     cart.location_id = None
     cart.destination_location_id = None
@@ -503,11 +576,25 @@ def remove_rack_container(
     db.commit()
     db.refresh(cart)
 
+    logger.info(
+        "[remove_rack] step=7_wms_commit_OK container=%s is_active=%s status=%s "
+        "fleet_registered=%s location_id=%s",
+        c_code,
+        bool(cart.is_active),
+        cart.status,
+        bool(cart.fleet_registered),
+        cart.location_id,
+    )
+
     try:
         dispatch_service.try_resolve_waiting_slot_queue(db)
         dispatch_service.try_resolve_waiting_cart_queue(db)
     except Exception as exc:
-        logger.warning("Queue scan after rack removal failed: %s", exc)
+        logger.warning(
+            "[remove_rack] step=8_queue_scan_WARN container=%s error=%s",
+            c_code,
+            exc,
+        )
 
     publish_event(
         "floor.changed",
@@ -532,6 +619,17 @@ def remove_rack_container(
         )
     else:
         msg = f"Đã thu hồi Rack '{c_code}' khỏi WMS thành công."
+
+    logger.info(
+        "[remove_rack] step=9_done container=%s path=%s message=%s",
+        c_code,
+        (
+            "query_hit_then_out"
+            if called_fleet_out
+            else ("query_empty_skip_out" if skipped_fleet_absent else "other")
+        ),
+        msg,
+    )
 
     return {
         "success": True,
