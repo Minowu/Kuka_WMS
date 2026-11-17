@@ -27,6 +27,7 @@ ACTIVE_REQUEST_STATUSES = ("pending", "queued_for_cart", "queued_for_slot", "in_
 from app.modules.production.rack.policy import (
     _build_route_context_by_item,
     _evaluate_rack_block_reason,
+    _validate_location_for_cart,
 )
 
 def serialize_rack(
