@@ -6,6 +6,7 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session, selectinload
 
 from app.core.database import get_db
+from app.core.roles import ROLE_ADMIN, user_is_admin
 from app.core.security import TOKEN_EXPIRED, decode_access_token_with_reason
 from app.core.logger import bind_context
 from app.modules.audit.audit_service import EVENT_TOKEN_INVALID, RESULT_FAILED, record_audit
@@ -75,7 +76,7 @@ def require_role(*allowed_roles: str) -> Callable:
 
 def require_permission(*codes: str) -> Callable:
     def checker(current_user: Annotated[User, Depends(get_current_user)]) -> User:
-        if any(role.name == "admin" for role in current_user.roles):
+        if user_is_admin(current_user):
             return current_user
         user_codes = {
             p.code

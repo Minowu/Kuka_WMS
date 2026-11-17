@@ -11,7 +11,7 @@ from app.modules.production.production_models import (
     FleetTask,
     ProductionRecord,
 )
-from app.modules.production.dispatch_service import DispatchService
+from app.modules.production.dispatch.service import DispatchService
 
 __all__ = [
     "UserLocation",

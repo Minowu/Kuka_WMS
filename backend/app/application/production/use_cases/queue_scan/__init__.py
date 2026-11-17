@@ -1,0 +1,1 @@
+"""Queue scan use cases."""

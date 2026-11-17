@@ -22,10 +22,13 @@ from app.modules.auth.auth_model import (  # noqa: F401
     UserWarehouse,
 )
 from app.modules.warehouse.warehouse_zone.warehouse_model import Warehouse  # noqa: F401
-from app.modules.warehouse.location_map.location_model import Location, WarehouseMap  # noqa: F401
-from app.modules.warehouse.item.item_model import Item  # noqa: F401
-from app.modules.warehouse.item_stock.item_stock_model import ItemStock  # noqa: F401
-from app.modules.production.production_models import (  # noqa: F401
+from app.infrastructure.persistence.sqlalchemy.models.warehouse_orm import (  # noqa: F401
+    Item,
+    ItemStock,
+    Location,
+    WarehouseMap,
+)
+from app.infrastructure.persistence.sqlalchemy.models.production_orm import (  # noqa: F401
     FleetTask,
     Machine,
     ProductionRecord,

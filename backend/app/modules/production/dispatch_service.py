@@ -1,8 +1,5 @@
-"""
-Backward-compatibility bridge for app.modules.production.dispatch_service.
-All implementation is now cleanly organized in app.modules.production.dispatch package.
-"""
+"""Compatibility re-export — implementation moved to feature package."""
 
-from app.modules.production.dispatch import DispatchService, IcsError, dispatch_service
+from app.modules.production.dispatch.service import DispatchService, dispatch_service
 
-__all__ = ["DispatchService", "dispatch_service", "IcsError"]
+__all__ = ['DispatchService', 'dispatch_service']
