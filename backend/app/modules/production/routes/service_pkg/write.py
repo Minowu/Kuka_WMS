@@ -23,6 +23,7 @@ from app.modules.production.routes.schema import (
 from app.modules.warehouse.item.item_model import Item
 from app.modules.warehouse.item_stock.item_stock_model import ItemStock
 from app.modules.warehouse.location_map.location_model import Location
+from app.modules.production.routes.service_pkg.query import get_route_detail
 
 log = get_logger("wms.domain.production")
 
