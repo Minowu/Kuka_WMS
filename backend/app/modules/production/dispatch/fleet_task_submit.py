@@ -1,7 +1,7 @@
 """Fleet mission payload build + submit (extracted from KukaFleetClient)."""
 
 from datetime import datetime, timezone
-from typing import Any, Optional
+from typing import Any, Optional, Union
 import time
 import uuid
 
