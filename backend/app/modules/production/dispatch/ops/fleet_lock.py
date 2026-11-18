@@ -18,6 +18,7 @@ from app.modules.production.production_models import (
     TransportRequest,
     UserLocation,
 )
+from app.modules.production.dispatch.cart_route_rules import assert_dispatch_peer_allowed
 from app.modules.warehouse.item.item_model import Item
 from app.modules.warehouse.item_stock.item_stock_model import ItemStock
 from app.modules.warehouse.location_map.location_model import Location
@@ -35,6 +36,15 @@ def lock_cart_and_dispatch_fleet_task(
     dropoff_location_id: int,
 ) -> FleetTask:
     """Atomically lock container and create FleetTask (Tx1) then dispatch submitMission (Tx2)."""
+    assert_dispatch_peer_allowed(
+        db,
+        cart=cart,
+        pickup_location_id=pickup_location_id,
+        dropoff_location_id=dropoff_location_id,
+        item_id=transport_req.item_id,
+        required_stage_level=transport_req.required_stage_level,
+    )
+
     mission_code = f"MS{datetime.now().strftime('%Y%m%d%H%M%S%f')[:17]}{uuid.uuid4().hex[:4].upper()}"
     fleet_req_id = f"SUB{datetime.now().strftime('%Y%m%d%H%M%S%f')[:17]}{uuid.uuid4().hex[:4].upper()}"
 

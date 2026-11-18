@@ -85,6 +85,71 @@ def peer_step_reject_reason(
     return None
 
 
+def assert_dispatch_peer_allowed(
+    db: Session,
+    *,
+    cart: ItemStock,
+    pickup_location_id: int,
+    dropoff_location_id: int,
+    item_id: Optional[int],
+    required_stage_level: Optional[int],
+) -> None:
+    """
+    Cổng cứng trước lock/dispatch: chặn cặp cùng bước dù selector đã lọt
+    (worker lệch bản, TOCTOU, ...). Chỉ áp khi required_stage_level > 0.
+    """
+    stage = int(required_stage_level or 0)
+    if stage <= 0 or not item_id:
+        return
+
+    pickup_loc = db.query(Location).filter(Location.id == pickup_location_id).first()
+    dropoff_loc = db.query(Location).filter(Location.id == dropoff_location_id).first()
+    if not dropoff_loc or dropoff_loc.machine_id is None:
+        return
+    if not pickup_loc or pickup_loc.machine_id is None:
+        return
+
+    machine_step_map = load_machine_step_map(db, int(item_id))
+    reason = peer_step_reject_reason(
+        cart_location=pickup_loc,
+        target_location=dropoff_loc,
+        machine_step_map=machine_step_map,
+        apply_peer_rule=True,
+    )
+    if not reason:
+        return
+
+    log_peer_step_reject(
+        cart=cart,
+        cart_location=pickup_loc,
+        target_location=dropoff_loc,
+        item_id=int(item_id),
+        machine_step_map=machine_step_map,
+        reason=reason,
+    )
+    logger.error(
+        "Dispatch blocked by peer gate: cart=%s reason=%s pickup_location_id=%s "
+        "dropoff_location_id=%s item_id=%s required_stage_level=%s",
+        cart.container_code,
+        reason,
+        pickup_location_id,
+        dropoff_location_id,
+        item_id,
+        stage,
+        extra={
+            "container_code": cart.container_code,
+            "item_id": item_id,
+            "reason": reason,
+            "pickup_location_id": pickup_location_id,
+            "dropoff_location_id": dropoff_location_id,
+        },
+    )
+    raise ValueError(
+        f"Không thể dispatch: xe {cart.container_code} bị chặn ({reason}) "
+        f"pickup={pickup_loc.location_code} -> dropoff={dropoff_loc.location_code}."
+    )
+
+
 def log_peer_step_reject(
     *,
     cart: ItemStock,

@@ -6,6 +6,7 @@ from typing import Any, Callable, Optional
 from sqlalchemy.orm import Session
 
 from app.core.logger import bind_context, get_logger, log_context
+from app.modules.production.dispatch.cart_route_rules import assert_dispatch_peer_allowed
 from app.modules.production.dispatch.cart_selector import CartSelector
 from app.modules.production.production_models import FleetTask, TransportQueue, TransportRequest
 from app.modules.warehouse.item_stock.item_stock_model import ItemStock
@@ -155,6 +156,15 @@ class QueueService:
             )
             if cart and lock_and_dispatch_fn:
                 try:
+                    # Gate trước dequeue để tránh RESOLVED giả rồi rollback khi peer chặn.
+                    assert_dispatch_peer_allowed(
+                        db,
+                        cart=cart,
+                        pickup_location_id=cart.location_id,
+                        dropoff_location_id=req.destination_location_id,
+                        item_id=req.item_id,
+                        required_stage_level=req.required_stage_level,
+                    )
                     self.dequeue(
                         db,
                         entry,
