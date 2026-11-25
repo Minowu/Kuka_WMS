@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   Card,
@@ -7,11 +7,12 @@ import {
   Form,
   Input,
   Select,
+  TextArea,
   message,
   Space,
   Table,
 } from '@/components/ui';
-import { Tag, Switch, Tooltip, Alert } from 'antd';
+import { Tag, Switch, Tooltip, Alert, Radio } from 'antd';
 import {
   ReloadOutlined,
   DeleteOutlined,
@@ -29,11 +30,111 @@ import Hero from '@/components/shared/Hero';
 import {
   getProductionRacksApi,
   removeProductionRackApi,
-  updateProductionRackLocationApi,
+  syncProductionRackBypassApi,
   type RackManagementItem,
+  type RackSyncBypassMode,
 } from '@/api/rackManagement';
-import { useStationCatalog } from '@/hooks/useStations';
-import type { StationCatalogItem } from '@/types/station';
+import {
+  getProductionRouteDetailApi,
+  getProductionRoutesApi,
+} from '@/api/productionRoute';
+import { useAvailableNodes, useStationCatalog } from '@/hooks/useStations';
+import type { AvailableMapNode, StationCatalogItem } from '@/types/station';
+import type { ProductionRoute } from '@/types/productionRoute';
+import NodeSelectWithMap from '@/pages/components/stationSetting/NodeSelectWithMap';
+import { useMapPicker } from '@/pages/components/stationSetting/useMapPicker';
+import { useStationNodes } from '@/pages/components/stationSetting/useStationNodes';
+import { MapNodePickerModal } from '@/pages/components/MapNodePickerModal';
+
+type BypassRouteContext = {
+  routeId: number;
+  routeCode: string;
+  /** machine_code → stage_level (S) trong route_step_machine */
+  machineStageByCode: Map<string, number>;
+  /** stage_level của bước is_final_cnc_step */
+  finalStage: number;
+};
+
+function buildBypassRouteContext(route: ProductionRoute): BypassRouteContext {
+  const machineStageByCode = new Map<string, number>();
+  let finalStage = 0;
+  for (const step of route.steps || []) {
+    if (step.is_final_cnc_step) {
+      finalStage = Math.max(finalStage, step.stage_level);
+    }
+    for (const code of step.allowed_machines || []) {
+      const prev = machineStageByCode.get(code) ?? 0;
+      machineStageByCode.set(code, Math.max(prev, step.stage_level));
+    }
+  }
+  if (!finalStage) {
+    finalStage = Math.max(0, ...(route.steps || []).map((s) => s.stage_level), 0);
+  }
+  return {
+    routeId: route.id,
+    routeCode: route.route_code,
+    machineStageByCode,
+    finalStage,
+  };
+}
+
+function deriveStageFromLocation(
+  loc: StationCatalogItem,
+  routeCtx: BypassRouteContext | null,
+): number | null {
+  if (loc.location_type === 'RAW_MATERIAL') return 0;
+  if (!routeCtx) return null;
+  if (loc.location_type === 'WASHING_SLOT') {
+    return routeCtx.finalStage > 0 ? routeCtx.finalStage : null;
+  }
+  if (loc.location_type === 'CNC_SLOT') {
+    if (!loc.machine_code) return null;
+    return routeCtx.machineStageByCode.has(loc.machine_code)
+      ? routeCtx.machineStageByCode.get(loc.machine_code)!
+      : null;
+  }
+  return null;
+}
+
+function isLocationOnRoute(
+  loc: StationCatalogItem,
+  routeCtx: BypassRouteContext | null,
+  mode: RackSyncBypassMode | undefined,
+): boolean {
+  if (mode === 'DISPATCH_TO_WASH') {
+    return loc.location_type === 'WASHING_SLOT' && !!routeCtx && routeCtx.finalStage > 0;
+  }
+  if (loc.location_type === 'RAW_MATERIAL') return true;
+  if (loc.location_type === 'WASHING_SLOT') {
+    return !!routeCtx && routeCtx.finalStage > 0;
+  }
+  if (loc.location_type === 'CNC_SLOT') {
+    return !!loc.machine_code && !!routeCtx?.machineStageByCode.has(loc.machine_code);
+  }
+  return false;
+}
+
+const toNodeKey = (value?: string | number | null) => String(value ?? '').toLowerCase();
+
+function findStationByMapNode(
+  node: AvailableMapNode,
+  stations: Array<StationCatalogItem & { groupLabel?: string }>,
+) {
+  const keys = [toNodeKey(node.node_label), toNodeKey(node.node_number)];
+  return stations.find((loc) => {
+    const candidates = [
+      toNodeKey(loc.location_label),
+      toNodeKey(loc.node_label),
+      toNodeKey(loc.location_code),
+    ];
+    return candidates.some(
+      (c) =>
+        c &&
+        (keys.includes(c) ||
+          keys.some((k) => k && (c.endsWith(`-${k}`) || c.endsWith(k)))),
+    );
+  });
+}
 
 const AREA_LABELS: Record<string, { label: string; color: string }> = {
   RAW_MATERIAL: { label: 'Khu Nguyên Liệu', color: 'blue' },
@@ -48,12 +149,37 @@ export default function RackManagementPage() {
   const [areaFilter, setAreaFilter] = useState<string>('ALL');
   const [includeInactive, setIncludeInactive] = useState(false);
 
-  // Modal Cập nhật vị trí Rack
+  // Modal Đồng bộ bypass (vị trí + stage + note)
   const [editingRack, setEditingRack] = useState<RackManagementItem | null>(null);
   const [updateErrorMsg, setUpdateErrorMsg] = useState<string | null>(null);
   const [locationForm] = Form.useForm<{
-    location_id: number;
+    mode: RackSyncBypassMode;
+    location_id?: number;
+    note: string;
   }>();
+  const bypassMode = Form.useWatch('mode', locationForm) as RackSyncBypassMode | undefined;
+
+  useEffect(() => {
+    if (!editingRack) return;
+    locationForm.setFieldValue('location_id', undefined);
+  }, [bypassMode, editingRack, locationForm]);
+
+  const { data: activeRouteDetail } = useQuery({
+    queryKey: ['production-route-for-bypass', editingRack?.item_id],
+    enabled: Boolean(editingRack?.item_id),
+    queryFn: async () => {
+      const itemId = editingRack!.item_id!;
+      const routes = await getProductionRoutesApi({ item_id: itemId, is_active: true });
+      const active = routes[0];
+      if (!active) return null;
+      return getProductionRouteDetailApi(active.id);
+    },
+  });
+
+  const bypassRouteCtx = useMemo(
+    () => (activeRouteDetail ? buildBypassRouteContext(activeRouteDetail) : null),
+    [activeRouteDetail],
+  );
 
   // Modal Xóa Rack (containerOut)
   const [deletingRack, setDeletingRack] = useState<RackManagementItem | null>(null);
@@ -71,6 +197,9 @@ export default function RackManagementPage() {
   });
 
   const { data: stationCatalog } = useStationCatalog();
+  const { data: availableNodes = [] } = useAvailableNodes();
+  const { assignedNodesMap } = useStationNodes(stationCatalog, availableNodes);
+  const { mapPicker, openMapPicker, closeMapPicker } = useMapPicker();
 
   // Gom các vị trí trạm sản xuất (Nguyên liệu, Máy CNC, Tẩy rửa — không cho phép chuyển vào Bãi xe trống)
   const allStationLocations = useMemo(() => {
@@ -106,39 +235,49 @@ export default function RackManagementPage() {
     return map;
   }, [racks]);
 
-  const locationOptions = useMemo(() => {
+  // Bypass: chỉ hiện node thuộc cùng route (CNC qua route_step_machine; wash = final step).
+  const bypassLocationSelectOptions = useMemo(() => {
     const groups = new Map<
       string,
-      Array<{ value: number; label: string; disabled?: boolean }>
+      Array<{ value: string; label: string; disabled?: boolean }>
     >();
 
-    const allowedSet = new Set<number>(editingRack?.allowed_location_ids || []);
-    const hasAllowedList = Array.isArray(editingRack?.allowed_location_ids);
+    const washOnly = bypassMode === 'DISPATCH_TO_WASH';
 
     for (const loc of allStationLocations) {
+      if (washOnly && loc.location_type !== 'WASHING_SLOT') continue;
+
+      const onRoute = isLocationOnRoute(loc, bypassRouteCtx, bypassMode);
+      const derivedStage = deriveStageFromLocation(loc, bypassRouteCtx);
       const occupant = occupiedByLocationId.get(loc.id);
       const isOccupiedByOther =
         Boolean(occupant) && occupant !== editingRack?.container_code;
-      const isSameCurrentLoc = occupant === editingRack?.container_code;
-      const isAllowedByRouteAndStage = !hasAllowedList || allowedSet.has(loc.id);
+      const isSameCurrentLoc =
+        Boolean(editingRack?.location_id) && loc.id === editingRack?.location_id;
 
       const displayLabel = loc.location_name || loc.location_code;
       const nodeHint = loc.location_label || loc.node_label || loc.location_code;
 
-      let statusText = ' [Trống - Hợp lệ]';
+      let statusText = ' [Trống]';
+      if (!onRoute) {
+        statusText = ' [Ngoài quy trình model]';
+      } else if (derivedStage != null) {
+        statusText = ` [→ Lv ${derivedStage}]`;
+      }
       if (isSameCurrentLoc) {
-        statusText = ' [Vị trí hiện tại]';
+        statusText += ' [Hiện tại]';
       } else if (isOccupiedByOther) {
-        statusText = ` [Đang có rack: ${occupant}]`;
-      } else if (!isAllowedByRouteAndStage) {
-        statusText = ` [Không khớp Quy trình / Công đoạn Lv ${editingRack?.current_stage_level ?? 0}]`;
+        statusText += ` [Có rack: ${occupant}]`;
       }
 
       const arr = groups.get(loc.groupLabel) || [];
       arr.push({
-        value: loc.id,
+        value: String(loc.id),
         label: `${displayLabel} (${nodeHint})${statusText}`,
-        disabled: isOccupiedByOther || isSameCurrentLoc || !isAllowedByRouteAndStage,
+        disabled:
+          !onRoute ||
+          isOccupiedByOther ||
+          (bypassMode === 'SYNC_PHYSICAL' && isSameCurrentLoc),
       });
       groups.set(loc.groupLabel, arr);
     }
@@ -147,7 +286,78 @@ export default function RackManagementPage() {
       label,
       options,
     }));
-  }, [allStationLocations, occupiedByLocationId, editingRack]);
+  }, [
+    allStationLocations,
+    occupiedByLocationId,
+    editingRack,
+    bypassMode,
+    bypassRouteCtx,
+  ]);
+
+  const selectedBypassLocationId = Form.useWatch('location_id', locationForm) as
+    | number
+    | undefined;
+
+  const selectedBypassNodeLabel = useMemo(() => {
+    if (selectedBypassLocationId == null) return undefined;
+    const loc = allStationLocations.find((l) => l.id === selectedBypassLocationId);
+    return loc?.location_label || loc?.node_label || loc?.location_code || undefined;
+  }, [allStationLocations, selectedBypassLocationId]);
+
+  const openBypassMapPicker = () => {
+    openMapPicker({
+      title:
+        bypassMode === 'DISPATCH_TO_WASH'
+          ? 'Chọn ô rửa trên bản đồ KUKA'
+          : 'Chọn vị trí thực tế trên bản đồ KUKA',
+      currentSelectedNodeLabel: selectedBypassNodeLabel,
+      currentLocationId: editingRack?.location_id,
+      onSelect: (node) => {
+        const matched = findStationByMapNode(node, allStationLocations);
+        if (!matched) {
+          message.error(
+            `Node ${node.node_number} chưa gắn trạm sản xuất (NL/CNC/Rửa).`,
+          );
+          return;
+        }
+        if (!isLocationOnRoute(matched, bypassRouteCtx, bypassMode)) {
+          message.error(
+            `Node/vị trí '${matched.location_name || matched.location_code}' không thuộc quy trình ` +
+              `${bypassRouteCtx?.routeCode || 'của model'} — không thể chọn.`,
+          );
+          return;
+        }
+        if (bypassMode === 'DISPATCH_TO_WASH' && matched.location_type !== 'WASHING_SLOT') {
+          message.error('Mode DISPATCH_TO_WASH chỉ nhận ô WASHING_SLOT.');
+          return;
+        }
+        const occupant = occupiedByLocationId.get(matched.id);
+        if (occupant && occupant !== editingRack?.container_code) {
+          message.error(
+            `Vị trí '${matched.location_name || matched.location_code}' đang có rack ${occupant}.`,
+          );
+          return;
+        }
+        locationForm.setFieldValue('location_id', matched.id);
+        closeMapPicker();
+      },
+    });
+  };
+
+  const selectedBypassLocation = useMemo(() => {
+    if (selectedBypassLocationId == null) return null;
+    return allStationLocations.find((l) => l.id === selectedBypassLocationId) || null;
+  }, [allStationLocations, selectedBypassLocationId]);
+
+  const derivedBypassStage = useMemo(() => {
+    if (!selectedBypassLocation) {
+      if (bypassMode === 'DISPATCH_TO_WASH' && bypassRouteCtx) {
+        return bypassRouteCtx.finalStage > 0 ? bypassRouteCtx.finalStage : null;
+      }
+      return null;
+    }
+    return deriveStageFromLocation(selectedBypassLocation, bypassRouteCtx);
+  }, [selectedBypassLocation, bypassRouteCtx, bypassMode]);
 
   const filteredRacks = useMemo(() => {
     return racks.filter((r) => {
@@ -203,19 +413,21 @@ export default function RackManagementPage() {
     },
   });
 
-  const updateLocationMutation = useMutation({
+  const syncBypassMutation = useMutation({
     mutationFn: ({
       rackId,
-      location_id,
+      payload,
     }: {
       rackId: number;
-      location_id: number;
-    }) =>
-      updateProductionRackLocationApi(rackId, {
-        location_id,
-      }),
+      payload: {
+        mode: RackSyncBypassMode;
+        note: string;
+        location_id?: number;
+        current_stage_level?: number;
+      };
+    }) => syncProductionRackBypassApi(rackId, payload),
     onSuccess: (res) => {
-      message.success(res.message || 'Đã cập nhật vị trí Rack thành công');
+      message.success(res.message || 'Đã đồng bộ bypass Rack thành công');
       setEditingRack(null);
       setUpdateErrorMsg(null);
       locationForm.resetFields();
@@ -225,7 +437,7 @@ export default function RackManagementPage() {
       const detail =
         err?.response?.data?.detail ||
         err?.message ||
-        'Cập nhật vị trí thất bại do KUKA Fleet báo lỗi.';
+        'Đồng bộ bypass thất bại. Chọn vị trí khác hoặc thử lại.';
       setUpdateErrorMsg(detail);
       message.error(detail);
     },
@@ -234,7 +446,11 @@ export default function RackManagementPage() {
   const openEditLocationModal = (rack: RackManagementItem) => {
     setEditingRack(rack);
     setUpdateErrorMsg(null);
-    locationForm.resetFields();
+    locationForm.setFieldsValue({
+      mode: 'SYNC_PHYSICAL',
+      note: '',
+      location_id: undefined,
+    });
   };
 
   const handleConfirmUpdateLocation = async () => {
@@ -242,9 +458,55 @@ export default function RackManagementPage() {
     setUpdateErrorMsg(null);
     try {
       const values = await locationForm.validateFields();
-      updateLocationMutation.mutate({
+      const note = (values.note || '').trim();
+
+      if (values.mode === 'SYNC_PHYSICAL') {
+        if (values.location_id == null) {
+          message.error('Chọn vị trí/node thực tế (thuộc quy trình model).');
+          return;
+        }
+        const loc = allStationLocations.find((l) => l.id === values.location_id);
+        if (!loc || !isLocationOnRoute(loc, bypassRouteCtx, values.mode)) {
+          message.error('Vị trí chọn không thuộc quy trình của model trên rack.');
+          return;
+        }
+        const stage = deriveStageFromLocation(loc, bypassRouteCtx);
+        if (stage == null) {
+          message.error('Không suy được stage từ vị trí đã chọn.');
+          return;
+        }
+        syncBypassMutation.mutate({
+          rackId: editingRack.id,
+          payload: {
+            mode: values.mode,
+            note,
+            location_id: values.location_id,
+            current_stage_level: stage,
+          },
+        });
+        return;
+      }
+
+      // DISPATCH_TO_WASH: stage = final is_final_cnc_step
+      if (!bypassRouteCtx || bypassRouteCtx.finalStage <= 0) {
+        message.error('Model chưa có bước CNC cuối (is_final_cnc_step) trong route.');
+        return;
+      }
+      if (values.location_id != null) {
+        const loc = allStationLocations.find((l) => l.id === values.location_id);
+        if (!loc || loc.location_type !== 'WASHING_SLOT') {
+          message.error('Ô ưu tiên phải là WASHING_SLOT thuộc quy trình.');
+          return;
+        }
+      }
+      syncBypassMutation.mutate({
         rackId: editingRack.id,
-        location_id: values.location_id,
+        payload: {
+          mode: values.mode,
+          note,
+          location_id: values.location_id,
+          current_stage_level: bypassRouteCtx.finalStage,
+        },
       });
     } catch {
       // form validation error
@@ -476,7 +738,7 @@ export default function RackManagementPage() {
                   disabled={relocateDisabled}
                   onClick={() => openEditLocationModal(record)}
                 >
-                  Đổi vị trí
+                  Đồng bộ bypass
                 </Button>
               </span>
             </Tooltip>
@@ -595,13 +857,13 @@ export default function RackManagementPage() {
         />
       </Card>
 
-      {/* Modal 1: Cập nhật vị trí cho Rack */}
+      {/* Modal 1: Đồng bộ bypass (vị trí + stage + note) */}
       <Modal
         title={
           <div className="flex items-center gap-2">
             <EnvironmentOutlined className="text-brand-primary" />
             <span>
-              Cập nhật vị trí cho Rack:{' '}
+              Đồng bộ bypass Rack:{' '}
               <strong className="font-mono text-brand-primary">
                 {editingRack?.container_code}
               </strong>
@@ -615,25 +877,30 @@ export default function RackManagementPage() {
           locationForm.resetFields();
         }}
         onOk={handleConfirmUpdateLocation}
-        confirmLoading={updateLocationMutation.isPending}
-        okText="Cập nhật vị trí"
+        confirmLoading={syncBypassMutation.isPending}
+        okText="Xác nhận bypass"
         cancelText="Hủy"
         destroyOnClose
+        width={640}
       >
         {editingRack && (
           <div className="space-y-4 pt-2">
             <Alert
               type="info"
               showIcon
-              message="Đồng bộ 2 chiều với KUKA Fleet"
-              description="Hệ thống sẽ gửi lệnh gỡ Rack ở vị trí cũ (containerOut) và đăng ký Rack vào vị trí mới (containerIn). Nếu KUKA Fleet từ chối hoặc báo lỗi, hệ thống sẽ tự động giữ nguyên vị trí cũ trong WMS để đảm bảo không lệch dữ liệu."
+              message="Bypass /complete-stage (admin)"
+              description={
+                bypassMode === 'DISPATCH_TO_WASH'
+                  ? 'Xe còn tại CNC cuối: stage = bước is_final_cnc_step; tạo MOVE_TO_WASH/AMR. Chỉ chọn ô rửa (optional).'
+                  : 'Chọn một node thuộc route model: hệ thống suy stage (CNC→S, Wash→final, NL→0), đồng bộ Fleet + production_record. Node ngoài route bị khóa.'
+              }
             />
 
             {updateErrorMsg && (
               <Alert
                 type="error"
                 showIcon
-                message="KUKA Fleet từ chối cập nhật vị trí"
+                message="Không thể đồng bộ bypass"
                 description={updateErrorMsg}
               />
             )}
@@ -666,15 +933,95 @@ export default function RackManagementPage() {
 
             <Form form={locationForm} layout="vertical">
               <Form.Item
-                name="location_id"
-                label="Chọn vị trí trạm mới (chỉ các ô đang trống)"
-                rules={[{ required: true, message: 'Vui lòng chọn vị trí mới cho Rack' }]}
+                name="mode"
+                label="Chế độ bypass"
+                rules={[{ required: true, message: 'Chọn chế độ bypass' }]}
               >
-                <Select
-                  showSearch
-                  placeholder="Tìm và chọn vị trí trống (Nguyên liệu, CNC, Tẩy rửa...)"
-                  optionFilterProp="label"
-                  options={locationOptions}
+                <Radio.Group className="flex flex-col gap-2">
+                  <Radio value="SYNC_PHYSICAL">
+                    SYNC_PHYSICAL — xe đã ở đúng chỗ (kể cả ô rửa / CNC tiếp)
+                  </Radio>
+                  <Radio value="DISPATCH_TO_WASH">
+                    DISPATCH_TO_WASH — còn ở CNC cuối, điều AMR sang rửa
+                  </Radio>
+                </Radio.Group>
+              </Form.Item>
+
+              {!editingRack.item_id && (
+                <Alert
+                  type="warning"
+                  showIcon
+                  message="Rack chưa gắn Model — không suy được stage từ route."
+                />
+              )}
+              {editingRack.item_id && !bypassRouteCtx && (
+                <Alert
+                  type="warning"
+                  showIcon
+                  message="Model chưa có quy trình active — chỉ có thể chọn được sau khi cấu hình route."
+                />
+              )}
+              {bypassRouteCtx && (
+                <div className="text-xs text-slate-500 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+                  Route <strong className="font-mono">{bypassRouteCtx.routeCode}</strong>
+                  {' · '}
+                  CNC cuối (is_final_cnc_step) ={' '}
+                  <strong>Lv {bypassRouteCtx.finalStage}</strong>
+                  {derivedBypassStage != null && (
+                    <>
+                      {' · '}
+                      Stage sẽ ghi:{' '}
+                      <strong className="text-brand-primary">Lv {derivedBypassStage}</strong>
+                    </>
+                  )}
+                </div>
+              )}
+
+              <Form.Item
+                name="location_id"
+                label={
+                  bypassMode === 'DISPATCH_TO_WASH'
+                    ? 'Ô rửa ưu tiên (không bắt buộc)'
+                    : 'Vị trí/node thực tế (suy stage theo route)'
+                }
+                rules={
+                  bypassMode === 'SYNC_PHYSICAL'
+                    ? [{ required: true, message: 'Chọn vị trí/node thuộc quy trình model' }]
+                    : []
+                }
+                getValueProps={(value) => ({
+                  value: value != null ? String(value) : undefined,
+                })}
+                normalize={(value) =>
+                  value == null || value === '' ? undefined : Number(value)
+                }
+              >
+                <NodeSelectWithMap
+                  allowClear={bypassMode === 'DISPATCH_TO_WASH'}
+                  placeholder={
+                    bypassMode === 'DISPATCH_TO_WASH'
+                      ? 'Để trống = hệ thống tự chọn ô rửa trống'
+                      : 'Chọn node trong route hoặc mở Bản đồ...'
+                  }
+                  options={bypassLocationSelectOptions}
+                  onOpenMap={openBypassMapPicker}
+                />
+              </Form.Item>
+
+              <Form.Item
+                name="note"
+                label="Ghi chú bypass (bắt buộc → production_record)"
+                rules={[
+                  { required: true, message: 'Nhập lý do bypass' },
+                  { whitespace: true, message: 'Ghi chú không được để trống' },
+                  { max: 1000, message: 'Tối đa 1000 ký tự' },
+                ]}
+              >
+                <TextArea
+                  rows={3}
+                  placeholder="VD: Op quên bấm hoàn thành, đã đẩy tay từ CNC01 sang CNC02"
+                  maxLength={1000}
+                  showCount
                 />
               </Form.Item>
             </Form>
@@ -776,6 +1123,19 @@ export default function RackManagementPage() {
           </div>
         )}
       </Modal>
+
+      <MapNodePickerModal
+        open={mapPicker.open}
+        onClose={closeMapPicker}
+        title={mapPicker.title}
+        isOverview={mapPicker.isOverview}
+        currentSelectedNodeLabel={mapPicker.currentSelectedNodeLabel}
+        availableNodes={availableNodes}
+        assignedNodesMap={assignedNodesMap}
+        currentLocationId={mapPicker.currentLocationId}
+        selectedInForm={mapPicker.selectedInForm}
+        onSelectNode={mapPicker.onSelect}
+      />
     </div>
   );
 }

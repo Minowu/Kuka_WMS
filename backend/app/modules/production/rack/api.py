@@ -13,6 +13,7 @@ from app.modules.production.rack import service as rack_service
 from app.modules.production.rack.schema import (
     RackActionResponse,
     RackManagementItem,
+    RackSyncBypassRequest,
     RackUpdateLocationRequest,
 )
 
@@ -106,6 +107,41 @@ def update_production_rack_location(
             db=db,
             rack_id=rack_id,
             new_location_id=body.location_id,
+            operator_id=user.id,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
+
+
+@rack_router.put(
+    "/production/racks/{rack_id}/sync-bypass",
+    response_model=RackActionResponse,
+)
+@rack_router.post(
+    "/production/racks/{rack_id}/sync-bypass",
+    response_model=RackActionResponse,
+)
+def sync_production_rack_bypass(
+    rack_id: int,
+    body: RackSyncBypassRequest,
+    db: DbSession,
+    user: CurrentUser,
+):
+    """
+    Admin bypass /complete-stage:
+    - SYNC_PHYSICAL: đồng bộ vị trí thực tế + stage + Fleet + production_record(note).
+    - DISPATCH_TO_WASH: CNC cuối → MOVE_TO_WASH / WAITING_SLOT + production_record(note).
+    Conflict đích: trả lỗi — admin chọn vị trí khác hoặc bấm lại.
+    """
+    _ensure_admin(user)
+    try:
+        return rack_service.sync_rack_bypass(
+            db=db,
+            rack_id=rack_id,
+            mode=body.mode,
+            note=body.note,
+            location_id=body.location_id,
+            new_stage_level=body.current_stage_level,
             operator_id=user.id,
         )
     except ValueError as e:

@@ -65,7 +65,8 @@ def _build_route_context_by_item(
 ) -> dict[int, dict[str, Any]]:
     """
     Tiền nạp thông tin Quy trình đang active (`ProductionRoute`) cho danh sách `item_ids`:
-    Trả về `{item_id: {"max_stage": int, "machine_stages": {machine_id: set[int]}}}`.
+    Trả về `{item_id: {route_id, max_stage, final_stage, machine_stages}}`.
+    `final_stage` = stage_level của bước `is_final_cnc_step=True` (fallback max_stage).
     """
     if not item_ids:
         return {}
@@ -86,6 +87,8 @@ def _build_route_context_by_item(
     for route in routes:
         steps = route.steps or []
         max_stage = max((st.stage_level for st in steps), default=0)
+        final_stages = [st.stage_level for st in steps if st.is_final_cnc_step]
+        final_stage = max(final_stages) if final_stages else max_stage
         machine_stages: dict[int, set[int]] = {}
         for st in steps:
             for link in st.allowed_machine_links or []:
@@ -94,6 +97,7 @@ def _build_route_context_by_item(
         result[route.item_id] = {
             "route_id": route.id,
             "max_stage": max_stage,
+            "final_stage": final_stage,
             "machine_stages": machine_stages,
         }
     return result
@@ -137,6 +141,7 @@ def _validate_location_for_cart(
         )
 
     max_stage = int(route_ctx.get("max_stage") or 0)
+    final_stage = int(route_ctx.get("final_stage") or max_stage or 0)
     machine_stages: dict[int, set[int]] = route_ctx.get("machine_stages") or {}
 
     if loc_type == "CNC_SLOT":
@@ -157,10 +162,11 @@ def _validate_location_for_cart(
         return True, None
 
     if loc_type == "WASHING_SLOT":
-        if max_stage <= 0 or cart_level < max_stage:
+        if final_stage <= 0 or cart_level < final_stage:
             return (
                 False,
-                f"Rack mới ở công đoạn Lv {cart_level} (chưa hoàn thành bước CNC cuối Lv {max_stage} của Model '{item_name}'), không thể chuyển thẳng vào Khu Tẩy Rửa '{loc_display}'.",
+                f"Rack mới ở công đoạn Lv {cart_level} (chưa hoàn thành bước CNC cuối Lv {final_stage} "
+                f"của Model '{item_name}'), không thể chuyển thẳng vào Khu Tẩy Rửa '{loc_display}'.",
             )
         return True, None
 

@@ -36,10 +36,24 @@ export interface RackUpdateLocationPayload {
   location_id: number;
 }
 
+export type RackSyncBypassMode = 'SYNC_PHYSICAL' | 'DISPATCH_TO_WASH';
+
+export interface RackSyncBypassPayload {
+  mode: RackSyncBypassMode;
+  note: string;
+  /** SYNC_PHYSICAL: bắt buộc. DISPATCH_TO_WASH: ô rửa ưu tiên (optional). */
+  location_id?: number;
+  /** Optional — BE suy stage từ location/route; nếu gửi phải khớp. */
+  current_stage_level?: number;
+}
+
 export interface RackActionResponse {
   success: boolean;
   message: string;
   rack?: RackManagementItem | null;
+  mode?: string | null;
+  action?: string | null;
+  request_code?: string | null;
 }
 
 export const getProductionRacksApi = async (params?: {
@@ -68,6 +82,17 @@ export const updateProductionRackLocationApi = async (
 ): Promise<RackActionResponse> => {
   const response = await axiosInstance.put<RackActionResponse>(
     `/api/v1/production/racks/${rackId}/location`,
+    payload,
+  );
+  return response.data;
+};
+
+export const syncProductionRackBypassApi = async (
+  rackId: number,
+  payload: RackSyncBypassPayload,
+): Promise<RackActionResponse> => {
+  const response = await axiosInstance.put<RackActionResponse>(
+    `/api/v1/production/racks/${rackId}/sync-bypass`,
     payload,
   );
   return response.data;

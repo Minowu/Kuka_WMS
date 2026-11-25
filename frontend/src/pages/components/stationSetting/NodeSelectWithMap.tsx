@@ -2,13 +2,21 @@ import { EnvironmentOutlined } from '@ant-design/icons';
 import { Button, Select, Space } from '@/components/ui';
 import type { NodeOption } from './stationSettingTypes';
 
+type SelectOption =
+  | Pick<NodeOption, 'value' | 'label' | 'disabled'>
+  | {
+      label: string;
+      options: Array<Pick<NodeOption, 'value' | 'label' | 'disabled'>>;
+    };
+
 interface NodeSelectWithMapProps {
   value?: string;
-  onChange?: (value: string) => void;
-  options: NodeOption[];
+  onChange?: (value: string | undefined) => void;
+  options: SelectOption[];
   placeholder: string;
   onOpenMap: () => void;
   compact?: boolean;
+  allowClear?: boolean;
 }
 
 /** Dùng được trong Form.Item (nhận value/onChange tự động) hoặc điều khiển trực tiếp qua props. */
@@ -19,11 +27,13 @@ export default function NodeSelectWithMap({
   placeholder,
   onOpenMap,
   compact = false,
+  allowClear = false,
 }: NodeSelectWithMapProps) {
   return (
     <Space.Compact style={{ width: '100%' }}>
       <Select
         showSearch
+        allowClear={allowClear}
         size={compact ? 'small' : undefined}
         value={value}
         onChange={onChange}

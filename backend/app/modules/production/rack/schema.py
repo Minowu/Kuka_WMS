@@ -1,7 +1,7 @@
 """Pydantic schemas for Container / Rack Management (Admin)."""
 
 from datetime import datetime
-from typing import Optional
+from typing import Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -42,7 +42,42 @@ class RackUpdateLocationRequest(BaseModel):
     location_id: int = Field(..., gt=0, description="ID vị trí mới của Rack")
 
 
+class RackSyncBypassRequest(BaseModel):
+    mode: Literal["SYNC_PHYSICAL", "DISPATCH_TO_WASH"] = Field(
+        ...,
+        description=(
+            "SYNC_PHYSICAL: xe đã đứng đúng chỗ (đổi vị trí+stage+Fleet). "
+            "DISPATCH_TO_WASH: còn ở CNC cuối, tạo MOVE_TO_WASH/AMR."
+        ),
+    )
+    note: str = Field(
+        ...,
+        min_length=1,
+        max_length=1000,
+        description="Ghi chú bắt buộc — lưu vào production_record.notes",
+    )
+    location_id: Optional[int] = Field(
+        None,
+        gt=0,
+        description=(
+            "SYNC_PHYSICAL: bắt buộc — vị trí/node thực tế (stage suy từ route). "
+            "DISPATCH_TO_WASH: optional — ô rửa ưu tiên nếu trống."
+        ),
+    )
+    current_stage_level: Optional[int] = Field(
+        None,
+        ge=0,
+        description=(
+            "Optional. Backend luôn suy stage từ location/route; "
+            "nếu gửi phải khớp giá trị suy ra."
+        ),
+    )
+
+
 class RackActionResponse(BaseModel):
     success: bool
     message: str
     rack: Optional[RackManagementItem] = None
+    mode: Optional[str] = None
+    action: Optional[str] = None
+    request_code: Optional[str] = None

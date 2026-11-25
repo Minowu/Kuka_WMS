@@ -25,6 +25,7 @@ logger = get_logger("wms.dispatch")
 ACTIVE_TASK_STATUSES = ("created", "pending_submit", "submitting", "sent", "dispatched", "in_progress")
 ACTIVE_REQUEST_STATUSES = ("pending", "queued_for_cart", "queued_for_slot", "in_progress")
 from app.modules.production.rack.policy import (
+    _build_route_context_by_item,
     _ensure_rack_modifiable,
     _validate_location_for_cart,
 )
