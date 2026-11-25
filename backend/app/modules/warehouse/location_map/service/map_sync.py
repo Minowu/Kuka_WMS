@@ -279,11 +279,6 @@ def _active_stock_totals(db: Session, location_ids: list[int]) -> dict[int, Deci
     )
     return {location_id: total for location_id, total in rows if location_id is not None}
 
-def _shelf_may_take_location(shelf: dict, location: Location) -> bool:
-    """Never let a coordinate or node-number coincidence steal an already named bin."""
-    shelf_bin = shelf.get("bin_code")
-    return not (location.bin_code and shelf_bin and location.bin_code != shelf_bin)
-
 def _match_shelf_to_location(
     shelf: dict,
     by_code: dict[str, Location],
@@ -334,7 +329,6 @@ def _assign_node_numbers(
             freed.append(
                 {
                     "location_id": location.id,
-                    "bin_code": location.bin_code,
                     "released_location_code": location.location_code,
                 }
             )
@@ -371,13 +365,25 @@ def _move_location_references(
             moved[f"{model.__tablename__}.{column}"] = total
     return moved
 
+def _location_alias_keys(location: Location) -> tuple[str, ...]:
+    """Human + KUKA keys an operator may type in remap from/to fields."""
+    keys: list[str] = []
+    for value in (
+        location.location_name,
+        location.location_label,
+        location.location_code,
+    ):
+        if value:
+            keys.append(str(value))
+    return tuple(keys)
+
+
 def _orphan_lookup(orphans: list[Location]) -> dict[str, Location]:
-    """Accept remap.from_bin as a bin code, a display name, or the old node number."""
+    """Accept remap.from_bin as location_name, location_label, or location_code."""
     lookup: dict[str, Location] = {}
     for location in orphans:
-        for key in (location.bin_code, location.location_name, location.location_code):
-            if key:
-                lookup.setdefault(str(key), location)
+        for key in _location_alias_keys(location):
+            lookup.setdefault(key, location)
     return lookup
 
 def _blocked_message(blocked: list[dict]) -> str:
@@ -400,10 +406,9 @@ def sync_locations_from_map(
 ) -> dict:
     """Upsert locations from map shelves while keeping location.id stable.
 
-    Shelves are matched on bin_code first, so a renumbered map node reuses the same
-    row and every FK stays valid. Locations missing from the new map are never
-    deleted: their references are moved to another bin when `remap` says so,
-    otherwise the row is just deactivated. Caller commits/rollbacks the session.
+    Shelves are matched on location_code (KUKA nodeUuid). Locations missing from
+    the new map are never deleted: their references are moved when `remap` says
+    so, otherwise the row is just deactivated. Caller commits/rollbacks the session.
 
     With strict=False, blockers are reported instead of raised (used by the preview).
     """
@@ -472,7 +477,10 @@ def sync_locations_from_map(
     references = _reference_counts_by_location(db, orphan_ids)
     stock_totals = _active_stock_totals(db, orphan_ids)
 
-    nodes_in_new_map = {loc.location_code: loc for loc, _ in assignments if loc.location_code}
+    nodes_in_new_map: dict[str, Location] = {}
+    for loc, _ in assignments:
+        for key in _location_alias_keys(loc):
+            nodes_in_new_map.setdefault(key, loc)
 
     remapped: list[dict] = []
     remapped_ids: set[int] = set()
@@ -481,16 +489,16 @@ def sync_locations_from_map(
         source_key = str(entry.get("from_node") or entry.get("from_bin") or "").strip()
         target_key = str(entry.get("to_node") or entry.get("to_bin") or "").strip()
         if not source_key or not target_key:
-            raise ValueError("Mỗi phần tử remap phải có cả from_node và to_node")
+            raise ValueError("Mỗi phần tử remap phải có cả from_bin và to_bin")
 
         source = orphan_lookup.get(source_key)
         if source is None:
             raise ValueError(
-                f"remap.from_node không phải vị trí bị loại khỏi map mới: {source_key}"
+                f"remap.from_bin không phải vị trí bị loại khỏi map mới: {source_key}"
             )
         target = nodes_in_new_map.get(target_key)
         if target is None:
-            raise ValueError(f"remap.to_node không có trong map mới: {target_key}")
+            raise ValueError(f"remap.to_bin không có trong map mới: {target_key}")
         if target.id == source.id:
             raise ValueError(f"remap không thể trỏ về chính nó: {source_key}")
 
@@ -498,9 +506,9 @@ def sync_locations_from_map(
         remapped.append(
             {
                 "from_location_id": source.id,
-                "from_node": source.location_name or source.location_code,
+                "from_bin": source.location_name or source.location_label or source.location_code,
                 "to_location_id": target.id,
-                "to_node": target.location_name or target.location_code,
+                "to_bin": target.location_name or target.location_label or target.location_code,
                 "moved": moved,
             }
         )
